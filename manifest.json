@@ -1,0 +1,48 @@
+{
+  "name": "STUPInD — SuperTimerUsablePerInDevice",
+  "short_name": "STUPInD",
+  "description": "Privacy-first, offline-capable Pomodoro timer + ClickUp-style task manager. Runs entirely in your browser. No account, no tracking, no sync.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#0a1320",
+  "theme_color": "#3b82f6",
+  "categories": ["productivity", "utilities", "lifestyle"],
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "New Task",
+      "short_name": "Task",
+      "description": "Jump straight to adding a task",
+      "url": "./?tab=tasks",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Start Focus Timer",
+      "short_name": "Focus",
+      "description": "Open the Pomodoro timer",
+      "url": "./?tab=focus",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}
