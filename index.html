@@ -3,17 +3,17 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>STUPInD · Personal Task Manager</title>
+<title>ODTAULAI · Personal Task Manager</title>
 
 <!-- PWA meta -->
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0a1320">
-<meta name="description" content="Privacy-first Pomodoro timer + ClickUp-style task manager. Runs entirely in your browser. No account, no tracking.">
+<meta name="description" content="ODTAULAI — understands task meaning and context on your device (embedding model, not chat). Pomodoro + tasks, semantic search, smart metadata, duplicates, values alignment, auto-organize lists. ~33 MB, offline. No account, no tracking.">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="STUPInD">
+<meta name="apple-mobile-web-app-title" content="ODTAULAI">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="application-name" content="STUPInD">
+<meta name="application-name" content="ODTAULAI">
 
 <!-- Icons -->
 <link rel="manifest" href="manifest.json" id="pwa-manifest">
@@ -29,7 +29,7 @@
 <!-- Styles -->
 <!-- Fonts: uses system fonts (see --font-sans in main.css). No external font requests. -->
 <link rel="stylesheet" href="css/main.css">
-<!-- Preconnect hints — speeds up AI model download when user enables it -->
+<!-- Preconnect hints — speeds up first-load of the on-device embedding model (jsDelivr for Transformers.js, huggingface.co for model weights) -->
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <link rel="preconnect" href="https://huggingface.co" crossorigin>
 
@@ -40,8 +40,11 @@
 <div class="container">
 
   <div class="header">
-    <h1><img src="icons/icon-192.png" alt="" class="header-logo" width="32" height="32" onerror="this.style.display='none'">STUPInD</h1>
-    <div class="header-date" id="headerDate"></div>
+    <h1><img src="icons/icon-192.png" alt="" class="header-logo" width="32" height="32" onerror="this.style.display='none'">ODTAULAI</h1>
+    <div class="header-mid">
+      <div class="header-date" id="headerDate"></div>
+      <button type="button" class="what-next-pill" id="whatNextBtn" onclick="openWhatNext()" title="Top-ranked next actions">What next?</button>
+    </div>
   </div>
 
   <div id="banner" style="display:none;width:100%;padding:10px 14px;background:#0d1a2d;border:1px solid #1a2d44;border-radius:10px;margin-bottom:14px">
@@ -95,12 +98,12 @@
         <input class="task-input" id="taskInput" placeholder="Add a task... (try: Buy milk tomorrow @urgent #shopping)"
           oninput="maybeShowEnhanceBtn()"
           onkeydown="if(event.key==='Enter'){if(window._smartAddPreview){applySmartAddAndSubmit()}else{addTask()}}">
-        <button class="task-enhance-btn" id="taskEnhanceBtn" onclick="smartAddEnhance()" style="display:none" title="Enhance with AI — fills in priority, category, effort based on task name and your history">✨</button>
+        <button class="task-enhance-btn" id="taskEnhanceBtn" onclick="smartAddEnhance()" style="display:none" title="Suggest metadata from your task history (embeddings)">✨</button>
       </div>
       <button class="task-add" onclick="if(window._smartAddPreview){applySmartAddAndSubmit()}else{addTask()}">+ Add</button>
     </div>
     <div id="smartAddPreview" class="smart-add-preview" style="display:none"></div>
-    <div class="qa-hint">QUICK ADD: type <code>today</code>, <code>tomorrow</code>, <code>mon-sun</code> for due dates · <code>@urgent</code> <code>@high</code> <code>@low</code> for priority · <code>#tag</code> for tags · <code>!star</code> to pin · <code>~daily</code> <code>~weekly</code> for recurring</div>
+    <div class="qa-hint">QUICK ADD: <code>today</code> / <code>tomorrow</code> / weekdays · natural dates (e.g. next Friday, in 3 days) · <code>@urgent</code> <code>@high</code> <code>@low</code> · <code>#tag</code> · <code>!star</code> · <code>~daily</code> <code>~weekly</code></div>
 
     <!-- Smart views only — lightweight navigation -->
     <div class="smart-views" id="smartViews">
@@ -130,7 +133,12 @@
 
     <!-- Collapsible filter panel (hidden by default on mobile) -->
     <div class="task-toolbar" id="filtersPanel" style="display:none">
-      <input type="text" class="task-search" id="taskSearch" placeholder="🔍 Search tasks..." oninput="updateTaskFilters()">
+      <div class="task-search-row">
+        <input type="text" class="task-search" id="taskSearch" placeholder="🔍 Search tasks..." oninput="updateTaskFilters()">
+        <label class="task-search-semantic" title="Rank by meaning (requires intelligence loaded)">
+          <input type="checkbox" id="taskSearchSemantic" onchange="toggleTaskSearchSemantic()"> Semantic
+        </label>
+      </div>
       <!-- View selector (mobile-only, when controlbar view-toggle is hidden) -->
       <div class="view-toggle mobile-view-toggle" style="width:100%">
         <button id="viewListMobile" class="active" onclick="setTaskView('list');updateMobileViewToggle()" style="flex:1">☰ List</button>
@@ -317,10 +325,10 @@
       </div>
 
 
-      <!-- AI Triage -->
+      <!-- Intelligence -->
       <div class="srow" style="flex-direction:column;align-items:flex-start;gap:10px;padding:14px 0 0;border-top:1px solid var(--border);margin-top:6px">
-        <span class="sr-lbl" style="font-size:12px;letter-spacing:.06em">AI Triage — On Device</span>
-        <div id="claudePanel" style="width:100%"></div>
+        <span class="sr-lbl" style="font-size:12px;letter-spacing:.06em">Intelligence — On Device</span>
+        <div id="intelPanel" style="width:100%"></div>
       </div>
 
       <!-- P2P Sync -->
@@ -434,6 +442,34 @@
   </div>
   <button class="mt-btn mt-play" id="mtToggle" onclick="event.stopPropagation();miniTimerToggle()">▶</button>
   <div class="mt-open" id="mtTaskHint" style="display:none">⇢ open</div>
+</div>
+
+<!-- What next? overlay -->
+<div id="whatNextOverlay" class="what-next-overlay" style="display:none" onclick="if(event.target===this)closeWhatNext()">
+  <div class="what-next-panel" onclick="event.stopPropagation()">
+    <div class="what-next-hdr">
+      <span>What next?</span>
+      <button type="button" class="what-next-x" onclick="closeWhatNext()" aria-label="Close">✕</button>
+    </div>
+    <p class="what-next-sub">Ranked by priority, due date, energy fit, and blockers (no embeddings).</p>
+    <div class="what-next-ctx">
+      <label>Time available (min)</label>
+      <select id="whatNextTime" class="mfield-in" onchange="openWhatNext()">
+        <option value="0">Any</option>
+        <option value="15">15</option>
+        <option value="30">30</option>
+        <option value="60">60</option>
+        <option value="120">120</option>
+      </select>
+      <label>Energy</label>
+      <select id="whatNextEnergy" class="mfield-in" onchange="openWhatNext()">
+        <option value="">Any</option>
+        <option value="high">High</option>
+        <option value="low">Low</option>
+      </select>
+    </div>
+    <div id="whatNextBody" class="what-next-body"></div>
+  </div>
 </div>
 
 <!-- Command Palette (Cmd+K) -->
@@ -559,6 +595,15 @@
         <div id="mdBlockedBy"></div>
       </div>
 
+      <div class="mfield md-similar-wrap">
+        <button type="button" class="similar-acc-trigger" id="mdSimilarTrigger" onclick="toggleSimilarAccordion()">
+          <span>Similar tasks</span><span class="similar-acc-chevron">▼</span>
+        </button>
+        <div class="similar-acc-panel" id="mdSimilarAccordion">
+          <div id="mdSimilarTasks" class="md-similar-tasks"></div>
+        </div>
+      </div>
+
       <div class="mfield">
         <div class="mfield-lbl">Checklist</div>
         <div id="mdChecklist"></div>
@@ -594,6 +639,10 @@
 <script src="js/audio.js"></script>
 <script src="js/timer.js"></script>
 <script src="js/tasks.js"></script>
+<script src="js/intel.js"></script>
+<script src="js/embed-store.js"></script>
+<script src="js/nlparse.js"></script>
+<script src="js/intel-features.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/ai.js"></script>
 <script src="js/sync.js"></script>

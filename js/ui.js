@@ -298,6 +298,9 @@ function renderTaskItem(t,depth){
   if(t.valuesAlignment&&t.valuesAlignment.length){
     signalChips+='<span class="task-sig sig-values" title="Serves: '+t.valuesAlignment.join(', ')+'">◈</span>';
   }
+  if(window._dupSimMap && window._dupSimMap.get(t.id) >= 0.9){
+    signalChips+='<span class="task-sig task-dup-badge" title="Very similar to another task">⧉ dup</span>';
+  }
 
   // Hover-only metadata (status badge + tags + description preview) — hidden by default, reveal on hover
   const status=STATUSES[t.status||'open'];
@@ -499,9 +502,38 @@ function openTaskDetail(id){
   renderTaskNotes(id);
   // Blocked by
   renderBlockedBy(id);
+  refreshMdSimilarTasks(id);
   gid('taskModal').classList.add('open');
   setTimeout(()=>gid('mdName').focus(),50)
 }
+
+async function refreshMdSimilarTasks(id){
+  const body = gid('mdSimilarTasks');
+  const acc = gid('mdSimilarAccordion');
+  if(!body) return;
+  if(typeof isIntelReady !== 'function' || !isIntelReady()){
+    body.innerHTML = '<span class="intel-muted">Load intelligence (Settings) for similar tasks.</span>';
+    if(acc) acc.classList.remove('open');
+    return;
+  }
+  body.innerHTML = '<span class="intel-muted">Finding neighbors…</span>';
+  try{
+    const sim = await similarTasksFor(id, 5);
+    if(!sim.length){
+      body.innerHTML = '<span class="intel-muted">No similar tasks found yet.</span>';
+      return;
+    }
+    body.innerHTML = sim.map(({ t: ot, sim: s }) => `
+      <button type="button" class="similar-task-row" onclick="closeTaskDetail();openTaskDetail(${ot.id})">
+        <span class="st-name">${esc(ot.name.slice(0, 48))}</span>
+        <span class="st-sim">${s.toFixed(2)}</span>
+      </button>`).join('');
+    if(acc) acc.classList.add('open');
+  }catch(e){
+    body.innerHTML = '<span class="intel-muted">Could not load neighbors.</span>';
+  }
+}
+
 
 function renderEffortChips(t,eChips){
   [...eChips.children].forEach(b=>{b.classList.toggle('active',b.textContent.toLowerCase()===t.effort)})
@@ -593,6 +625,11 @@ function showTab(tab){
 
 // ========== FLOATING MINI TIMER ==========
 // Show the mini-timer when not on the Timer (focus) tab. Click it to jump to Timer.
+window.toggleSimilarAccordion = function(){
+  const acc = gid('mdSimilarAccordion');
+  if(acc) acc.classList.toggle('open');
+};
+
 function updateMiniTimer(){
   const el=gid('miniTimer');if(!el)return;
   // Hide on the Timer tab (the full timer is already visible there)
@@ -635,5 +672,5 @@ function resetStats(){
   goals=[];goalIdCtr=0;tasks=[];taskIdCtr=0;activeTaskId=null;taskStartedAt=null;timeLog=[];
   renderStats();renderPips();renderGoalList();renderTaskList();renderLog();renderBanner();renderArchive();saveState()
 }
-function updateTitle(){if(running)document.title=(phase==='work'?'🔴':'🟢')+' '+fmt(remaining)+' — '+getPL(phase);else if(finished)document.title='✅ '+getPL(phase)+' Complete';else document.title='SuperTimerUsablePerInDevice'}
+function updateTitle(){if(running)document.title=(phase==='work'?'🔴':'🟢')+' '+fmt(remaining)+' — '+getPL(phase);else if(finished)document.title='✅ '+getPL(phase)+' Complete';else document.title='ODTAULAI'}
 

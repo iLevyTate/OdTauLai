@@ -28,9 +28,9 @@ function startKeepalive(){
   if('mediaSession' in navigator){
     try{
       navigator.mediaSession.metadata=new MediaMetadata({
-        title:'STUPInD Focus Timer',
+        title:'ODTAULAI Focus Timer',
         artist:'Pomodoro session in progress',
-        album:'STUPInD'
+        album:'ODTAULAI'
       });
       navigator.mediaSession.playbackState='playing';
       navigator.mediaSession.setActionHandler('pause',()=>{if(running)pauseTimer()});
@@ -149,7 +149,7 @@ function notify(title,body){
   if(!('Notification' in window))return;
   if(Notification.permission!=='granted')return;
   try{
-    const n=new Notification(title,{body,tag:'stupind',renotify:true,silent:false});
+    const n=new Notification(title,{body,tag:'odtaulai',renotify:true,silent:false});
     setTimeout(()=>{try{n.close()}catch(e){}},8000);
   }catch(e){}
 }

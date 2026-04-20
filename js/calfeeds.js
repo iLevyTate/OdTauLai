@@ -496,7 +496,7 @@ function renderCalFeedsPanel(){
       <ol start="5" style="font-size:11px;line-height:1.6;padding-left:18px;color:var(--text-3)">
         <li>Click <strong>Save and deploy</strong></li>
         <li>Copy your Worker URL (looks like <code>ical-proxy.your-name.workers.dev</code>)</li>
-        <li>In STUPInD, paste it in the "CORS proxy URL" field above, appending <code>?url=</code></li>
+        <li>In ODTAULAI, paste it in the "CORS proxy URL" field above, appending <code>?url=</code></li>
       </ol>
       <p style="font-size:11px;color:var(--text-3)"><strong>Privacy note:</strong> This Worker only forwards requests to <code>calendar.google.com</code>. You're the only one using it. Cloudflare's free tier gives 100k requests/day, more than enough for personal use.</p>
     </div>
@@ -576,7 +576,7 @@ function confirmRemoveCalFeed(feedId){
   _loadCalFeeds();
   const f = _calFeeds.feeds.find(x => x.id === feedId);
   if(!f) return;
-  if(confirm(`Remove "${f.label}"? This only removes it from STUPInD — your actual calendar is unaffected.`)){
+  if(confirm(`Remove "${f.label}"? This only removes it from ODTAULAI — your actual calendar is unaffected.`)){
     removeCalFeed(feedId);
     renderCalFeedsPanel();
     if(typeof renderTaskList === 'function') renderTaskList();

@@ -1,5 +1,5 @@
 // ── App version — bumped on each release ───────────────────────────────────
-const APP_VERSION = 'v14';
+const APP_VERSION = 'v17';
 const APP_BUILD_DATE = '2026-04-19';
 
 // ── Persistent storage — protects task data from "Clear browsing history" ──
@@ -132,7 +132,7 @@ function exportAllCSV(){
     csv+=`"${a.date}",${a.totalPomos||0},${Math.floor((a.totalFocusSec||0)/60)},${a.totalBreaks||0},${doneG},${totalG},"${taskNames}"\n`;
   });
   const blob=new Blob([csv],{type:'text/csv'});
-  const el=document.createElement('a');el.href=URL.createObjectURL(blob);el.download='stupind-history.csv';el.click();URL.revokeObjectURL(el.href)
+  const el=document.createElement('a');el.href=URL.createObjectURL(blob);el.download='odtaulai-history.csv';el.click();URL.revokeObjectURL(el.href)
 }
 
 // ========== EXPORT ==========
@@ -160,7 +160,7 @@ function buildReport(format){
   if(goals.length){r+=h2('Goals')+'\n';doneGoals.forEach(g=>{r+=check(true)+g.text+(g.doneAt?' ('+g.doneAt+')':'')+'\n'});missedGoals.forEach(g=>{r+=check(false)+g.text+'\n'});r+='\n'}
   if(tasks.length){r+=h2('Time by Task')+'\n'+buildTaskTreeReport(bullet,null,0)+'\n'}
   if(timeLog.length){r+=h2('Session Log')+'\n';timeLog.slice().reverse().forEach(l=>{r+=bullet+l.time+' | '+(l.type==='work'?'FOCUS':l.type==='short'?'SHORT BREAK':l.type==='quick'?'QUICK':'LONG BREAK')+' | '+l.name+' | '+fmtShort(l.durSec)+'\n'});r+='\n'}
-  r+=hr+'\nGenerated at '+timeNow()+' by SuperTimerUsablePerInDevice\n';return r
+  r+=hr+'\nGenerated at '+timeNow()+' by ODTAULAI\n';return r
 }
 function exportFile(format){
   // Daily report only supports txt/md now; csv is routed to the unified task CSV
@@ -168,13 +168,45 @@ function exportFile(format){
   const content=buildReport(format);
   const ext=format==='md'?'md':'txt';
   const blob=new Blob([content],{type:'text/plain'});
-  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='stupind-'+todayKey()+'.'+ext;a.click();URL.revokeObjectURL(a.href);
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='odtaulai-'+todayKey()+'.'+ext;a.click();URL.revokeObjectURL(a.href);
 }
 function exportClipboard(){const content=buildReport('txt');navigator.clipboard.writeText(content).then(()=>{const btn=document.querySelector('.export-clip');const orig=btn.textContent;btn.textContent='Copied!';btn.style.color='#2ecc71';btn.style.borderColor='#1a4a2a';setTimeout(()=>{btn.textContent=orig;btn.style.color='';btn.style.borderColor=''},1500)}).catch(()=>{const ta=document.createElement('textarea');ta.value=content;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta)})}
+
+// ========== v16 migration (WebLLM removal — reclaim ~1.5GB) ==========
+function runV16Migration(){
+  if(localStorage.getItem('stupind_v16_migrated') === '1') return;
+  try{
+    ['webllm/model','webllm/wasm','webllm/config'].forEach(n => {
+      try{ indexedDB.deleteDatabase(n); }catch(e){}
+    });
+    if(typeof caches !== 'undefined'){
+      caches.keys().then(ks => ks.filter(k => k.startsWith('webllm/')).forEach(k => caches.delete(k))).catch(() => {});
+    }
+    const old = localStorage.getItem('stupind_ai_cfg');
+    if(old && !localStorage.getItem('stupind_intel_cfg')){
+      try{
+        const j = JSON.parse(old);
+        if(j && Array.isArray(j.dominant) && j.dominant.length){
+          localStorage.setItem('stupind_intel_cfg', JSON.stringify({ dominant: j.dominant.slice(0, 3) }));
+        }
+      }catch(e){}
+    }
+  }catch(e){}
+  localStorage.removeItem('stupind_ai_cfg');
+  localStorage.removeItem('stupind_model_ready');
+  localStorage.removeItem('stupind_ai_chat_history');
+  localStorage.setItem('stupind_v16_migrated', '1');
+}
+runV16Migration();
 
 // ========== INIT ==========
 loadState();
 ensureDefaultList();
+setTimeout(() => {
+  if(typeof embedStore !== 'undefined' && embedStore.cleanOrphans){
+    embedStore.cleanOrphans().catch(() => {});
+  }
+}, 200);
 // Manifest shortcuts use ?tab= — override saved tab when opening from a shortcut/link (after list bootstrap)
 (function applyTabFromUrl(){
   try{
@@ -208,18 +240,16 @@ document.querySelectorAll('[data-tab]').forEach(el=>{el.style.display=el.dataset
 document.querySelectorAll('.nav-tab').forEach(el=>{el.classList.toggle('active',el.dataset.navtab===activeTab)});
 if(activeTab==='settings'&&!settingsOpen)toggleSettings();
 
-// PWA status detection
+// PWA status — standalone / file / SW; install UI lives in pwa.js (refreshPWAInstallUI)
 (function(){
   const status=gid('pwaStatus');if(!status)return;
   const isStandalone=window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone===true;
   if(isStandalone){status.textContent='✓ Running as app';return}
   if(location.protocol==='file:'){status.textContent='⚠ Served via file:// — host over HTTP to install';return}
   if(!('serviceWorker' in navigator)){status.textContent='Browser does not support PWA';return}
-  // Give SW a moment to register, then check
   setTimeout(()=>{
-    if(window._deferredInstallPrompt){status.textContent='Ready to install';gid('installBtn').style.display=''}
-    else if(window._swRegistered===false)status.textContent='Offline cache unavailable in this browser';
-    else status.textContent='Installable via browser menu';
+    if(window._swRegistered===false){ status.textContent='Offline cache unavailable in this browser'; return; }
+    if(typeof window.refreshPWAInstallUI==='function') window.refreshPWAInstallUI();
   },500)
 })();
 
@@ -250,7 +280,6 @@ setInterval(()=>{
 // Init sync panel UI (renders the "Enable Sync" state by default)
 if(typeof renderSyncPanel==='function') renderSyncPanel();
 
-// Init AI panel — also auto-load Gemma into memory if model is already cached
 if(typeof renderAIPanel==='function') renderAIPanel();
 
 // Init calendar feeds panel + auto-refresh on boot
@@ -272,19 +301,41 @@ async function renderSystemInfo(info){
     <div><strong>Version:</strong> ${APP_VERSION} (built ${APP_BUILD_DATE})</div>
     <div><strong>Network:</strong> ${onlineLine}</div>
     <div><strong>Storage:</strong> ${storageLine}</div>
-    <div><strong>AI model:</strong> ${localStorage.getItem('stupind_model_ready') ? '<span style="color:#2ecc71">✓ Cached — works offline</span>' : 'Not downloaded'}</div>`;
+    <div><strong>Intelligence:</strong> ${typeof isIntelReady === 'function' && isIntelReady()
+      ? `<span style="color:#2ecc71">✓ Embeddings ready (${typeof getIntelDevice === 'function' ? getIntelDevice() || 'runtime' : ''})</span>`
+      : '<span style="color:var(--text-3)">Loads in background (~33 MB, cached offline)</span>'}</div>`;
 }
 // Initial render + re-render when online status changes
 setTimeout(() => { renderSystemInfo(); }, 400);
 window.addEventListener('online',  () => renderSystemInfo());
 window.addEventListener('offline', () => renderSystemInfo());
 
-// One-click UX: if model is already downloaded, transparently load it into memory
-// on app open so user can use AI features immediately without a manual "Load" step.
-// We wait a moment so the rest of the UI renders first.
-if(localStorage.getItem('stupind_model_ready')==='1' && typeof aiInit==='function'){
-  // Only auto-init on devices with WebGPU — avoids kicking off a doomed load on mobile Safari
-  if(navigator.gpu){
-    setTimeout(()=>{ try{ aiInit(); }catch(e){} }, 800);
-  }
-}
+// Deferred intelligence load — small embedding model (~33 MB), WebGPU or WASM
+setTimeout(() => {
+  if(typeof intelLoad !== 'function') return;
+  const w = document.getElementById('intelProgressWrap');
+  const bar = document.getElementById('intelProgressBar');
+  const pct = document.getElementById('intelProgressPct');
+  const txt = document.getElementById('intelProgressTxt');
+  const retry = document.getElementById('intelRetryBtn');
+  if(w) w.style.display = '';
+  intelLoad(p => {
+    const v = p && p.progress != null ? Math.round(p.progress * 100) : 0;
+    if(bar) bar.style.width = v + '%';
+    if(pct) pct.textContent = v + '%';
+    if(txt) txt.textContent = (p && p.status) ? String(p.status).slice(0, 72) : '';
+  }).then(() => {
+    if(w) w.style.display = 'none';
+    if(retry) retry.style.display = 'none';
+    if(typeof ensureSchwartzEmbeddings === 'function'){
+      ensureSchwartzEmbeddings().catch(() => {});
+    }
+    if(typeof renderAIPanel === 'function') renderAIPanel();
+    if(typeof maybeShowEnhanceBtn === 'function') maybeShowEnhanceBtn();
+    if(typeof scheduleIntelDupRefresh === 'function') scheduleIntelDupRefresh();
+  }).catch(() => {
+    if(w) w.style.display = 'none';
+    if(retry) retry.style.display = '';
+    if(typeof renderAIPanel === 'function') renderAIPanel();
+  });
+}, 1000);

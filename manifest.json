@@ -1,8 +1,8 @@
 {
-  "name": "STUPInD — SuperTimerUsablePerInDevice",
-  "short_name": "STUPInD",
+  "name": "ODTAULAI — On device task app using local ambient intelligence",
+  "short_name": "ODTAULAI",
   "id": "./",
-  "description": "Privacy-first Pomodoro timer + ClickUp-style task manager with on-device AI (Gemma 2B) and optional P2P device sync. Runs entirely in your browser. No account, no tracking.",
+  "description": "On-device Pomodoro timer + task manager. A small local embedding model captures the meaning and context of your tasks (not just keywords) for semantic search, smart suggestions, duplicates, list routing, and values alignment—without generative chat. ~33 MB, works offline. Optional P2P sync. No account, no tracking.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

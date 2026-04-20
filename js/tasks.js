@@ -49,8 +49,23 @@ function defaultTaskProps(){return{
   // v5 — values alignment
   category:null,        // life area: health|finance|work|relationships|learning|home|personal|other
   valuesAlignment:[],   // which user values this task serves e.g. ['security','benevolence']
-  valuesNote:null       // Gemma's reasoning for the alignment
+  valuesNote:null       // Short note from values alignment
 }}
+
+let _dupRefreshTimer = null;
+function scheduleIntelDupRefresh(){
+  if(_dupRefreshTimer) return;
+  _dupRefreshTimer = setTimeout(async () => {
+    _dupRefreshTimer = null;
+    if(typeof computeDuplicateScores !== 'function' || typeof isIntelReady !== 'function' || !isIntelReady()) return;
+    try{
+      window._dupSimMap = await computeDuplicateScores();
+      if(typeof renderTaskList === 'function') renderTaskList();
+    }catch(e){}
+  }, 2000);
+}
+window.scheduleIntelDupRefresh = scheduleIntelDupRefresh;
+window.invalidateDupMap = function(){ window._dupSimMap = null; };
 
 // Parse natural language tokens from input: @priority, #tag, !star, ~recur, today/tomorrow/mon-sun
 function parseQuickAdd(raw){
@@ -95,13 +110,19 @@ function parseQuickAdd(raw){
   return{name:text.replace(/\s+/g,' ').trim(),props};
 }
 
-function addTask(){
+async function addTask(){
   const inp=gid('taskInput'),raw=inp.value.trim();if(!raw)return;
   ensureDefaultList();
-  let{name,props}=parseQuickAdd(raw);
-  // Fallback: if parsing stripped everything (e.g. user typed just "monday"
-  // or "tomorrow" as the whole title), treat the raw input as the task name
-  // and discard the auto-parsed metadata. The user clearly meant it as a title.
+  let name, props;
+  if(typeof parseQuickAddAsync === 'function'){
+    const parsed = await parseQuickAddAsync(raw);
+    name = parsed.name;
+    props = parsed.props;
+  } else {
+    const p = parseQuickAdd(raw);
+    name = p.name;
+    props = p.props;
+  }
   if(!name){ name = raw; props = {}; }
   tasks.push(Object.assign({
     id:++taskIdCtr,name,totalSec:0,sessions:0,created:timeNowFull(),
@@ -211,6 +232,9 @@ function removeTask(id){
       activeTaskId=null;taskStartedAt=null;
     }
     tasks=tasks.filter(t=>!toRemove.includes(t.id));
+    if(typeof embedStore !== 'undefined' && embedStore && embedStore.purge){
+      embedStore.purge(toRemove).catch(()=>{});
+    }
   }else{
     // Archive it
     const descendants=getTaskDescendantIds(id);
@@ -326,11 +350,13 @@ function checkReminders(){
   tasks.forEach(t=>{
     if(!t.remindAt||t.reminderFired||t.archived||t.status==='done')return;
     const remindTime=new Date(t.remindAt).getTime();
-    if(now>=remindTime&&(now-remindTime)<60*60*1000){
+    if(now>=remindTime){
       t.reminderFired=true;fired=true;
+      const late=(now-remindTime)>5*60*1000;
+      const title=(late?'Missed: ':'Task reminder: ')+t.name;
       if('Notification' in window&&Notification.permission==='granted'){
         try{
-          const n=new Notification('Task reminder: '+t.name,{
+          const n=new Notification(title,{
             body:t.dueDate?'Due '+fmtDue(t.dueDate):'No due date',
             tag:'task-'+t.id,requireInteraction:true
           });
@@ -417,23 +443,44 @@ function haptic(ms){
 }
 
 // Lists (Projects)
+// Each list: { id, name, color, description } — description is optional but feeds
+// Auto-organize (embeddings route tasks to the list whose name+description they
+// match best). Example: description "bills, taxes, budgets, investments" routes
+// "pay rent" or "review purchases" to Finance.
 function ensureDefaultList(){
   if(lists.length===0){
-    lists.push({id:++listIdCtr,name:'Personal',color:'#2ecc71'});
-    lists.push({id:++listIdCtr,name:'Work',color:'#3d8bcc'});
+    lists.push({id:++listIdCtr,name:'Personal',color:'#2ecc71',description:'Personal life — errands, home, hobbies, relationships, health, self-care.'});
+    lists.push({id:++listIdCtr,name:'Work',color:'#3d8bcc',description:'Work and career — projects, meetings, deadlines, professional learning.'});
     activeListId=lists[0].id;
   }
   if(!activeListId&&lists.length)activeListId=lists[0].id;
   // Assign orphaned tasks to the active list
   const defList=activeListId||lists[0].id;
   tasks.forEach(t=>{if(!t.listId)t.listId=defList});
+  lists.forEach(l=>{if(typeof l.description!=='string')l.description=''});
 }
+const LIST_DESC_HINT='Short description (optional) — feeds Auto-organize so new tasks get routed here.\nExamples: "bills, taxes, budgets, investments" or "household chores, repairs, cleaning".';
 function addList(){
   const name=prompt('List name:');if(!name||!name.trim())return;
+  const description=(prompt(LIST_DESC_HINT,'')||'').trim();
   const colors=['#2ecc71','#3d8bcc','#e056a0','#e8a838','#9b59b6','#48b5e0','#c0392b','#1abc9c'];
   const color=colors[lists.length%colors.length];
-  lists.push({id:++listIdCtr,name:name.trim(),color});
+  lists.push({id:++listIdCtr,name:name.trim(),color,description});
   activeListId=listIdCtr;
+  if(typeof invalidateListVectorCache==='function')invalidateListVectorCache();
+  renderLists();renderTaskList();saveState()
+}
+function editList(id){
+  event&&event.stopPropagation();
+  const l=lists.find(x=>x.id===id);if(!l)return;
+  const name=prompt('List name:',l.name);
+  if(name===null)return;
+  if(!name.trim()){alert('Name cannot be empty.');return}
+  const description=prompt(LIST_DESC_HINT,l.description||'');
+  if(description===null)return;
+  l.name=name.trim();
+  l.description=description.trim();
+  if(typeof invalidateListVectorCache==='function')invalidateListVectorCache();
   renderLists();renderTaskList();saveState()
 }
 function removeList(id){
@@ -446,6 +493,7 @@ function removeList(id){
   const fallbackId=lists[0].id;
   tasks.forEach(t=>{if(t.listId===id)t.listId=fallbackId});
   if(activeListId===id)activeListId=fallbackId;
+  if(typeof invalidateListVectorCache==='function')invalidateListVectorCache();
   renderLists();renderTaskList();saveState()
 }
 function switchList(id){activeListId=id;renderLists();renderTaskList();saveState()}
@@ -466,9 +514,12 @@ function renderLists(){
     const chip=document.createElement('button');
     chip.className='list-chip'+(l.id===activeListId?' active':'');
     chip.onclick=function(){switchList(l.id)};
+    chip.title=l.description?l.description+'\n\n(double-click or ✎ to edit)':'Double-click or ✎ to edit list';
+    chip.ondblclick=function(e){if(e)e.stopPropagation();editList(l.id)};
     chip.innerHTML='<span class="lc-dot" style="background:'+l.color+'"></span>'
       +esc(l.name)
       +'<span class="lc-count">'+count+'</span>'
+      +'<span class="lc-edit" onclick="event.stopPropagation();editList('+l.id+')" title="Edit name + description">✎</span>'
       +'<span class="lc-rm" onclick="event.stopPropagation();removeList('+l.id+')">✕</span>';
     bar.appendChild(chip)
   });
@@ -485,7 +536,23 @@ function updateTaskFilters(){
   taskFilters.category=(gid('filterCategory')||{}).value||'all';
   taskSortBy=gid('taskSortSel').value;
   const g=gid('groupBySel');if(g)taskGroupBy=g.value;
+  const sem=gid('taskSearchSemantic');
+  window._taskSearchSemantic=sem?sem.checked:false;
   updateFiltersActiveBadge();
+  if(window._taskSearchSemantic && taskFilters.search && typeof semanticSearch === 'function' && typeof isIntelReady === 'function' && isIntelReady()){
+    const rawQ = gid('taskSearch').value.trim();
+    void (async () => {
+      try{
+        const results = await semanticSearch(rawQ, 800);
+        window._semanticScores = new Map(results.map(r => [r.id, r.score]));
+      }catch(e){
+        window._semanticScores = null;
+      }
+      renderTaskList();
+    })();
+    return;
+  }
+  window._semanticScores = null;
   renderTaskList()
 }
 function setTaskView(v){
@@ -525,10 +592,15 @@ function matchesFilters(t){
   else if(smartView==='unscheduled'){if(t.dueDate||t.status==='done')return false}
   else if(smartView==='starred'){if(!t.starred||t.status==='done')return false}
   else if(smartView==='completed'){if(t.status!=='done')return false}
-  // Search — includes category and values
+  // Search — semantic (cosine) or substring
   if(taskFilters.search){
-    const hay=(t.name+' '+(t.description||'')+' '+(t.tags||[]).join(' ')+' '+(t.category||'')+' '+(t.valuesAlignment||[]).join(' ')).toLowerCase();
-    if(!hay.includes(taskFilters.search))return false;
+    const semActive = window._taskSearchSemantic && window._semanticScores && window._semanticScores.size > 0;
+    if(semActive){
+      if(!window._semanticScores.has(t.id))return false;
+    }else{
+      const hay=(t.name+' '+(t.description||'')+' '+(t.tags||[]).join(' ')+' '+(t.category||'')+' '+(t.valuesAlignment||[]).join(' ')).toLowerCase();
+      if(!hay.includes(taskFilters.search))return false;
+    }
   }
   if(taskFilters.status!=='all'){
     if(taskFilters.status==='active'){if(t.status==='done')return false}
@@ -541,6 +613,9 @@ function matchesFilters(t){
 }
 function sortTasks(arr){
   const sorted=arr.slice();
+  if(window._semanticScores && window._semanticScores.size && window._taskSearchSemantic && taskFilters.search){
+    return sorted.sort((a,b)=>(window._semanticScores.get(b.id)||0)-(window._semanticScores.get(a.id)||0));
+  }
   const by = taskSortBy==='order'?'manual':taskSortBy;
   if(by==='manual')return sorted.sort((a,b)=>(a.order||0)-(b.order||0));
   sorted.sort((a,b)=>{
@@ -608,6 +683,7 @@ function updateFiltersActiveBadge(){
   let count=0;
   const s=gid('taskSearch'),st=gid('filterStatus'),pr=gid('filterPriority'),so=gid('taskSortSel'),gr=gid('groupBySel');
   if(s&&s.value.trim())count++;
+  const sem=gid('taskSearchSemantic');if(sem&&sem.checked)count++;
   if(st&&st.value!=='all')count++;
   if(pr&&pr.value!=='all')count++;
   if(so&&so.value!=='manual'&&so.value!=='smart')count++;

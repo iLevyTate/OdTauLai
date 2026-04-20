@@ -1,0 +1,53 @@
+/**
+ * Extends quick-add with chrono-node (dynamic import) for natural date phrases.
+ * Depends on global parseQuickAdd from tasks.js.
+ */
+const CHRONO_CDN = 'https://cdn.jsdelivr.net/npm/chrono-node@2.7.7/+esm';
+
+let _chronoMod = null;
+
+async function loadChrono(){
+  if(_chronoMod) return _chronoMod;
+  _chronoMod = await import(CHRONO_CDN);
+  return _chronoMod;
+}
+
+function _isoDate(d){
+  const x = new Date(d);
+  if(Number.isNaN(+x)) return null;
+  return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0');
+}
+
+/**
+ * Async enrich: runs sync parseQuickAdd then chrono on remaining title for dueDate.
+ * @returns {Promise<{name: string, props: object}>}
+ */
+async function parseQuickAddAsync(raw){
+  if(typeof parseQuickAdd !== 'function'){
+    console.warn('[nlparse] parseQuickAdd missing');
+    return { name: String(raw || '').trim(), props: {} };
+  }
+  const base = parseQuickAdd(raw);
+  if(!base.name || base.props.dueDate) return base;
+
+  try{
+    const chrono = await loadChrono();
+    const root = chrono.default || chrono;
+    const parser = root.parse || chrono.parse;
+    if(!parser) return base;
+    const results = parser.call(root, base.name, new Date(), { forwardDate: true });
+    if(results && results.length){
+      const start = results[0].start && results[0].start.date();
+      if(start){
+        const iso = _isoDate(start);
+        if(iso) base.props.dueDate = iso;
+      }
+    }
+  }catch(e){
+    console.warn('[nlparse] chrono failed', e);
+  }
+  return base;
+}
+
+window.loadChrono = loadChrono;
+window.parseQuickAddAsync = parseQuickAddAsync;

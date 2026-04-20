@@ -3,6 +3,7 @@
 // PeerJS cloud only handles the initial handshake (SDP/ICE exchange).
 // After that, data flows device-to-device via RTCDataChannel.
 
+// Peer IDs keep stupind- prefix so existing paired devices stay compatible.
 const SYNC_PEER_KEY = 'stupind_peer_id';
 const SYNC_ROOM_KEY = 'stupind_sync_room';
 const SYNC_VERSION  = 1;

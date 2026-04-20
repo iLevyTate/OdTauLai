@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Quick local server for STUPInD PWA
+# Quick local server for ODTAULAI PWA
 # Usage: ./serve.sh [port]
 # Default port: 8080
 
@@ -7,7 +7,7 @@ PORT="${1:-8080}"
 cd "$(dirname "$0")"
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo " STUPInD — Local Dev Server"
+echo " ODTAULAI — Local Dev Server"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "  Open in browser:"

@@ -16,9 +16,9 @@
     document.getElementById('pwa-apple-icon').href = iconUrl;
     document.getElementById('pwa-favicon').href = iconUrl;
     const manifest = {
-      name: 'SuperTimerUsablePerInDevice',
-      short_name: 'STUPInD',
-      description: 'Pomodoro timer with task tracking, quick timers, and daily goals',
+      name: 'ODTAULAI — On device task app using local ambient intelligence',
+      short_name: 'ODTAULAI',
+      description: 'Pomodoro + tasks with on-device semantic understanding of task meaning and context (embedding model; no generative chat).',
       start_url: location.pathname.split('/').slice(0,-1).join('/') + '/' + (location.pathname.split('/').pop() || ''),
       scope: location.pathname.split('/').slice(0,-1).join('/') + '/',
       display: 'standalone',
@@ -48,11 +48,18 @@
       console.warn('External sw.js failed, falling back to inline SW:', err);
       // Fallback: inline SW via blob URL
       const swCode = `
-        const CACHE = 'stupind-v14-inline';
+        const CACHE = 'odtaulai-v17-inline';
         self.addEventListener('install', e => self.skipWaiting());
         self.addEventListener('activate', e => e.waitUntil(clients.claim()));
         self.addEventListener('fetch', e => {
           if (e.request.method !== 'GET') return;
+          const u = new URL(e.request.url);
+          const h = u.hostname;
+          if (h.includes('huggingface.co') || h.includes('cdn-lfs.huggingface.co') ||
+              h === 'hf.co' || h.includes('cdn.jsdelivr.net')) {
+            e.respondWith(fetch(e.request));
+            return;
+          }
           e.respondWith(
             caches.match(e.request).then(cached => {
               if (cached) return cached;
@@ -87,6 +94,7 @@
     });
     const btn = document.getElementById('installBtn');
     if (btn) btn.style.display = '';
+    if (typeof window.refreshPWAInstallUI === 'function') window.refreshPWAInstallUI();
   });
   window.addEventListener('appinstalled', () => {
     window._deferredInstallPrompt = null;
@@ -95,16 +103,69 @@
     const status = document.getElementById('pwaStatus');
     if (status) status.textContent = '✓ Installed as app';
   });
-  window.installPWA = function(){
-    if (!window._deferredInstallPrompt) {
-      alert('Install not available. To install:\n\n• Chrome/Edge desktop: click the install icon in the address bar\n• iOS Safari: Share → Add to Home Screen\n• Android Chrome: menu → Install app\n\nNote: Must be served via HTTPS/localhost (not file://) for install to work on Android/Chrome.');
+
+  function _isIOS(){
+    const ua = navigator.userAgent || '';
+    return /iPad|iPhone|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  }
+  function _isStandalonePWA(){
+    return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+  }
+
+  /** iOS never fires beforeinstallprompt — show the same button with manual steps. */
+  function _syncInstallButtonForPlatform(){
+    if (location.protocol === 'file:') return;
+    if (_isStandalonePWA()) return;
+    const btn = document.getElementById('installBtn');
+    const status = document.getElementById('pwaStatus');
+    if (!btn) return;
+    if (window._deferredInstallPrompt) {
+      btn.style.display = '';
+      btn.textContent = '＋ Install';
+      if (status) status.textContent = 'Ready to install';
       return;
     }
-    window._deferredInstallPrompt.prompt();
-    window._deferredInstallPrompt.userChoice.then(() => {
-      window._deferredInstallPrompt = null;
-      const btn = document.getElementById('installBtn');
-      if (btn) btn.style.display = 'none';
-    });
+    if (_isIOS()) {
+      btn.style.display = '';
+      btn.textContent = '＋ Add to Home Screen';
+      if (status) status.textContent = 'iOS: tap for steps — Share → Add to Home Screen';
+      return;
+    }
+    if (/Android/i.test(navigator.userAgent)) {
+      btn.style.display = '';
+      btn.textContent = '＋ Install app';
+      if (status) status.textContent = 'Android: tap for tips, or Chrome ⋮ → Install app';
+    }
+  }
+
+  window.installPWA = function(){
+    if (window._deferredInstallPrompt) {
+      window._deferredInstallPrompt.prompt();
+      window._deferredInstallPrompt.userChoice.then(() => {
+        window._deferredInstallPrompt = null;
+        const btn = document.getElementById('installBtn');
+        if (btn) btn.style.display = 'none';
+      });
+      return;
+    }
+    if (_isIOS()) {
+      alert('Apple does not provide an “Install” API on iPhone/iPad (unlike Android).\n\nUse Safari:\n1. Tap Share (square with arrow).\n2. Tap “Add to Home Screen”.\n3. Tap Add — ODTAULAI opens fullscreen like an app.\n\nChrome on iOS uses the same WebKit engine; if Add to Home Screen is missing, try Safari.');
+      return;
+    }
+    if (/Android/i.test(navigator.userAgent || '')) {
+      alert('On Android (Chrome):\n1. Open the menu (⋮).\n2. Tap “Install app” or “Add to Home screen”.\n\nIf you do not see it:\n• Use HTTPS or localhost (required).\n• Use the site for a moment first — Chrome shows install when engagement criteria are met.');
+      return;
+    }
+    alert('To install this app:\n\n• Chrome / Edge: tap ⊕ Install in the address bar, or Menu → Save and share → Install page as app.\n• Site must be served over HTTPS or localhost (not file://).\n\niOS: Share → Add to Home Screen.');
   };
+
+  window.refreshPWAInstallUI = _syncInstallButtonForPlatform;
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => { _syncInstallButtonForPlatform(); });
+  } else {
+    _syncInstallButtonForPlatform();
+  }
+  setTimeout(_syncInstallButtonForPlatform, 800);
+  setTimeout(_syncInstallButtonForPlatform, 2500);
 })();

@@ -1,10 +1,10 @@
 # Deployment Guide
 
-STUPInD is a static PWA — no build step, no server-side code, no API. You just need to host the files.
+ODTAULAI is a static PWA — no build step, no server-side code, no API. You just need to host the files.
 
 ## Web app manifest `id`
 
-[`manifest.json`](manifest.json) uses `"id": "./"`. The browser resolves it relative to the manifest URL, so the installed app identity matches **whatever directory hosts** `index.html` and `manifest.json` — site root (`https://example.com/`) or a subpath (`https://<user>.github.io/stupind/`) without editing the file.
+[`manifest.json`](manifest.json) uses `"id": "./"`. The browser resolves it relative to the manifest URL, so the installed app identity matches **whatever directory hosts** `index.html` and `manifest.json` — site root (`https://example.com/`) or a subpath (`https://<user>.github.io/odtaulai/`) without editing the file.
 
 Changing `id` later can make existing installs look like a separate app until old entries are removed.
 
@@ -21,17 +21,17 @@ Changing `id` later can make existing installs look like a separate app until ol
 
 ## Option 2: GitHub Pages (free, permanent URL)
 
-1. Create a new GitHub repo (e.g., `stupind`)
+1. Create a new GitHub repo (e.g., `odtaulai`)
 2. Upload all project files to the repo root
 3. Repo Settings → Pages → Source: `main` branch, `/` (root)
-4. Wait ~2 minutes, then visit `https://<username>.github.io/stupind/`
+4. Wait ~2 minutes, then visit `https://<username>.github.io/odtaulai/`
 
 ---
 
 ## Option 3: Vercel (free, fast)
 
 ```bash
-cd /path/to/STUPInD
+cd /path/to/ODTAULAI
 npx vercel
 ```
 
@@ -55,9 +55,9 @@ Copy the project folder to your server. Nginx config:
 ```nginx
 server {
     listen 443 ssl http2;
-    server_name stupind.example.com;
+    server_name odtaulai.example.com;
 
-    root /var/www/stupind;
+    root /var/www/odtaulai;
     index index.html;
 
     # Cache static assets for 1 year
@@ -90,7 +90,7 @@ server {
 ## Option 6: Python one-liner (LAN / local test)
 
 ```bash
-cd /path/to/STUPInD
+cd /path/to/ODTAULAI
 python3 -m http.server 8080
 # Open http://YOUR-LAN-IP:8080 from your phone (same Wi-Fi)
 ```
@@ -102,7 +102,7 @@ python3 -m http.server 8080
 ## Option 7: Caddy (auto-HTTPS, one command)
 
 ```bash
-caddy file-server --domain stupind.example.com --root .
+caddy file-server --domain odtaulai.example.com --root .
 ```
 
 ---
@@ -111,14 +111,14 @@ caddy file-server --domain stupind.example.com --root .
 
 After deploying, visit the site and open DevTools (desktop) or Safari Web Inspector (iOS):
 
-- **Chrome DevTools:** Application tab → Manifest → should show "STUPInD" with icons
+- **Chrome DevTools:** Application tab → Manifest → should show "ODTAULAI" with icons
 - **Application tab → Service Workers:** should show `sw.js` registered and running
 - **Lighthouse:** Run PWA audit — should score 100%
 
 ### Expected behavior
 
 1. Visit site → browser shows install icon in address bar (desktop) or "Add to Home Screen" is suggested (mobile)
-2. Install → app opens in its own window with the STUPInD icon
+2. Install → app opens in its own window with the ODTAULAI icon
 3. Turn off Wi-Fi → app still loads (service worker serves from cache)
 4. Tasks, timers, settings all persist across sessions and reloads
 
@@ -137,7 +137,7 @@ After deploying, visit the site and open DevTools (desktop) or Safari Web Inspec
 
 **"Offline doesn't work"**
 - First visit caches everything; reload once while online before testing offline
-- Check Application → Cache Storage in DevTools — should see a `stupind-v*` cache (version matches [sw.js](sw.js)) with precached assets
+- Check Application → Cache Storage in DevTools — should see an `odtaulai-v*` cache (version matches [sw.js](sw.js)) with precached assets
 
 **"Audio doesn't fire in background"**
 - User must interact with the page first (browser autoplay policy)

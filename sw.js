@@ -1,5 +1,5 @@
-// STUPInD Service Worker v14
-const CACHE_NAME = 'stupind-v14';
+// ODTAULAI Service Worker v17 — ambient intelligence (Transformers.js / HF CDN pass-through)
+const CACHE_NAME = 'odtaulai-v17';
 
 const ASSETS = [
   './',
@@ -13,10 +13,14 @@ const ASSETS = [
   './js/audio.js',
   './js/timer.js',
   './js/tasks.js',
+  './js/intel.js',
+  './js/embed-store.js',
+  './js/nlparse.js',
+  './js/intel-features.js',
   './js/ui.js',
+  './js/ai.js',
   './js/sync.js',
   './js/calfeeds.js',
-  './js/ai.js',
   './js/app.js',
   './js/vendor/peerjs.min.js',
   './icons/icon-192.png',
@@ -29,51 +33,53 @@ const ASSETS = [
 self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(CACHE_NAME)
-      .then(c => c.addAll(ASSETS).catch(()=>{}))
-    // NOTE: NO skipWaiting() here. The new SW goes into 'waiting' state until
-    // the client (app.js) explicitly sends SKIP_WAITING after user clicks
-    // "Reload to update" on the update banner. This keeps old & new versions
-    // cleanly separated instead of swapping code mid-session.
+      .then(c => c.addAll(ASSETS).catch(() => {}))
   );
 });
 
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k=>k!==CACHE_NAME).map(k=>caches.delete(k))))
+      .then(keys => Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
 
 self.addEventListener('fetch', e => {
-  if(e.request.method!=='GET') return;
+  if(e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
-  // Pass through external CDN requests (WebLLM, fonts) — let browser cache them
-  if(url.origin!==self.location.origin) return;
+  const host = url.hostname;
+  // Let Transformers.js / Hugging Face / jsDelivr manage their own HTTP caches
+  if(host.includes('huggingface.co') || host.includes('cdn-lfs.huggingface.co') ||
+     host === 'hf.co' || host.includes('cdn.jsdelivr.net')){
+    e.respondWith(fetch(e.request));
+    return;
+  }
+  if(url.origin !== self.location.origin) return;
 
   e.respondWith(
     caches.match(e.request).then(cached => {
       const net = fetch(e.request).then(res => {
-        if(res&&res.status===200&&res.type==='basic'){
-          const clone=res.clone();
-          caches.open(CACHE_NAME).then(c=>c.put(e.request,clone).catch(()=>{}));
+        if(res && res.status === 200 && res.type === 'basic'){
+          const clone = res.clone();
+          caches.open(CACHE_NAME).then(c => c.put(e.request, clone).catch(() => {}));
         }
         return res;
-      }).catch(()=>cached||new Response('Offline',{status:503,headers:{'Content-Type':'text/plain'}}));
-      return cached||net;
+      }).catch(() => cached || new Response('Offline', { status: 503, headers: { 'Content-Type': 'text/plain' } }));
+      return cached || net;
     })
   );
 });
 
 self.addEventListener('message', e => {
-  if(e.data?.type==='SKIP_WAITING') self.skipWaiting();
+  if(e.data?.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('notificationclick', e => {
   e.notification.close();
   e.waitUntil(
-    self.clients.matchAll({type:'window',includeUncontrolled:true}).then(clients=>{
-      for(const c of clients){ if('focus'in c)return c.focus(); }
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clients => {
+      for(const c of clients){ if('focus' in c) return c.focus(); }
       if(self.clients.openWindow) return self.clients.openWindow('./');
     })
   );

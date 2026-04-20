@@ -1,4 +1,5 @@
 // ========== PERSISTENCE ==========
+// Internal keys keep stupind_* prefix so existing installs retain data after rebrand to ODTAULAI.
 const STORE_KEY     = 'stupind_state';
 const ARCHIVE_KEY   = 'stupind_archive';
 const SCHEMA_VERSION = 5;
@@ -159,11 +160,13 @@ function saveState(){
   // This gives sync a reliable "newer wins" comparator without touching every
   // mutation site manually.
   const prev = _prevTaskSnapshot || {};
+  const _intelEmbedIds = [];
   tasks.forEach(t => {
     const p = prev[t.id];
     if (!p) {
       // Brand new task
       t.lastModified = t.lastModified || Date.now();
+      _intelEmbedIds.push(t.id);
     } else {
       // Cheap comparator — any field difference = changed
       const fieldsToCompare = ['name','status','priority','dueDate','startDate','description','tags',
@@ -175,7 +178,10 @@ function saveState(){
         const b = JSON.stringify(p[f]);
         if (a !== b) { changed = true; break; }
       }
-      if (changed) t.lastModified = Date.now();
+      if (changed){
+        t.lastModified = Date.now();
+        _intelEmbedIds.push(t.id);
+      }
     }
   });
   // Rebuild snapshot for next diff
@@ -222,6 +228,15 @@ function saveState(){
   _idbSet(STORE_KEY, serialized);
   if(typeof syncBroadcast==='function') syncBroadcast();
   showSaveIndicator();
+
+  queueMicrotask(() => {
+    if(typeof embedStore === 'undefined' || !embedStore || !embedStore.ensure) return;
+    _intelEmbedIds.forEach(id => {
+      const t = typeof findTask === 'function' ? findTask(id) : null;
+      if(t) embedStore.ensure(t).catch(() => {});
+    });
+    if(typeof scheduleIntelDupRefresh === 'function') scheduleIntelDupRefresh();
+  });
 }
 
 // ── Apply validated+migrated state to live variables ─────────────────────────
@@ -267,7 +282,12 @@ function _applyState(s){
 
     // Lists
     if(Array.isArray(s.lists)){
-      lists       = s.lists.filter(l=>l&&l.id&&l.name);
+      lists       = s.lists.filter(l=>l&&l.id&&l.name).map(l=>({
+        id: l.id,
+        name: l.name,
+        color: l.color || '#3d8bcc',
+        description: typeof l.description==='string' ? l.description : '',
+      }));
       listIdCtr   = _int(s.listIdCtr, 0);
       activeListId = s.activeListId ?? null;
     }
@@ -359,7 +379,7 @@ function exportData(){
   const blob = new Blob([JSON.stringify({export:raw,archive,exportedAt:new Date().toISOString()},null,2)],{type:'application/json'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'stupind-full-backup-'+todayKey()+'.json';
+  a.download = 'odtaulai-full-backup-'+todayKey()+'.json';
   a.click(); URL.revokeObjectURL(a.href);
 }
 
@@ -500,7 +520,7 @@ function exportTasksCSV(){
   const blob = new Blob([csv], {type: 'text/csv;charset=utf-8'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'stupind-tasks-'+todayKey()+'.csv';
+  a.download = 'odtaulai-tasks-'+todayKey()+'.csv';
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -512,12 +532,12 @@ function exportTasksJSON(){
     return;
   }
   const payload = {
-    kind: 'stupind-tasks',
+    kind: 'odtaulai-tasks',
     version: 1,
     exportedAt: new Date().toISOString(),
     taskCount: tasks.length,
     // Include the current lists so list membership survives the round trip
-    lists: Array.isArray(lists) ? lists.map(l => ({id:l.id, name:l.name, color:l.color})) : [],
+    lists: Array.isArray(lists) ? lists.map(l => ({id:l.id, name:l.name, color:l.color, description:l.description||''})) : [],
     tasks: tasks.map(t => {
       const row = _taskToExportRow(t);
       // In JSON, keep full arrays — drop the tabular-only derivations
@@ -541,7 +561,7 @@ function exportTasksJSON(){
   const blob = new Blob([JSON.stringify(payload, null, 2)], {type: 'application/json'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'stupind-tasks-'+todayKey()+'.json';
+  a.download = 'odtaulai-tasks-'+todayKey()+'.json';
   a.click();
   URL.revokeObjectURL(a.href);
 }
@@ -679,7 +699,7 @@ function _importTasksFromJSON(text){
   if(!parsed || typeof parsed !== 'object') throw new Error('Not a valid JSON file');
 
   // Accept three shapes:
-  //   1. { kind:'stupind-tasks', tasks:[...] }  — our native task export
+  //   1. { kind:'odtaulai-tasks' | 'stupind-tasks', tasks:[...] }  — native task export
   //   2. { tasks:[...] }                         — generic
   //   3. [...]                                   — bare array
   let incomingTasks;
@@ -692,7 +712,12 @@ function _importTasksFromJSON(text){
     parsed.lists.forEach(rl => {
       if(!rl || typeof rl !== 'object' || !rl.id) return;
       if(!lists.find(l => l.id === rl.id)){
-        lists.push({id: rl.id, name: rl.name || 'Imported', color: rl.color || '#3d8bcc'});
+        lists.push({
+          id: rl.id,
+          name: rl.name || 'Imported',
+          color: rl.color || '#3d8bcc',
+          description: typeof rl.description==='string' ? rl.description : '',
+        });
         if(rl.id > listIdCtr) listIdCtr = rl.id;
       }
     });
