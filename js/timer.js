@@ -1,0 +1,235 @@
+// ========== CONFIG ==========
+function updateConfig(){cfg.work=Math.max(1,parseInt(gid('cfgWork').value)||25);cfg.short=Math.max(1,parseInt(gid('cfgShort').value)||5);cfg.long=Math.max(1,parseInt(gid('cfgLong').value)||15);cfg.cycle=Math.max(2,parseInt(gid('cfgCycle').value)||4);if(!running&&!finished){setPhaseTime();renderPips()}saveState()}
+function toggleOpt(id){const el=gid(id);el.classList.toggle('on');if(id==='togBreak')cfg.autoBreak=el.classList.contains('on');if(id==='togWork')cfg.autoWork=el.classList.contains('on');if(id==='togSound'){cfg.sound=el.classList.contains('on');if(running){if(cfg.sound)schedulePhaseAudio();else cancelScheduledAudio()}}if(id==='togLink')cfg.linkTask=el.classList.contains('on');if(id==='togNotif'){cfg.notif=el.classList.contains('on');if(cfg.notif)reqNotifPerm()}saveState()}
+let settingsOpen=false;
+function toggleSettings(){settingsOpen=!settingsOpen;gid('settingsBody').style.maxHeight=settingsOpen?'800px':'0';gid('settingsArrow').style.transform=settingsOpen?'rotate(180deg)':''}
+
+// ========== STATE ==========
+let cfg={work:25,short:5,long:15,cycle:4,autoBreak:true,autoWork:false,sound:true,linkTask:true,notif:true};
+let phase='work',pomosInCycle=0,totalPomos=0,totalBreaks=0,totalFocusSec=0;
+let totalDuration=0,remaining=0,running=false,finished=false;
+let startedAt=0,pausedRemaining=0,tickId=null;
+let sessionHistory=[],intervals=[],intIdCtr=0,fireCounts={},lastFlash=null,lastTickSec=-1;
+let tasks=[],taskIdCtr=0,activeTaskId=null,taskStartedAt=null,subtaskPromptParent=null;
+let lists=[],listIdCtr=0,activeListId=null;
+let taskFilters={search:'',status:'all',priority:'all',category:'all'};
+let taskSortBy='smart',taskView='list',editingTaskId=null,smartView='all';
+let taskGroupBy='none',calMonth=null,theme='dark';
+let collapsedSections={};
+let timeLog=[],goals=[],goalIdCtr=0,logIdCtr=0;
+let swRunning=false,swStartTime=0,swElapsed=0,swPausedEl=0,swTickId=null,swLapList=[];
+let quickTimers=[],qtIdCtr=0,qtGlobalTick=null;
+let activeTab='tasks';
+
+// ========== PHASE ==========
+function getPS(p){return p==='work'?cfg.work*60:p==='short'?cfg.short*60:cfg.long*60}
+function getPC(p){return p==='work'?'var(--work)':p==='short'?'var(--short)':'var(--long)'}
+function getPBg(p){return p==='work'?'var(--work-bg)':p==='short'?'var(--short-bg)':'var(--long-bg)'}
+function getPBd(p){return p==='work'?'var(--work-border)':p==='short'?'var(--short-border)':'var(--long-border)'}
+function getPL(p){return p==='work'?'Focus':p==='short'?'Short Break':'Long Break'}
+function switchPhase(p){if(running)return;phase=p;finished=false;fireCounts={};setPhaseTime();renderAll()}
+function setPhaseTime(){totalDuration=getPS(phase);remaining=totalDuration;pausedRemaining=totalDuration}
+function renderAll(){
+  gid('mainCard').style.background=getPBg(phase);gid('mainCard').style.borderColor=getPBd(phase);
+  gid('ringFg').setAttribute('stroke',getPC(phase));gid('ringFg').setAttribute('stroke-dashoffset','0');
+  gid('display').textContent=fmt(remaining);gid('display').style.color=getPC(phase);gid('display').className='ring-time';
+  gid('phaseLabel').textContent=getPL(phase);gid('phaseLabel').style.color=getPC(phase);
+  document.querySelectorAll('.tab').forEach(t=>t.className='tab');
+  document.querySelectorAll('.tab')[phase==='work'?0:phase==='short'?1:2].classList.add('active',phase==='work'?'work':phase==='short'?'short':'long');
+  renderPips();renderCtrls();renderStats();renderTaskList();renderGoalList();renderArchive();updateTitle();updateMiniTimer()
+}
+function renderPips(){const c=gid('pips');c.innerHTML='';for(let i=0;i<cfg.cycle;i++){const d=document.createElement('div');d.className='pip'+(i<pomosInCycle?' done':i===pomosInCycle&&phase==='work'?' current':'');d.title='Jump to pomo '+(i+1);d.onclick=(function(idx){return function(){jumpToPomo(idx)}})(i);c.appendChild(d)}}
+function jumpToPomo(idx){if(running)return;if(idx<0||idx>=cfg.cycle)return;pomosInCycle=idx;renderPips();saveState()}
+function renderCtrls(){
+  const c=gid('ctrls');
+  if(!running&&!finished&&remaining===totalDuration)c.innerHTML='<button class="btn btn-primary" onclick="startTimer()">Start</button>';
+  else if(running)c.innerHTML='<button class="btn btn-pause" onclick="pauseTimer()">Pause</button><button class="btn-skip" onclick="skipPhase()">Skip ▸</button><button class="btn-danger" onclick="resetAll()">Reset</button>';
+  else if(finished){const nl=phase==='work'?(pomosInCycle>=cfg.cycle?'Long Break ▸':'Short Break ▸'):'Start Focus ▸';c.innerHTML='<button class="btn btn-primary" onclick="advancePhase()">'+nl+'</button><button class="btn-danger" onclick="resetAll()">Reset</button>'}
+  else c.innerHTML='<button class="btn btn-primary" onclick="resumeTimer()">Resume</button><button class="btn-skip" onclick="skipPhase()">Skip ▸</button><button class="btn-danger" onclick="resetAll()">Reset</button>'
+}
+
+// ========== TIMER ==========
+function startTimer(){if(totalDuration<=0)return;running=true;finished=false;startedAt=Date.now();pausedRemaining=remaining;fireCounts={};if(cfg.linkTask&&phase==='work'&&activeTaskId)taskStartedAt=Date.now();clearInterval(tickId);tickId=setInterval(tick,200);reqNotifPerm();schedulePhaseAudio();startKeepalive();renderCtrls()}
+function pauseTimer(){running=false;const el=Math.floor((Date.now()-startedAt)/1000);pausedRemaining=Math.max(0,pausedRemaining-el);remaining=pausedRemaining;if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000);taskStartedAt=null}}cancelScheduledAudio();maybeStopKeepalive();renderCtrls();renderTaskList();saveState()}
+function resumeTimer(){running=true;startedAt=Date.now();if(cfg.linkTask&&phase==='work'&&activeTaskId)taskStartedAt=Date.now();clearInterval(tickId);tickId=setInterval(tick,200);schedulePhaseAudio();renderCtrls()}
+function tick(){
+  if(!running)return;
+  const el=Math.floor((Date.now()-startedAt)/1000);remaining=Math.max(0,pausedRemaining-el);
+  const totalEl=totalDuration-remaining,circ=553;
+  gid('ringFg').setAttribute('stroke-dashoffset',String(circ-(remaining/totalDuration)*circ));
+  const disp=gid('display');disp.textContent=fmt(remaining);disp.className='ring-time'+(remaining<=10&&remaining>0?' warn':'');
+  intervals.forEach(iv=>{if(iv.intervalSec<=0)return;const exp=Math.floor(totalEl/iv.intervalSec),prev=fireCounts[iv.id]||0;if(exp>prev&&totalEl>0){if(cfg.sound&&!audioScheduled)playChime(iv.chime);fireCounts[iv.id]=exp;flashInt(iv.id)}});
+  if(remaining!==lastTickSec){lastTickSec=remaining;renderIntList()}
+  renderBanner();updateTitle();updateMiniTimer();
+  if(remaining<=0){running=false;finished=true;clearInterval(tickId);onPhaseComplete()}
+}
+function onPhaseComplete(){
+  if(phase==='work'){pomosInCycle++;totalPomos++;totalFocusSec+=totalDuration;sessionHistory.push({type:'work'});
+    const pips=gid('pips').children;if(pips[pomosInCycle-1])pips[pomosInCycle-1].classList.add('done','pop');
+    if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000);t.sessions++;taskStartedAt=null;addLog(t.name,totalDuration,'work')}}else addLog('Focus',totalDuration,'work')
+  }else{totalBreaks++;sessionHistory.push({type:phase});addLog(getPL(phase),getPS(phase),phase)}
+  // Scheduled audio already fired at the right moment; only play manually if scheduling failed
+  if(cfg.sound&&!audioScheduled)(phase==='work'?playTransition:playBreakEnd)();
+  audioScheduled=false;scheduledAudio=[];
+  // System notification for backgrounded tabs
+  notify(getPL(phase)+' Complete',phase==='work'?'Great work! Time for a break.':'Break over — back to focus.');
+  gid('display').className='ring-time done';gid('display').textContent='00:00';gid('phaseLabel').textContent=getPL(phase)+' Complete';
+  renderStats();renderCtrls();renderTaskList();updateTitle();saveState();
+  if(phase==='work'&&cfg.autoBreak)setTimeout(()=>{if(finished)advancePhase()},1500);
+  else if(phase!=='work'&&cfg.autoWork)setTimeout(()=>{if(finished)advancePhase()},1500)
+}
+function advancePhase(){if(phase==='work')phase=pomosInCycle>=cfg.cycle?'long':'short';else{if(phase==='long')pomosInCycle=0;phase='work'}finished=false;fireCounts={};setPhaseTime();renderAll();if((phase!=='work'&&cfg.autoBreak)||(phase==='work'&&cfg.autoWork))setTimeout(startTimer,300)}
+function skipPhase(){running=false;clearInterval(tickId);cancelScheduledAudio();const el=Math.floor((Date.now()-startedAt)/1000);remaining=Math.max(0,pausedRemaining-el);const worked=totalDuration-remaining;if(phase==='work'){if(worked>30)totalFocusSec+=worked;if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000);t.sessions++;taskStartedAt=null;addLog(t.name,worked,'work')}}else if(worked>30){addLog('Focus (partial)',worked,'work')}if(worked>30){pomosInCycle++;totalPomos++;sessionHistory.push({type:'work'});const pips=gid('pips').children;if(pips[pomosInCycle-1])pips[pomosInCycle-1].classList.add('done','pop')}}else{totalBreaks++;sessionHistory.push({type:phase});addLog(getPL(phase),worked||getPS(phase),phase)}if(cfg.sound)(phase==='work'?playTransition:playBreakEnd)();notify(getPL(phase)+' Skipped','Moving to next phase.');finished=true;gid('display').className='ring-time done';gid('display').textContent='00:00';gid('phaseLabel').textContent=getPL(phase)+' Complete';renderStats();renderCtrls();renderTaskList();updateTitle();saveState();if(phase==='work'&&cfg.autoBreak)setTimeout(()=>{if(finished)advancePhase()},1500);else if(phase!=='work'&&cfg.autoWork)setTimeout(()=>{if(finished)advancePhase()},1500)}
+function resetAll(){running=false;finished=false;clearInterval(tickId);cancelScheduledAudio();phase='work';pomosInCycle=0;fireCounts={};if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000);taskStartedAt=null}}setPhaseTime();renderAll();saveState()}
+
+// ========== STOPWATCH ==========
+function swToggle(){if(swRunning){swRunning=false;swPausedEl+=Date.now()-swStartTime;gid('swStartBtn').textContent='Resume';gid('swStartBtn').className='btn btn-primary';maybeStopKeepalive()}else{swRunning=true;swStartTime=Date.now();clearInterval(swTickId);swTickId=setInterval(swTick,100);gid('swStartBtn').textContent='Pause';gid('swStartBtn').className='btn btn-pause';startKeepalive()}}
+function swTick(){if(!swRunning)return;swElapsed=swPausedEl+Date.now()-swStartTime;gid('swDisplay').textContent=fmtHMS(Math.floor(swElapsed/1000))}
+function swLap(){if(swElapsed<=0)return;const s=Math.floor(swElapsed/1000),d=document.createElement('div');d.style.cssText='font-size:10px;color:#5a8ab5;padding:4px 8px;background:#0a1320;border-radius:4px;display:flex;justify-content:space-between';d.innerHTML='<span>Lap '+(swLapList.length+1)+'</span><span>'+fmtHMS(s)+'</span>';gid('swLaps').prepend(d);swLapList.push(s)}
+function swReset(){swRunning=false;swElapsed=0;swPausedEl=0;swLapList=[];clearInterval(swTickId);gid('swDisplay').textContent='00:00:00';gid('swStartBtn').textContent='Start';gid('swStartBtn').className='btn btn-primary';gid('swLaps').innerHTML=''}
+
+// ========== QUICK TIMERS ==========
+function addQuickTimer(){
+  const mins=parseInt(gid('qtMin').value)||0,secs=parseInt(gid('qtSec').value)||0,total=mins*60+secs;
+  if(total<=0)return;
+  const label=(gid('qtLabel').value||'').trim()||'Timer '+fmt(total);
+  const sound=gid('qtSound').value;
+  quickTimers.push({id:++qtIdCtr,label,totalSec:total,remaining:total,running:false,startedAt:0,pausedRem:total,sound,finished:false});
+  gid('qtLabel').value='';renderQuickTimers();saveState()
+}
+
+function addQuickPreset(mins,secs,label){
+  const total=mins*60+secs;
+  quickTimers.push({id:++qtIdCtr,label,totalSec:total,remaining:total,running:false,startedAt:0,pausedRem:total,sound:'bell',finished:false});
+  renderQuickTimers();saveState()
+}
+
+function toggleQuickTimer(id){
+  const qt=quickTimers.find(t=>t.id===id);
+  if(!qt)return;
+  if(qt.finished){
+    qt.remaining=qt.totalSec;qt.pausedRem=qt.totalSec;qt.finished=false;qt.running=true;qt.startedAt=Date.now();
+    reqNotifPerm();scheduleQtAudio(qt);startKeepalive();
+  }else if(qt.running){
+    const el=Math.floor((Date.now()-qt.startedAt)/1000);
+    qt.pausedRem=Math.max(0,qt.pausedRem-el);qt.remaining=qt.pausedRem;qt.running=false;
+    cancelQtAudio(qt);maybeStopKeepalive();
+  }else{
+    qt.running=true;qt.startedAt=Date.now();
+    reqNotifPerm();scheduleQtAudio(qt);startKeepalive();
+  }
+  ensureQuickTick();renderQuickTimers();saveState()
+}
+
+// Only stop keepalive if nothing is running
+function maybeStopKeepalive(){
+  if(running)return;
+  if(quickTimers.some(qt=>qt.running))return;
+  if(swRunning)return;
+  stopKeepalive();
+}
+
+function resetQuickTimer(id){
+  const qt=quickTimers.find(t=>t.id===id);
+  if(!qt)return;
+  cancelQtAudio(qt);
+  qt.running=false;qt.finished=false;qt.remaining=qt.totalSec;qt.pausedRem=qt.totalSec;qt.flashUntil=0;
+  renderQuickTimers();saveState()
+}
+
+function removeQuickTimer(id){
+  const qt=quickTimers.find(t=>t.id===id);if(qt)cancelQtAudio(qt);
+  quickTimers=quickTimers.filter(t=>t.id!==id);
+  renderQuickTimers();saveState()
+}
+
+function scheduleQtAudio(qt){
+  cancelQtAudio(qt);
+  if(!cfg.sound)return;
+  const delay=qt.remaining;
+  if(delay<=0)return;
+  try{
+    const x=getAudioCtx(),base=x.currentTime+delay,c=CH[qt.sound]||CH.bell;
+    qt._nodes=[];
+    c.freq.forEach((f,i)=>{
+      const o=x.createOscillator(),g=x.createGain(),t=base+i*.05;
+      o.type=c.type;o.frequency.setValueAtTime(f,t);
+      g.gain.setValueAtTime(.25,t);g.gain.exponentialRampToValueAtTime(.001,t+c.decay);
+      o.connect(g);g.connect(x.destination);
+      o.start(t);o.stop(t+c.decay+.1);
+      qt._nodes.push(o);
+    });
+    qt._audioScheduled=true;
+  }catch(e){}
+}
+
+function cancelQtAudio(qt){
+  if(qt._nodes){qt._nodes.forEach(o=>{try{o.stop(0)}catch(e){}});qt._nodes=[]}
+  qt._audioScheduled=false;
+}
+
+function ensureQuickTick(){
+  if(qtGlobalTick)return;
+  if(!quickTimers.some(qt=>qt.running))return;
+  qtGlobalTick=setInterval(()=>{
+    let anyRunning=false,needsRender=false;
+    quickTimers.forEach(qt=>{
+      if(!qt.running)return;
+      anyRunning=true;
+      const el=Math.floor((Date.now()-qt.startedAt)/1000);
+      const newRem=Math.max(0,qt.pausedRem-el);
+      if(newRem!==qt.remaining){qt.remaining=newRem;needsRender=true}
+      if(newRem<=0&&!qt.finished){
+        qt.running=false;qt.finished=true;qt.pausedRem=0;
+        // Scheduled audio already played; fall back to manual play only if scheduling failed
+        if(cfg.sound&&!qt._audioScheduled)playChime(qt.sound);
+        qt._audioScheduled=false;qt._nodes=[];
+        notify('Timer done',qt.label);
+        qt.flashUntil=Date.now()+2000;
+        addLog(qt.label,qt.totalSec,'quick');
+        needsRender=true;saveState();
+      }
+    });
+    if(!anyRunning){clearInterval(qtGlobalTick);qtGlobalTick=null}
+    if(needsRender)renderQuickTimers();
+  },500)
+}
+
+function renderQuickTimers(){
+  const list=gid('qtList');
+  gid('qtCount').textContent=quickTimers.length+' timer'+(quickTimers.length!==1?'s':'');
+  list.querySelectorAll('.qt-item').forEach(e=>e.remove());
+  if(!quickTimers.length){gid('qtEmpty').style.display='';return}
+  gid('qtEmpty').style.display='none';
+  quickTimers.forEach(qt=>{
+    let rem=qt.remaining;
+    if(qt.running){const el=Math.floor((Date.now()-qt.startedAt)/1000);rem=Math.max(0,qt.pausedRem-el)}
+    const pct=qt.totalSec>0?((qt.totalSec-rem)/qt.totalSec)*100:0;
+    const flash=qt.flashUntil&&Date.now()<qt.flashUntil;
+    const d=document.createElement('div');
+    d.className='qt-item'+(qt.finished?' done':qt.running?' running':'')+(flash?' flash':'');
+    const btnClass=qt.finished?'qt-restart':qt.running?'qt-pause':'qt-play';
+    const btnIcon=qt.finished?'↻':qt.running?'⏸':'▶';
+    const timeClass='qt-time'+(qt.finished?' done':qt.running?' running':'')+(rem<=10&&qt.running&&rem>0?' warn':'');
+    const barClass='qt-bar'+(qt.finished?' done':'');
+    d.innerHTML='<button class="qt-btn '+btnClass+'" onclick="toggleQuickTimer('+qt.id+')" title="'+(qt.finished?'Restart':qt.running?'Pause':'Start')+'">'+btnIcon+'</button>'
+      +'<div class="qt-info"><div class="qt-label">'+esc(qt.label)+'</div>'
+      +'<div class="'+timeClass+'">'+fmtHMS(rem)+'</div>'
+      +'<div class="qt-progress"><div class="'+barClass+'" style="width:'+pct+'%"></div></div>'
+      +'</div>'
+      +'<div class="qt-actions">'
+      +'<button class="qt-act" onclick="resetQuickTimer('+qt.id+')" title="Reset">↺</button>'
+      +'<button class="qt-act" onclick="removeQuickTimer('+qt.id+')" title="Remove">×</button>'
+      +'</div>';
+    list.appendChild(d)
+  })
+}
+// Keep quick timer display fresh every second even if render isn't triggered by tick
+setInterval(()=>{if(quickTimers.some(qt=>qt.running))renderQuickTimers()},1000);
+
+// ========== INTERVALS ==========
+function addInterval(){const m=parseInt(gid('intMin').value)||0,s=parseInt(gid('intSec').value)||0,sec=m*60+s;if(sec<=0)return;intervals.push({id:++intIdCtr,intervalSec:sec,label:gid('intLabel').value||'Every '+fmt(sec),chime:gid('intChime').value});gid('intLabel').value='';gid('intMin').value='5';gid('intSec').value='0';renderIntList();if(running)schedulePhaseAudio();saveState()}
+function removeInterval(id){intervals=intervals.filter(i=>i.id!==id);delete fireCounts[id];renderIntList();if(running)schedulePhaseAudio();saveState()}
+function flashInt(id){lastFlash=id;setTimeout(()=>{if(lastFlash===id){lastFlash=null;renderIntList()}},600);renderIntList()}
+function renderIntList(){const list=gid('intList');gid('intCount').textContent=intervals.length+' set';list.querySelectorAll('.iitem').forEach(e=>e.remove());if(!intervals.length){gid('intEmpty').style.display='';return}gid('intEmpty').style.display='none';const totalEl=totalDuration-remaining;intervals.forEach(iv=>{const fires=fireCounts[iv.id]||0,fl=lastFlash===iv.id,next=(fires+1)*iv.intervalSec-totalEl;const d=document.createElement('div');d.className='iitem'+(fl?' flash':'');d.innerHTML='<div class="idot'+(fl?' flash':fires>0?' active':'')+'"></div><div class="iinfo"><div class="iname">'+esc(iv.label)+'</div><div class="imeta">⟳ every '+fmt(iv.intervalSec)+' · '+CHL[iv.chime]+'</div></div>'+(running||finished?'<div class="istat"><div class="ifires'+(fl?' flash':'')+'">'+fires+'×</div>'+(next>0&&running?'<div class="inext">next '+fmt(next)+'</div>':'')+'</div>':'')+'<button class="irm" onclick="removeInterval('+iv.id+')">×</button>';list.appendChild(d)})}
+

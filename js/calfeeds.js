@@ -1,0 +1,598 @@
+// ════════════════════════════════════════════════════════════════════════════
+// CALENDAR FEEDS — import external .ics (iCalendar) feeds like Google Calendar
+// ════════════════════════════════════════════════════════════════════════════
+// Fully client-side. Parses .ics locally, caches events in localStorage.
+// Three fetch modes: paste raw content, direct URL (rarely works due to CORS),
+// or via a user-configured CORS proxy. No centralised infrastructure — each
+// user decides their own privacy/convenience tradeoff.
+
+const CALFEEDS_KEY    = 'stupind_calfeeds';       // {feeds:[{id,label,color,url,proxy,content,events,lastSync}]}
+const CALFEEDS_PROXY  = 'stupind_calfeeds_proxy'; // default proxy URL (optional, user-entered)
+
+let _calFeeds = null;
+
+function _loadCalFeeds(){
+  if(_calFeeds) return _calFeeds;
+  try {
+    const raw = localStorage.getItem(CALFEEDS_KEY);
+    _calFeeds = raw ? JSON.parse(raw) : { feeds: [] };
+    if(!_calFeeds.feeds) _calFeeds.feeds = [];
+  } catch(e) {
+    _calFeeds = { feeds: [] };
+  }
+  return _calFeeds;
+}
+
+function _saveCalFeeds(){
+  try { localStorage.setItem(CALFEEDS_KEY, JSON.stringify(_calFeeds)); } catch(e) {}
+}
+
+// ── Parser: minimal but correct iCalendar subset ───────────────────────────
+// Handles VEVENT entries with DTSTART, DTEND, SUMMARY, DESCRIPTION, LOCATION,
+// UID, RRULE. Properly unfolds long lines (RFC 5545: lines continue on the
+// next line if they start with a space or tab).
+function parseICS(text){
+  if(typeof text !== 'string') return [];
+  // Normalise line endings and unfold continuation lines
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  const unfolded = [];
+  for(const line of lines){
+    if(line.startsWith(' ') || line.startsWith('\t')){
+      if(unfolded.length) unfolded[unfolded.length-1] += line.slice(1);
+    } else {
+      unfolded.push(line);
+    }
+  }
+
+  const events = [];
+  let current = null;
+  for(const raw of unfolded){
+    if(raw === 'BEGIN:VEVENT'){ current = {}; continue; }
+    if(raw === 'END:VEVENT'){
+      if(current && current.DTSTART){ events.push(current); }
+      current = null; continue;
+    }
+    if(!current) continue;
+
+    // Split "KEY;PARAM=VAL:VALUE" → key (ignore params for our subset), value
+    const colonIdx = raw.indexOf(':');
+    if(colonIdx < 0) continue;
+    let keyPart = raw.slice(0, colonIdx);
+    const value = raw.slice(colonIdx + 1);
+    // Key may have params (e.g. DTSTART;TZID=America/New_York) — strip them but keep TZID for date parse
+    const semi = keyPart.indexOf(';');
+    let tzid = null;
+    let valueType = null;
+    if(semi >= 0){
+      const params = keyPart.slice(semi+1).split(';');
+      keyPart = keyPart.slice(0, semi);
+      for(const p of params){
+        if(p.startsWith('TZID=')) tzid = p.slice(5);
+        if(p.startsWith('VALUE=')) valueType = p.slice(6);
+      }
+    }
+    current[keyPart] = value;
+    if(keyPart === 'DTSTART' || keyPart === 'DTEND'){
+      current[keyPart + '_TZID'] = tzid;
+      current[keyPart + '_VALUE'] = valueType;
+    }
+  }
+
+  // Transform raw VEVENTS to our normalized shape
+  return events.map(normaliseEvent).filter(Boolean);
+}
+
+// Convert iCal date format to ISO YYYY-MM-DD and HH:MM (local) where possible
+function normaliseEvent(ev){
+  if(!ev.DTSTART) return null;
+  const start = parseICSDate(ev.DTSTART, ev.DTSTART_VALUE === 'DATE', ev.DTSTART_TZID);
+  if(!start) return null;
+  const end = ev.DTEND ? parseICSDate(ev.DTEND, ev.DTEND_VALUE === 'DATE', ev.DTEND_TZID) : null;
+  return {
+    uid:         (ev.UID || '').slice(0, 200),
+    title:       unescapeICS(ev.SUMMARY || '(no title)'),
+    description: unescapeICS(ev.DESCRIPTION || ''),
+    location:    unescapeICS(ev.LOCATION || ''),
+    dateISO:     start.iso,       // YYYY-MM-DD (in user's local zone)
+    time:        start.time,      // HH:MM (in user's local zone) or null for all-day
+    endDateISO:  end ? end.iso : null,
+    endTime:     end ? end.time : null,
+    allDay:      ev.DTSTART_VALUE === 'DATE',
+    rrule:       ev.RRULE || null,
+  };
+}
+
+// Parse iCal date/datetime formats:
+//   20260420           → date-only (all-day)
+//   20260420T143000Z   → UTC datetime
+//   20260420T143000    → floating/local datetime (or TZID-specified if tzid provided)
+function parseICSDate(raw, isDateOnly, tzid){
+  if(!raw) return null;
+  // Strip non-alnum except T
+  const clean = raw.replace(/[^\dTZ]/g, '');
+  if(clean.length < 8) return null;
+  const Y = clean.slice(0, 4);
+  const M = clean.slice(4, 6);
+  const D = clean.slice(6, 8);
+  const iso = `${Y}-${M}-${D}`;
+  if(isDateOnly || clean.length === 8){
+    return { iso, time: null };
+  }
+  if(clean[8] !== 'T' || clean.length < 15) return { iso, time: null };
+  const hh = clean.slice(9, 11);
+  const mm = clean.slice(11, 13);
+  const isUTC = clean.endsWith('Z');
+
+  // Convert to user's local timezone if input is UTC or TZID-specified
+  if(isUTC){
+    const d = new Date(Date.UTC(+Y, +M-1, +D, +hh, +mm));
+    return toLocalIsoTime(d);
+  }
+  if(tzid){
+    // Approximate: find the UTC offset for this TZID at this date, then construct UTC Date
+    // This works for IANA zone names (America/New_York, Europe/London, etc.)
+    try {
+      const offsetMin = getTzOffsetMinutes(tzid, +Y, +M, +D, +hh, +mm);
+      const d = new Date(Date.UTC(+Y, +M-1, +D, +hh, +mm) - offsetMin * 60000);
+      return toLocalIsoTime(d);
+    } catch(e) {
+      // TZID not recognised — fall through to floating time
+    }
+  }
+  // Floating time (no Z, no TZID) — treat as if already local
+  return { iso, time: `${hh}:${mm}` };
+}
+
+// Helper: given a Date object, format as {iso: 'YYYY-MM-DD', time: 'HH:MM'} in local zone
+function toLocalIsoTime(d){
+  const localY = d.getFullYear();
+  const localM = String(d.getMonth()+1).padStart(2,'0');
+  const localD = String(d.getDate()).padStart(2,'0');
+  const localH = String(d.getHours()).padStart(2,'0');
+  const localMin = String(d.getMinutes()).padStart(2,'0');
+  return { iso: `${localY}-${localM}-${localD}`, time: `${localH}:${localMin}` };
+}
+
+// Helper: figure out what UTC offset an IANA timezone has at a given wall-clock moment.
+// Returns minutes east of UTC. Uses Intl.DateTimeFormat trick — works in all modern browsers.
+function getTzOffsetMinutes(tzid, Y, M, D, hh, mm){
+  // Build a Date pretending the wall time is UTC, then format it in the target zone
+  // and see how much it shifts.
+  const asUTC = new Date(Date.UTC(Y, M-1, D, hh, mm));
+  // Format target zone's wall clock for this instant
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: tzid, year:'numeric', month:'2-digit', day:'2-digit',
+    hour:'2-digit', minute:'2-digit', hour12:false,
+  });
+  const parts = {};
+  fmt.formatToParts(asUTC).forEach(p => { parts[p.type] = p.value; });
+  const targetY  = +parts.year;
+  const targetM  = +parts.month;
+  const targetD  = +parts.day;
+  const targetH  = +parts.hour === 24 ? 0 : +parts.hour;
+  const targetMi = +parts.minute;
+  const targetUTC = Date.UTC(targetY, targetM-1, targetD, targetH, targetMi);
+  return (targetUTC - asUTC.getTime()) / 60000;
+}
+
+// Unescape iCal text (RFC 5545 section 3.3.11)
+// IMPORTANT: order matters — \\ must be processed first, otherwise "\\n"
+// (literal backslash followed by n) would be misread as newline.
+function unescapeICS(s){
+  if(!s) return '';
+  // Use a placeholder to avoid double-processing
+  const PH = '\u0000UESC_BS\u0000';
+  return String(s)
+    .replace(/\\\\/g, PH)      // Escaped backslash → placeholder
+    .replace(/\\n/g, '\n')     // Literal newline
+    .replace(/\\N/g, '\n')
+    .replace(/\\,/g, ',')
+    .replace(/\\;/g, ';')
+    .replace(new RegExp(PH, 'g'), '\\'); // Placeholder → actual backslash
+}
+
+// ── Expand RRULE (minimal — handles DAILY/WEEKLY/MONTHLY/YEARLY) ──
+// Supports: FREQ, INTERVAL, COUNT, UNTIL, BYDAY (weekly only, most common)
+// Skipped: BYMONTHDAY, BYMONTH, BYSETPOS, EXDATE (rare, would need more code)
+// Expands only within ±windowDays around today so caches stay small.
+function expandEventToDateRange(event, windowDays = 180){
+  const today = new Date();
+  const past = new Date(today); past.setDate(past.getDate() - windowDays);
+  const future = new Date(today); future.setDate(today.getDate() + windowDays);
+
+  if(!event.rrule){
+    return [event];
+  }
+
+  const params = {};
+  event.rrule.split(';').forEach(p => {
+    const [k, v] = p.split('=');
+    if(k && v) params[k] = v;
+  });
+  const freq = params.FREQ;
+  if(!['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'].includes(freq)){
+    return [event];
+  }
+
+  const interval = parseInt(params.INTERVAL || '1', 10);
+  const until = params.UNTIL ? parseICSDate(params.UNTIL, false) : null;
+  const count = params.COUNT ? parseInt(params.COUNT, 10) : null;
+  // BYDAY — e.g. "MO,WE,FR" — for weekly events that fire on multiple days per week
+  const BY_DAY_MAP = { SU:0, MO:1, TU:2, WE:3, TH:4, FR:5, SA:6 };
+  const byDays = params.BYDAY
+    ? params.BYDAY.split(',').map(d => BY_DAY_MAP[d.replace(/^[+-]?\d+/,'')]).filter(v => v != null)
+    : null;
+
+  const baseDate = new Date(event.dateISO + 'T12:00:00');
+  const results = [];
+  let current = new Date(baseDate);
+  let iterations = 0;
+  const maxIter = 2000;
+
+  while(iterations < maxIter && current <= future){
+    // For WEEKLY with BYDAY: expand each week cycle to all specified weekdays
+    if(freq === 'WEEKLY' && byDays && byDays.length){
+      // Find start of this week's cycle (Sunday)
+      const weekStart = new Date(current);
+      weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+      for(const dayOfWeek of byDays){
+        const occ = new Date(weekStart);
+        occ.setDate(weekStart.getDate() + dayOfWeek);
+        if(occ < past || occ > future) continue;
+        if(occ < baseDate) continue; // don't emit before the original DTSTART
+        const iso = occ.getFullYear() + '-' +
+                    String(occ.getMonth()+1).padStart(2,'0') + '-' +
+                    String(occ.getDate()).padStart(2,'0');
+        if(until && iso > until.iso) continue;
+        results.push({ ...event, dateISO: iso });
+        if(count && results.length >= count) break;
+      }
+      if(count && results.length >= count) break;
+      current.setDate(current.getDate() + 7 * interval);
+    } else {
+      // Standard path — one occurrence per interval
+      if(current >= past){
+        const iso = current.getFullYear() + '-' +
+                    String(current.getMonth()+1).padStart(2,'0') + '-' +
+                    String(current.getDate()).padStart(2,'0');
+        if(until && iso > until.iso) break;
+        results.push({ ...event, dateISO: iso });
+        if(count && results.length >= count) break;
+      }
+      if(freq === 'DAILY')        current.setDate(current.getDate() + interval);
+      else if(freq === 'WEEKLY')  current.setDate(current.getDate() + 7 * interval);
+      else if(freq === 'MONTHLY') current.setMonth(current.getMonth() + interval);
+      else if(freq === 'YEARLY')  current.setFullYear(current.getFullYear() + interval);
+    }
+    iterations++;
+  }
+  // De-duplicate in case BYDAY + original DTSTART produced the same date
+  const seen = new Set();
+  return results.filter(r => {
+    if(seen.has(r.dateISO)) return false;
+    seen.add(r.dateISO);
+    return true;
+  });
+}
+
+// ── Fetch: try direct, fall back to proxy if configured ────────────────────
+async function fetchICSContent(feed){
+  if(feed.content){ return feed.content; }      // paste mode — already have it
+  if(!feed.url) throw new Error('No URL or pasted content for feed');
+
+  let fetchUrl = feed.url;
+  const proxy = feed.proxy || localStorage.getItem(CALFEEDS_PROXY) || '';
+  if(proxy){
+    // Append url param — supports corsproxy.io style and Worker style
+    fetchUrl = proxy.endsWith('=') || proxy.endsWith('?')
+      ? proxy + encodeURIComponent(feed.url)
+      : proxy + (proxy.includes('?') ? '&' : '?') + 'url=' + encodeURIComponent(feed.url);
+  }
+
+  const res = await fetch(fetchUrl, { cache: 'no-cache' });
+  if(!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.text();
+}
+
+// ── Sync a single feed: fetch + parse + store ──────────────────────────────
+async function syncCalFeed(feedId){
+  _loadCalFeeds();
+  const feed = _calFeeds.feeds.find(f => f.id === feedId);
+  if(!feed) throw new Error('Feed not found');
+
+  try {
+    const content = await fetchICSContent(feed);
+    const events = parseICS(content);
+    // Expand recurring events within window
+    const expanded = [];
+    events.forEach(e => {
+      expandEventToDateRange(e, 180).forEach(occ => expanded.push(occ));
+    });
+    feed.events = expanded;
+    feed.lastSync = Date.now();
+    feed.error = null;
+    _saveCalFeeds();
+    return { count: expanded.length };
+  } catch(err) {
+    feed.error = String(err.message || err).slice(0, 120);
+    feed.lastSync = Date.now();
+    _saveCalFeeds();
+    throw err;
+  }
+}
+
+// Sync all feeds in parallel, don't let one failure block others
+async function syncAllCalFeeds(){
+  _loadCalFeeds();
+  const results = await Promise.allSettled(
+    _calFeeds.feeds.map(f => syncCalFeed(f.id))
+  );
+  return results;
+}
+
+// ── CRUD: add/remove/update feeds ──────────────────────────────────────────
+function addCalFeed({label, url, proxy, content, color}){
+  _loadCalFeeds();
+  const id = 'cf_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+  const feed = {
+    id, label: label || 'Calendar',
+    color: color || '#3d8bcc',
+    url: url || null,
+    proxy: proxy || null,
+    content: content || null,
+    events: [],
+    lastSync: null,
+    visible: true,
+    error: null,
+  };
+  _calFeeds.feeds.push(feed);
+  _saveCalFeeds();
+  return feed;
+}
+
+function removeCalFeed(feedId){
+  _loadCalFeeds();
+  _calFeeds.feeds = _calFeeds.feeds.filter(f => f.id !== feedId);
+  _saveCalFeeds();
+}
+
+function toggleCalFeedVisibility(feedId){
+  _loadCalFeeds();
+  const f = _calFeeds.feeds.find(x => x.id === feedId);
+  if(f){ f.visible = !f.visible; _saveCalFeeds(); }
+}
+
+// ── Query: get events for a specific date (used by calendar view) ──────────
+function getCalFeedEventsForDate(isoDate){
+  _loadCalFeeds();
+  const out = [];
+  _calFeeds.feeds.forEach(feed => {
+    if(!feed.visible) return;
+    (feed.events || []).forEach(ev => {
+      if(ev.dateISO === isoDate){
+        out.push({ ...ev, feedId: feed.id, feedLabel: feed.label, feedColor: feed.color });
+      }
+    });
+  });
+  return out;
+}
+
+// Get all visible feed events (for list view / search)
+function getAllCalFeedEvents(){
+  _loadCalFeeds();
+  const out = [];
+  _calFeeds.feeds.forEach(feed => {
+    if(!feed.visible) return;
+    (feed.events || []).forEach(ev => {
+      out.push({ ...ev, feedId: feed.id, feedLabel: feed.label, feedColor: feed.color });
+    });
+  });
+  return out;
+}
+
+// ── UI: render the Settings panel section for managing feeds ───────────────
+function renderCalFeedsPanel(){
+  const panel = document.getElementById('calFeedsPanel');
+  if(!panel) return;
+  _loadCalFeeds();
+  const proxyDefault = localStorage.getItem(CALFEEDS_PROXY) || '';
+
+  const feedRows = _calFeeds.feeds.length
+    ? _calFeeds.feeds.map(f => {
+        const evCount = (f.events || []).length;
+        const lastSync = f.lastSync
+          ? new Date(f.lastSync).toLocaleString(undefined, {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})
+          : 'Never';
+        const status = f.error
+          ? `<span style="color:#e74c3c;font-size:10px">✕ ${esc(f.error)}</span>`
+          : `<span style="color:#2ecc71;font-size:10px">✓ ${evCount} events · ${lastSync}</span>`;
+        return `
+          <div class="calfeed-row" data-id="${f.id}">
+            <span class="calfeed-dot" style="background:${f.color}"></span>
+            <div class="calfeed-info">
+              <div class="calfeed-label">${esc(f.label)}</div>
+              ${status}
+            </div>
+            <button class="calfeed-btn" onclick="toggleCalFeedVisibility('${f.id}');renderCalFeedsPanel();if(typeof renderTaskList==='function')renderTaskList()" title="${f.visible?'Hide':'Show'}">${f.visible?'👁':'◎'}</button>
+            <button class="calfeed-btn" onclick="refreshCalFeed('${f.id}')" title="Refresh now">↻</button>
+            <button class="calfeed-btn calfeed-rm" onclick="confirmRemoveCalFeed('${f.id}')" title="Remove">×</button>
+          </div>`;
+      }).join('')
+    : '<div class="calfeed-empty">No calendars added yet</div>';
+
+  panel.innerHTML = `
+    <div class="calfeeds-list">${feedRows}</div>
+
+    <details class="calfeed-add-wrap">
+      <summary class="calfeed-add-toggle">+ Add Calendar Feed</summary>
+      <div class="calfeed-add-body">
+        <label class="calfeed-lbl">Label</label>
+        <input type="text" id="cfLabel" class="calfeed-in" placeholder="e.g. Work, Personal">
+
+        <label class="calfeed-lbl">Color</label>
+        <input type="color" id="cfColor" class="calfeed-color" value="#3d8bcc">
+
+        <div class="calfeed-mode-tabs">
+          <button class="calfeed-mode active" data-mode="paste" onclick="calFeedMode(this,'paste')">Paste .ics</button>
+          <button class="calfeed-mode" data-mode="url" onclick="calFeedMode(this,'url')">URL + Proxy</button>
+        </div>
+
+        <div id="cfPasteMode" class="calfeed-mode-panel">
+          <label class="calfeed-lbl">Paste the entire .ics file contents</label>
+          <textarea id="cfPasteContent" class="calfeed-ta" rows="6" placeholder="BEGIN:VCALENDAR..."></textarea>
+          <p class="calfeed-hint">Most private option. Download the .ics file from Google Calendar (Settings → your calendar → Export calendar), unzip, open in text editor, paste contents.</p>
+        </div>
+
+        <div id="cfUrlMode" class="calfeed-mode-panel" style="display:none">
+          <label class="calfeed-lbl">Secret iCal URL</label>
+          <input type="url" id="cfUrl" class="calfeed-in" placeholder="https://calendar.google.com/calendar/ical/.../private-.../basic.ics">
+
+          <label class="calfeed-lbl">CORS proxy URL (required for direct fetch)</label>
+          <input type="url" id="cfProxy" class="calfeed-in" value="${esc(proxyDefault)}" placeholder="https://your-name.workers.dev/?url=">
+          <p class="calfeed-hint">
+            Browsers block direct fetches from Google. Options:<br>
+            • <strong>Most private:</strong> <a href="#" onclick="showWorkerInstructions();return false">Deploy a free Cloudflare Worker (15 min)</a><br>
+            • <strong>Convenient:</strong> Use a public proxy like <code>https://corsproxy.io/?url=</code> — the operator CAN see your URL<br>
+            • <strong>Paste mode</strong> (left tab) has no proxy at all
+          </p>
+        </div>
+
+        <button class="btn-primary" style="margin-top:10px;width:100%" onclick="submitAddCalFeed()">Add Calendar</button>
+      </div>
+    </details>
+
+    <div class="calfeed-sync-row">
+      <button class="btn-ghost btn-sm" onclick="syncAllCalFeedsAndRerender()" ${_calFeeds.feeds.length?'':'disabled'}>↻ Refresh all</button>
+      <span class="calfeed-hint" style="font-size:10px">Auto-refresh runs on app open. Events cache locally for offline use.</span>
+    </div>
+
+    <div id="workerInstructions" class="calfeed-worker-panel" style="display:none">
+      <button class="btn-ghost btn-sm" onclick="document.getElementById('workerInstructions').style.display='none'" style="float:right">×</button>
+      <h4 style="margin-top:0">Deploy a personal CORS proxy (free, 15 min)</h4>
+      <ol style="font-size:11px;line-height:1.6;padding-left:18px;color:var(--text-3)">
+        <li>Sign up at <a href="https://dash.cloudflare.com" target="_blank">dash.cloudflare.com</a> (free)</li>
+        <li>Go to <strong>Workers & Pages</strong> → <strong>Create</strong> → <strong>Create Worker</strong></li>
+        <li>Name it (e.g. "ical-proxy"), click <strong>Deploy</strong></li>
+        <li>Click <strong>Edit code</strong>, replace the default with this:</li>
+      </ol>
+      <pre class="calfeed-code">export default {
+  async fetch(req) {
+    const url = new URL(req.url).searchParams.get('url');
+    if (!url) return new Response('Missing ?url param', {status: 400});
+    if (!url.startsWith('https://calendar.google.com/')) {
+      return new Response('Only calendar.google.com allowed', {status: 403});
+    }
+    const r = await fetch(url);
+    return new Response(await r.text(), {
+      status: r.status,
+      headers: {
+        'content-type': 'text/calendar',
+        'access-control-allow-origin': '*',
+        'cache-control': 'no-cache',
+      },
+    });
+  },
+};</pre>
+      <ol start="5" style="font-size:11px;line-height:1.6;padding-left:18px;color:var(--text-3)">
+        <li>Click <strong>Save and deploy</strong></li>
+        <li>Copy your Worker URL (looks like <code>ical-proxy.your-name.workers.dev</code>)</li>
+        <li>In STUPInD, paste it in the "CORS proxy URL" field above, appending <code>?url=</code></li>
+      </ol>
+      <p style="font-size:11px;color:var(--text-3)"><strong>Privacy note:</strong> This Worker only forwards requests to <code>calendar.google.com</code>. You're the only one using it. Cloudflare's free tier gives 100k requests/day, more than enough for personal use.</p>
+    </div>
+  `;
+}
+
+// Wire up mode tabs in the add-feed form
+function calFeedMode(btn, mode){
+  document.querySelectorAll('.calfeed-mode').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('cfPasteMode').style.display = mode === 'paste' ? '' : 'none';
+  document.getElementById('cfUrlMode').style.display = mode === 'url' ? '' : 'none';
+}
+
+function showWorkerInstructions(){
+  const el = document.getElementById('workerInstructions');
+  if(el) el.style.display = '';
+}
+
+// Form submission handler
+async function submitAddCalFeed(){
+  const label = document.getElementById('cfLabel').value.trim() || 'Calendar';
+  const color = document.getElementById('cfColor').value || '#3d8bcc';
+  const pasteActive = document.querySelector('.calfeed-mode.active')?.dataset.mode === 'paste';
+
+  let feed;
+  if(pasteActive){
+    const content = document.getElementById('cfPasteContent').value.trim();
+    if(!content.includes('BEGIN:VCALENDAR')){
+      alert('That doesn\'t look like an .ics file. It should start with BEGIN:VCALENDAR.');
+      return;
+    }
+    feed = addCalFeed({ label, color, content });
+  } else {
+    const url = document.getElementById('cfUrl').value.trim();
+    const proxy = document.getElementById('cfProxy').value.trim();
+    if(!url){ alert('URL is required'); return; }
+    if(!proxy){
+      if(!confirm('No proxy set — direct fetch will likely fail due to browser CORS restrictions. Continue anyway?')) return;
+    } else {
+      // Remember proxy as default for next time
+      try { localStorage.setItem(CALFEEDS_PROXY, proxy); } catch(e) {}
+    }
+    feed = addCalFeed({ label, color, url, proxy });
+  }
+
+  // Initial sync
+  try {
+    const result = await syncCalFeed(feed.id);
+    renderCalFeedsPanel();
+    if(typeof renderTaskList === 'function') renderTaskList();
+    alert(`✓ Loaded ${result.count} events from ${label}`);
+  } catch(err) {
+    renderCalFeedsPanel();
+    alert(`Feed added but sync failed: ${err.message}\n\nCheck the URL and proxy settings, then hit ↻ to retry.`);
+  }
+}
+
+async function refreshCalFeed(feedId){
+  try {
+    const r = await syncCalFeed(feedId);
+    renderCalFeedsPanel();
+    if(typeof renderTaskList === 'function') renderTaskList();
+  } catch(err) {
+    renderCalFeedsPanel();
+    alert('Sync failed: ' + err.message);
+  }
+}
+
+async function syncAllCalFeedsAndRerender(){
+  await syncAllCalFeeds();
+  renderCalFeedsPanel();
+  if(typeof renderTaskList === 'function') renderTaskList();
+}
+
+function confirmRemoveCalFeed(feedId){
+  _loadCalFeeds();
+  const f = _calFeeds.feeds.find(x => x.id === feedId);
+  if(!f) return;
+  if(confirm(`Remove "${f.label}"? This only removes it from STUPInD — your actual calendar is unaffected.`)){
+    removeCalFeed(feedId);
+    renderCalFeedsPanel();
+    if(typeof renderTaskList === 'function') renderTaskList();
+  }
+}
+
+// Auto-sync all feeds on app start (non-blocking, errors silent)
+function autoSyncCalFeedsOnBoot(){
+  _loadCalFeeds();
+  if(!_calFeeds.feeds.length) return;
+  // Only auto-sync feeds with URLs (paste-mode feeds don't need fetching)
+  const fetchable = _calFeeds.feeds.filter(f => f.url);
+  if(!fetchable.length) return;
+  setTimeout(async () => {
+    await syncAllCalFeeds();
+    renderCalFeedsPanel();
+    if(typeof renderTaskList === 'function') renderTaskList();
+  }, 2000); // let the app finish rendering first
+}
