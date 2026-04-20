@@ -1,5 +1,5 @@
 // ── App version — bumped on each release ───────────────────────────────────
-const APP_VERSION = 'v22';
+const APP_VERSION = 'v24';
 const APP_BUILD_DATE = '2026-04-20';
 
 // ── Persistent storage — protects task data from "Clear browsing history" ──
@@ -202,6 +202,7 @@ runV16Migration();
 
 // ========== INIT ==========
 loadState();
+if(typeof ensureClassificationConfig==='function') ensureClassificationConfig(cfg);
 ensureDefaultList();
 setTimeout(() => {
   if(typeof embedStore !== 'undefined' && embedStore.cleanOrphans){
@@ -223,6 +224,8 @@ setTimeout(() => {
   } catch(e) {}
 })();
 setPhaseTime();
+if(typeof restoreTaskToolbarPrefs==='function') restoreTaskToolbarPrefs();
+if(typeof refreshClassificationUi==='function') refreshClassificationUi();
 renderAll();
 renderLog();
 renderGoalList();
@@ -235,6 +238,7 @@ if(gid('groupBySel'))gid('groupBySel').value=taskGroupBy;
 applyTheme();
 setTaskView(taskView);
 setSmartView(smartView);
+if(typeof hydrateIcons==='function') hydrateIcons();
 updateMiniTimer();
 // Apply saved active tab without scroll
 document.querySelectorAll('[data-tab]').forEach(el=>{el.style.display=el.dataset.tab===activeTab?'':'none'});
