@@ -3,10 +3,15 @@
 // PeerJS cloud only handles the initial handshake (SDP/ICE exchange).
 // After that, data flows device-to-device via RTCDataChannel.
 
-// Peer IDs keep stupind- prefix so existing paired devices stay compatible.
-const SYNC_PEER_KEY = 'stupind_peer_id';
-const SYNC_ROOM_KEY = 'stupind_sync_room';
-const SYNC_VERSION  = 1;
+// Peer ID format: `stupind-<6 alphanumeric>` (never includes "stu" as suffix).
+// Displayed as `STU-XXX-XXX` where the first "STU" is branding only.
+// A legacy v1 bug produced 9-char ids starting with "stu" (the brand accidentally
+// embedded in the id), rendered as "STU-STU-XXXXXX". We migrate those on boot.
+const SYNC_PEER_KEY    = 'stupind_peer_id_v2'; // cleaned format
+const SYNC_PEER_KEY_V1 = 'stupind_peer_id';    // legacy — detected & migrated
+const SYNC_ROOM_KEY    = 'stupind_sync_room';
+const SYNC_VERSION     = 1;
+const CODE_ALPHABET    = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Crockford-ish, no 0/O/1/I
 
 let _peer        = null;   // PeerJS instance
 let _conn        = null;   // active DataConnection
@@ -14,14 +19,21 @@ let _syncEnabled = false;
 let _syncStatus  = 'off';  // 'off' | 'waiting' | 'connected' | 'error'
 let _myRoomCode  = null;
 let _lastSyncAt  = null;
+let _connectTimeoutId = null;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 function _genCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
-  for (let i = 0; i < 6; i++) code += chars[Math.floor(Math.random() * chars.length)];
-  return 'STU-' + code.slice(0,3) + '-' + code.slice(3);
+  for (let i = 0; i < 6; i++) code += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+  return code.slice(0,3) + '-' + code.slice(3); // e.g. "AB3-C9D"
+}
+
+function _genPeerId() {
+  // 6 random chars → stable peer id. No "stu" baked in.
+  let s = '';
+  for (let i = 0; i < 6; i++) s += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+  return 'stupind-' + s.toLowerCase();
 }
 
 function _setSyncStatus(status, msg) {
@@ -41,13 +53,43 @@ function _setSyncStatus(status, msg) {
   if (dot) dot.className = 'sync-dot sync-dot--' + status;
 }
 
+/** Normalize input: uppercase, strip whitespace/dashes, tolerate legacy "STU…" prefix. */
+function _normalizeCode(code) {
+  const raw = String(code || '').toUpperCase().replace(/[\s-]/g, '');
+  // Legacy codes were displayed as "STU-STU-XXXXXX" — 9 letters after stripping
+  // dashes and starting with "STU". Drop the accidental STU prefix so we land on
+  // the actual 6-char id suffix.
+  if (raw.length === 9 && raw.startsWith('STU')) return raw.slice(3);
+  return raw;
+}
+
 function _codeToId(code) {
-  return 'stupind-' + code.replace(/-/g, '').toLowerCase();
+  const suffix = _normalizeCode(code);
+  return 'stupind-' + suffix.toLowerCase();
 }
 
 function _idToCode(id) {
-  const raw = id.replace('stupind-', '').toUpperCase();
-  return 'STU-' + raw.slice(0,3) + '-' + raw.slice(3);
+  const raw = String(id || '').replace(/^stupind-/, '').toUpperCase();
+  // Display legacy 9-char ids (starting with STU) as clean "STU-XXX-XXX" too —
+  // the embedded STU is branding noise, not an address component.
+  const suffix = (raw.length === 9 && raw.startsWith('STU')) ? raw.slice(3) : raw;
+  if (suffix.length === 6) return 'STU-' + suffix.slice(0,3) + '-' + suffix.slice(3);
+  // Any other length: best-effort symmetric split (shouldn't happen post-migration)
+  const half = Math.ceil(suffix.length / 2);
+  return 'STU-' + suffix.slice(0, half) + '-' + suffix.slice(half);
+}
+
+/** True if the code parses to a 6-char suffix (the only shape we should ever accept). */
+function _isValidCode(code) {
+  const n = _normalizeCode(code);
+  return n.length === 6 && [...n].every(c => CODE_ALPHABET.includes(c));
+}
+
+/** True if the stored peer id is a legacy "stupind-stuXXXXXX" entry (double-STU bug). */
+function _isLegacyPeerId(id) {
+  if (!id) return false;
+  const suffix = id.replace(/^stupind-/, '').toLowerCase();
+  return suffix.length === 9 && suffix.startsWith('stu');
 }
 
 // ── PeerJS loader (CDN, lazy) ────────────────────────────────────────────────
@@ -159,17 +201,50 @@ function _wireConn(conn) {
 
   conn.on('close', () => {
     _conn = null;
-    _setSyncStatus('waiting');
+    // Don't stomp on a more-specific error message (e.g. "Code not found")
+    // that we just set from _peer.on('error', 'peer-unavailable').
+    if (_syncStatus !== 'error') _setSyncStatus('waiting');
   });
 
   conn.on('error', (err) => {
     console.warn('[sync] conn error', err);
     _conn = null;
-    _setSyncStatus('error', err.type || 'Connection failed');
+    if (_connectTimeoutId) { clearTimeout(_connectTimeoutId); _connectTimeoutId = null; }
+    _setSyncStatus('error', (err && (err.type || err.message)) || 'Connection failed');
   });
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
+
+/**
+ * Resolve our stable peer id. Migrates the legacy double-STU form
+ * (`stupind-stuXXXXXX`) to a fresh clean 6-char id, and clears any stored
+ * room code (the pairing relationship is no longer reachable from this side
+ * once our id rotates — re-pair by typing the other device's new code).
+ */
+function _resolvePeerId() {
+  let saved = null;
+  try { saved = localStorage.getItem(SYNC_PEER_KEY); } catch(e) {}
+
+  if (!saved) {
+    // One-time migration: pull v1 id, check if it's the buggy double-STU form,
+    // and if so mint a new one. Otherwise keep the v1 id — it was valid.
+    let legacy = null;
+    try { legacy = localStorage.getItem(SYNC_PEER_KEY_V1); } catch(e) {}
+    if (legacy && !_isLegacyPeerId(legacy)) {
+      saved = legacy;
+    } else if (legacy && _isLegacyPeerId(legacy)) {
+      saved = _genPeerId();
+      // Legacy pairing partner references the old id, so forget the room.
+      try { localStorage.removeItem(SYNC_ROOM_KEY); } catch(e) {}
+      console.info('[sync] migrated legacy peer id — re-pair required');
+    } else {
+      saved = _genPeerId();
+    }
+    try { localStorage.setItem(SYNC_PEER_KEY, saved); } catch(e) {}
+  }
+  return saved;
+}
 
 async function syncInit() {
   if (_peer) return;
@@ -179,14 +254,7 @@ async function syncInit() {
   try { Peer = await _loadPeerJS(); }
   catch(e) { _setSyncStatus('error', 'PeerJS unavailable'); return; }
 
-  // Reuse stable peer ID derived from stored room code, or generate new
-  let myId;
-  try {
-    const saved = localStorage.getItem(SYNC_PEER_KEY);
-    myId = saved || ('stupind-' + _genCode().replace(/-/g,'').toLowerCase());
-    localStorage.setItem(SYNC_PEER_KEY, myId);
-  } catch(e) { myId = 'stupind-' + _genCode().replace(/-/g,'').toLowerCase(); }
-
+  const myId = _resolvePeerId();
   _myRoomCode = _idToCode(myId);
 
   const codeEl = document.getElementById('syncMyCode');
@@ -197,6 +265,7 @@ async function syncInit() {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun.cloudflare.com:3478' },
       ]
     }
   });
@@ -217,50 +286,96 @@ async function syncInit() {
 
   _peer.on('error', (err) => {
     console.warn('[sync] peer error', err);
-    if (err.type === 'unavailable-id') {
-      // ID taken — generate new one
-      localStorage.removeItem(SYNC_PEER_KEY);
+    const t = err && err.type;
+    if (t === 'unavailable-id') {
+      // Our own id is already registered — mint a new one.
+      try { localStorage.removeItem(SYNC_PEER_KEY); } catch(e) {}
       _peer = null;
       syncInit();
-    } else {
-      _setSyncStatus('error', err.type || 'Peer error');
+      return;
     }
+    if (t === 'peer-unavailable') {
+      // Target we were trying to connect to doesn't exist on the broker.
+      // Cancel the connect timeout and show a clean specific message.
+      if (_connectTimeoutId) { clearTimeout(_connectTimeoutId); _connectTimeoutId = null; }
+      _setSyncStatus('error', 'Code not found — device is offline or the code is mistyped');
+      return;
+    }
+    if (t === 'network' || t === 'server-error' || t === 'socket-error' || t === 'socket-closed') {
+      _setSyncStatus('error', 'Lost connection to matchmaking server — check internet');
+      return;
+    }
+    if (t === 'browser-incompatible') {
+      _setSyncStatus('error', 'Browser does not support WebRTC data channels');
+      return;
+    }
+    _setSyncStatus('error', t || (err && err.message) || 'Peer error');
   });
 
   _peer.on('disconnected', () => {
     _setSyncStatus('waiting');
-    _peer.reconnect();
+    try { _peer.reconnect(); } catch(e) {}
   });
 }
 
 function syncConnect(code) {
   if (!_peer) { syncInit().then(() => syncConnect(code)); return; }
-  const targetId = _codeToId(code.trim().toUpperCase());
-  if (targetId === _peer.id) return; // can't connect to self
+  if (!_isValidCode(code)) {
+    _setSyncStatus('error', 'Invalid code — expected 6 letters/digits after STU-');
+    return;
+  }
+  const targetId = _codeToId(code);
+  if (targetId === _peer.id) {
+    _setSyncStatus('error', "That's this device's own code");
+    return;
+  }
   _setSyncStatus('connecting');
+
+  // If we have a stale dead connection, drop it before making a new one.
+  if (_conn) { try { _conn.close(); } catch(e) {} _conn = null; }
+
   const conn = _peer.connect(targetId, { reliable: true });
 
-  // Timeout guard: if connection doesn't open in 15s, most likely cause is
-  // NAT traversal failure (symmetric NAT on cellular, aggressive firewall,
-  // target device offline, or wrong code). Show specific message.
-  const timeoutId = setTimeout(() => {
+  // Two failure modes:
+  //   (a) Target isn't registered on broker → _peer.on('error') fires
+  //       `peer-unavailable` within ~1s (handled above; clears this timeout).
+  //   (b) Target is registered but NAT traversal fails → no error ever fires,
+  //       the data channel just never opens. 20s is generous for ICE gathering
+  //       but still snappy enough to be usable feedback.
+  if (_connectTimeoutId) clearTimeout(_connectTimeoutId);
+  _connectTimeoutId = setTimeout(() => {
+    _connectTimeoutId = null;
     if (conn && !conn.open) {
       try { conn.close(); } catch(e) {}
       _setSyncStatus('error',
-        'Could not connect. Common causes: the other device is offline, ' +
-        'the code is wrong, or one device is on a cellular network where ' +
-        'peer-to-peer is blocked. Try again on the same WiFi network.');
+        'No response — the other device may be on a different network ' +
+        '(cellular or restrictive firewall can block peer-to-peer). ' +
+        'Try again on the same WiFi network.');
     }
-  }, 15000);
+  }, 20000);
 
-  // Clear timeout when connection opens or errors (handlers stack with _wireConn's)
-  conn.on('open', () => clearTimeout(timeoutId));
-  conn.on('error', () => clearTimeout(timeoutId));
+  conn.on('open', () => {
+    if (_connectTimeoutId) { clearTimeout(_connectTimeoutId); _connectTimeoutId = null; }
+  });
+  conn.on('error', () => {
+    if (_connectTimeoutId) { clearTimeout(_connectTimeoutId); _connectTimeoutId = null; }
+  });
 
   _wireConn(conn);
 }
 
+/** Mint a fresh peer id (escape hatch if pairing is stuck on a bad code). */
+function syncRegenerateCode() {
+  try { localStorage.removeItem(SYNC_PEER_KEY); } catch(e) {}
+  try { localStorage.removeItem(SYNC_ROOM_KEY); } catch(e) {}
+  if (_conn) { try { _conn.close(); } catch(e) {} _conn = null; }
+  if (_peer) { try { _peer.destroy(); } catch(e) {} _peer = null; }
+  _setSyncStatus('loading');
+  syncInit().then(() => renderSyncPanel());
+}
+
 function syncDisconnect() {
+  if (_connectTimeoutId) { clearTimeout(_connectTimeoutId); _connectTimeoutId = null; }
   if (_conn) { try { _conn.close(); } catch(e) {} _conn = null; }
   if (_peer) { try { _peer.destroy(); } catch(e) {} _peer = null; }
   try { localStorage.removeItem(SYNC_ROOM_KEY); } catch(e) {}
@@ -322,21 +437,55 @@ function renderSyncPanel() {
       <div class="sync-my-code-block">
         <label>Your code</label>
         <div class="sync-code" id="syncMyCode">${_myRoomCode || '…'}</div>
-        <button class="btn-ghost btn-sm" onclick="navigator.clipboard?.writeText(document.getElementById('syncMyCode')?.textContent||'')">Copy</button>
+        <div class="sync-code-actions">
+          <button class="btn-ghost btn-sm" onclick="navigator.clipboard?.writeText(document.getElementById('syncMyCode')?.textContent||'')">Copy</button>
+          <button class="btn-ghost btn-sm" onclick="syncRegenerateCode()" title="Mint a new pairing code (unpairs this device)">Regenerate</button>
+        </div>
       </div>
       <div class="sync-connect-block">
         <label>Connect to device</label>
         <div class="sync-input-row">
-          <input id="syncCodeInput" type="text" placeholder="STU-XXX-XXX" maxlength="12"
-                 oninput="this.value=this.value.toUpperCase()"
+          <input id="syncCodeInput" type="text" placeholder="STU-XXX-XXX" maxlength="11"
+                 autocomplete="off" autocapitalize="characters" spellcheck="false"
+                 oninput="syncOnCodeInput(this)"
                  onkeydown="if(event.key==='Enter')syncConnectFromInput()">
-          <button class="btn-primary btn-sm" onclick="syncConnectFromInput()">Connect</button>
+          <button class="btn-primary btn-sm" id="syncConnectBtn" onclick="syncConnectFromInput()" disabled>Connect</button>
         </div>
+        <div class="sync-input-hint" id="syncInputHint">Enter the 6-character code shown on the other device (e.g. <code>STU-AB3-C9D</code>).</div>
       </div>
       <button class="btn-ghost btn-sm sync-disable" onclick="syncDisconnect()">Disable sync</button>
     </div>`;
 
   _setSyncStatus(_syncStatus);
+}
+
+/** Live validation + auto-format while typing a pairing code. */
+function syncOnCodeInput(el) {
+  if (!el) return;
+  // Strip anything that isn't a code letter or a dash, uppercase as we go.
+  let raw = String(el.value || '').toUpperCase().replace(/[^A-Z0-9-]/g, '');
+  // Collapse multiple dashes and trim leading/trailing
+  raw = raw.replace(/-+/g, '-').replace(/^-|-$/g, '');
+  el.value = raw;
+  const btn = document.getElementById('syncConnectBtn');
+  const hint = document.getElementById('syncInputHint');
+  const ok = _isValidCode(raw);
+  if (btn) btn.disabled = !ok;
+  if (hint) {
+    if (!raw) {
+      hint.textContent = 'Enter the 6-character code shown on the other device (e.g. STU-AB3-C9D).';
+      hint.classList.remove('sync-input-hint--err');
+    } else if (!ok) {
+      const n = _normalizeCode(raw).length;
+      hint.textContent = n < 6
+        ? `Keep typing — ${n}/6 characters so far.`
+        : 'Too long — pairing codes are 6 letters/digits after STU-.';
+      hint.classList.add('sync-input-hint--err');
+    } else {
+      hint.textContent = 'Ready — press Connect.';
+      hint.classList.remove('sync-input-hint--err');
+    }
+  }
 }
 
 function syncEnable() {
@@ -347,6 +496,9 @@ function syncEnable() {
 
 function syncConnectFromInput() {
   const val = (document.getElementById('syncCodeInput')?.value || '').trim();
-  if (val.length < 6) return;
+  if (!_isValidCode(val)) {
+    _setSyncStatus('error', 'Invalid code — expected 6 letters/digits after STU-');
+    return;
+  }
   syncConnect(val);
 }

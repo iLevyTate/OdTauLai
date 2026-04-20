@@ -48,7 +48,7 @@
       console.warn('External sw.js failed, falling back to inline SW:', err);
       // Fallback: inline SW via blob URL
       const swCode = `
-        const CACHE = 'odtaulai-v22-inline';
+        const CACHE = 'odtaulai-v24-inline';
         self.addEventListener('install', e => self.skipWaiting());
         self.addEventListener('activate', e => e.waitUntil(clients.claim()));
         self.addEventListener('fetch', e => {
@@ -90,16 +90,16 @@
     window._deferredInstallPrompt = e;
     document.addEventListener('DOMContentLoaded', () => {
       const btn = document.getElementById('installBtn');
-      if (btn) btn.style.display = '';
+      if (btn) btn.classList.remove('u-hidden');
     });
     const btn = document.getElementById('installBtn');
-    if (btn) btn.style.display = '';
+    if (btn) btn.classList.remove('u-hidden');
     if (typeof window.refreshPWAInstallUI === 'function') window.refreshPWAInstallUI();
   });
   window.addEventListener('appinstalled', () => {
     window._deferredInstallPrompt = null;
     const btn = document.getElementById('installBtn');
-    if (btn) btn.style.display = 'none';
+    if (btn) btn.classList.add('u-hidden');
     const status = document.getElementById('pwaStatus');
     if (status) status.textContent = '✓ Installed as app';
   });
@@ -120,19 +120,19 @@
     const status = document.getElementById('pwaStatus');
     if (!btn) return;
     if (window._deferredInstallPrompt) {
-      btn.style.display = '';
+      btn.classList.remove('u-hidden');
       btn.textContent = '＋ Install';
       if (status) status.textContent = 'Ready to install';
       return;
     }
     if (_isIOS()) {
-      btn.style.display = '';
+      btn.classList.remove('u-hidden');
       btn.textContent = '＋ Add to Home Screen';
       if (status) status.textContent = 'iOS: tap for steps — Share → Add to Home Screen';
       return;
     }
     if (/Android/i.test(navigator.userAgent)) {
-      btn.style.display = '';
+      btn.classList.remove('u-hidden');
       btn.textContent = '＋ Install app';
       if (status) status.textContent = 'Android: tap for tips, or Chrome ⋮ → Install app';
     }
@@ -144,7 +144,7 @@
       window._deferredInstallPrompt.userChoice.then(() => {
         window._deferredInstallPrompt = null;
         const btn = document.getElementById('installBtn');
-        if (btn) btn.style.display = 'none';
+        if (btn) btn.classList.add('u-hidden');
       });
       return;
     }

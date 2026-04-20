@@ -15,6 +15,7 @@ function toggleSettings(){
     body.style.overflowY='';
   }
   if(arrow)arrow.style.transform=settingsOpen?'rotate(180deg)':'';
+  if(settingsOpen&&typeof renderClassificationSettings==='function')renderClassificationSettings();
 }
 function _reflowSettingsIfOpen(){
   if(!settingsOpen)return;
@@ -35,7 +36,7 @@ let startedAt=0,pausedRemaining=0,tickId=null;
 let sessionHistory=[],intervals=[],intIdCtr=0,fireCounts={},lastFlash=null,lastTickSec=-1;
 let tasks=[],taskIdCtr=0,activeTaskId=null,taskStartedAt=null,subtaskPromptParent=null;
 let lists=[],listIdCtr=0,activeListId=null;
-let taskFilters={search:'',status:'all',priority:'all',category:'all'};
+let taskFilters={search:'',status:'all',priority:'all',category:'all',showDone:false};
 let taskSortBy='smart',taskView='list',editingTaskId=null,smartView='all';
 let taskGroupBy='none',calMonth=null,theme='dark';
 let collapsedSections={};
@@ -53,10 +54,13 @@ function getPL(p){return p==='work'?'Focus':p==='short'?'Short Break':'Long Brea
 function switchPhase(p){if(running)return;phase=p;finished=false;fireCounts={};setPhaseTime();renderAll()}
 function setPhaseTime(){totalDuration=getPS(phase);remaining=totalDuration;pausedRemaining=totalDuration}
 function renderAll(){
-  gid('mainCard').style.background=getPBg(phase);gid('mainCard').style.borderColor=getPBd(phase);
+  const card=gid('mainCard');
+  card.classList.remove('ring-card--work','ring-card--short','ring-card--long');
+  card.classList.add('ring-card','ring-card--'+phase);
+  card.style.background='';card.style.borderColor='';
   gid('ringFg').setAttribute('stroke',getPC(phase));gid('ringFg').setAttribute('stroke-dashoffset','0');
-  gid('display').textContent=fmt(remaining);gid('display').style.color=getPC(phase);gid('display').className='ring-time';
-  gid('phaseLabel').textContent=getPL(phase);gid('phaseLabel').style.color=getPC(phase);
+  gid('display').textContent=fmt(remaining);gid('display').style.color='';gid('display').className='ring-time';
+  gid('phaseLabel').textContent=getPL(phase);gid('phaseLabel').style.color='';
   document.querySelectorAll('.tab').forEach(t=>t.className='tab');
   document.querySelectorAll('.tab')[phase==='work'?0:phase==='short'?1:2].classList.add('active',phase==='work'?'work':phase==='short'?'short':'long');
   renderPips();renderCtrls();renderStats();renderTaskList();renderGoalList();renderArchive();updateTitle();updateMiniTimer()
@@ -108,7 +112,7 @@ function resetAll(){running=false;finished=false;clearInterval(tickId);cancelSch
 // ========== STOPWATCH ==========
 function swToggle(){if(swRunning){swRunning=false;swPausedEl+=Date.now()-swStartTime;gid('swStartBtn').textContent='Resume';gid('swStartBtn').className='btn btn-primary';maybeStopKeepalive()}else{swRunning=true;swStartTime=Date.now();clearInterval(swTickId);swTickId=setInterval(swTick,100);gid('swStartBtn').textContent='Pause';gid('swStartBtn').className='btn btn-pause';startKeepalive()}}
 function swTick(){if(!swRunning)return;swElapsed=swPausedEl+Date.now()-swStartTime;gid('swDisplay').textContent=fmtHMS(Math.floor(swElapsed/1000))}
-function swLap(){if(swElapsed<=0)return;const s=Math.floor(swElapsed/1000),d=document.createElement('div');d.style.cssText='font-size:10px;color:#5a8ab5;padding:4px 8px;background:#0a1320;border-radius:4px;display:flex;justify-content:space-between';d.innerHTML='<span>Lap '+(swLapList.length+1)+'</span><span>'+fmtHMS(s)+'</span>';gid('swLaps').prepend(d);swLapList.push(s)}
+function swLap(){if(swElapsed<=0)return;const s=Math.floor(swElapsed/1000),d=document.createElement('div');d.className='swlap-row';d.innerHTML='<span>Lap '+(swLapList.length+1)+'</span><span>'+fmtHMS(s)+'</span>';gid('swLaps').prepend(d);swLapList.push(s)}
 function swReset(){swRunning=false;swElapsed=0;swPausedEl=0;swLapList=[];clearInterval(swTickId);gid('swDisplay').textContent='00:00:00';gid('swStartBtn').textContent='Start';gid('swStartBtn').className='btn btn-primary';gid('swLaps').innerHTML=''}
 
 // ========== QUICK TIMERS ==========
@@ -255,4 +259,11 @@ function addInterval(){const m=parseInt(gid('intMin').value)||0,s=parseInt(gid('
 function removeInterval(id){intervals=intervals.filter(i=>i.id!==id);delete fireCounts[id];renderIntList();if(running)schedulePhaseAudio();saveState('user')}
 function flashInt(id){lastFlash=id;setTimeout(()=>{if(lastFlash===id){lastFlash=null;renderIntList()}},600);renderIntList()}
 function renderIntList(){const list=gid('intList');gid('intCount').textContent=intervals.length+' set';list.querySelectorAll('.iitem').forEach(e=>e.remove());if(!intervals.length){gid('intEmpty').style.display='';return}gid('intEmpty').style.display='none';const totalEl=totalDuration-remaining;intervals.forEach(iv=>{const fires=fireCounts[iv.id]||0,fl=lastFlash===iv.id,next=(fires+1)*iv.intervalSec-totalEl;const d=document.createElement('div');d.className='iitem'+(fl?' flash':'');d.innerHTML='<div class="idot'+(fl?' flash':fires>0?' active':'')+'"></div><div class="iinfo"><div class="iname">'+esc(iv.label)+'</div><div class="imeta">⟳ every '+fmt(iv.intervalSec)+' · '+CHL[iv.chime]+'</div></div>'+(running||finished?'<div class="istat"><div class="ifires'+(fl?' flash':'')+'">'+fires+'×</div>'+(next>0&&running?'<div class="inext">next '+fmt(next)+'</div>':'')+'</div>':'')+'<button class="irm" onclick="removeInterval('+iv.id+')">×</button>';list.appendChild(d)})}
+
+(function(){
+  const sb = typeof gid === 'function' ? gid('settingsBody') : null;
+  if(sb) sb.addEventListener('toggle', e => {
+    if(e.target && e.target.classList && e.target.classList.contains('set-section')) _reflowSettingsIfOpen();
+  }, true);
+})();
 

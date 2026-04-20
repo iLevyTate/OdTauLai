@@ -105,10 +105,16 @@
       title + body + '</svg>';
   }
 
-  /** Icon for a life-category key (or null if unknown). */
+  /** Icon for a life-category key (custom defs via resolveCategoryIconKey). */
   function categoryIcon(key, opts){
+    if(!key) return '';
+    if(typeof window.resolveCategoryIconKey === 'function'){
+      const name = window.resolveCategoryIconKey(key);
+      if(name && P[name]) return icon(name, opts);
+    }
     const k = CATEGORY_ICON[key];
-    return k ? icon(k, opts) : '';
+    if(k) return icon(k, opts);
+    return icon('pin', opts);
   }
 
   /**

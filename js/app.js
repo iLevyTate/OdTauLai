@@ -1,5 +1,5 @@
 // ── App version — bumped on each release ───────────────────────────────────
-const APP_VERSION = 'v22';
+const APP_VERSION = 'v24';
 const APP_BUILD_DATE = '2026-04-20';
 
 // ── Persistent storage — protects task data from "Clear browsing history" ──
@@ -36,9 +36,9 @@ function updateOnlineStatus(){
   const el = document.getElementById('onlineStatus');
   if(!el) return;
   if(navigator.onLine){
-    el.style.display = 'none';
+    el.classList.add('u-hidden');
   } else {
-    el.style.display = '';
+    el.classList.remove('u-hidden');
     el.textContent = '● Offline — tasks work, sync paused';
   }
 }
@@ -112,7 +112,7 @@ function renderArchive(){
     const d=document.createElement('div');d.className='hist-day';d.onclick=function(){this.classList.toggle('open')};
     d.innerHTML=`<div class="hist-day-hdr"><span class="hist-day-date">${prettyDate(a.date)}</span><div class="hist-day-stats"><div class="hist-day-stat"><span style="color:var(--work)">${a.totalPomos||0}</span> sessions</div><div class="hist-day-stat"><span style="color:var(--long)">${fmtShort(a.totalFocusSec||0)}</span></div>${totalG?`<div class="hist-day-stat"><span style="color:var(--short)">${doneG}/${totalG}</span> goals</div>`:''}</div></div>`
       +`<div class="hist-day-detail">`
-      +(a.goals&&a.goals.length?`<div class="hist-day-section"><div class="hist-day-section-title">Goals</div>${a.goals.map(g=>`<div class="hist-goal">${g.done?'✓':'○'} ${esc(g.text)}${g.doneAt?' <span style="color:#2a3a4a">('+g.doneAt+')</span>':''}</div>`).join('')}</div>`:'')
+      +(a.goals&&a.goals.length?`<div class="hist-day-section"><div class="hist-day-section-title">Goals</div>${a.goals.map(g=>`<div class="hist-goal">${g.done?'✓':'○'} ${esc(g.text)}${g.doneAt?' <span class="hist-goal-time">('+g.doneAt+')</span>':''}</div>`).join('')}</div>`:'')
       +(a.tasks&&a.tasks.length?`<div class="hist-day-section"><div class="hist-day-section-title">Tasks</div>${a.tasks.map(t=>`<div class="hist-task">${esc(t.name)}: ${fmtHMS(t.totalSec||0)} (${t.sessions||0} sessions)</div>`).join('')}</div>`:'')
       +(a.timeLog&&a.timeLog.length?`<div class="hist-day-section"><div class="hist-day-section-title">Session Log</div>${a.timeLog.slice().reverse().slice(0,20).map(l=>`<div class="hist-log">${l.time} — ${esc(l.name)} (${fmtShort(l.durSec)})</div>`).join('')}</div>`:'')
       +`</div>`;
@@ -171,7 +171,7 @@ function exportFile(format){
   const blob=new Blob([content],{type:'text/plain'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='odtaulai-'+todayKey()+'.'+ext;a.click();URL.revokeObjectURL(a.href);
 }
-function exportClipboard(){const content=buildReport('txt');navigator.clipboard.writeText(content).then(()=>{const btn=document.querySelector('.export-clip');const orig=btn.textContent;btn.textContent='Copied!';btn.style.color='#2ecc71';btn.style.borderColor='#1a4a2a';setTimeout(()=>{btn.textContent=orig;btn.style.color='';btn.style.borderColor=''},1500)}).catch(()=>{const ta=document.createElement('textarea');ta.value=content;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta)})}
+function exportClipboard(){const content=buildReport('txt');navigator.clipboard.writeText(content).then(()=>{const btn=document.querySelector('.export-clip');const orig=btn.textContent;btn.textContent='Copied!';btn.classList.add('export-clip--copied');setTimeout(()=>{btn.textContent=orig;btn.classList.remove('export-clip--copied')},1500)}).catch(()=>{const ta=document.createElement('textarea');ta.value=content;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta)})}
 
 // ========== v16 migration (WebLLM removal — reclaim ~1.5GB) ==========
 function runV16Migration(){
@@ -238,7 +238,11 @@ setSmartView(smartView);
 updateMiniTimer();
 // Apply saved active tab without scroll
 document.querySelectorAll('[data-tab]').forEach(el=>{el.style.display=el.dataset.tab===activeTab?'':'none'});
-document.querySelectorAll('.nav-tab').forEach(el=>{el.classList.toggle('active',el.dataset.navtab===activeTab)});
+document.querySelectorAll('.nav-tab').forEach(el=>{
+  const isActive=el.dataset.navtab===activeTab;
+  el.classList.toggle('active',isActive);
+  if(isActive) el.setAttribute('aria-current','page'); else el.removeAttribute('aria-current');
+});
 if(activeTab==='settings'&&!settingsOpen)toggleSettings();
 
 // PWA status — standalone / file / SW; install UI lives in pwa.js (refreshPWAInstallUI)
@@ -308,7 +312,7 @@ async function renderSystemInfo(info){
     <div><strong>Storage:</strong> ${storageLine}</div>
     <div><strong>Intelligence:</strong> ${typeof isIntelReady === 'function' && isIntelReady()
       ? `<span class="sys-info-ok">${okIc} Embeddings ready (${typeof getIntelDevice === 'function' ? getIntelDevice() || 'runtime' : ''})</span>`
-      : '<span style="color:var(--text-3)">Loads in background (~33 MB, cached offline)</span>'}</div>`;
+      : '<span class="intel-muted">Loads in background (~33 MB, cached offline)</span>'}</div>`;
 }
 // Initial render + re-render when online status changes
 setTimeout(() => { renderSystemInfo(); }, 400);

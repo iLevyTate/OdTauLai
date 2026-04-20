@@ -256,10 +256,7 @@ function renderTaskItem(t,depth){
   },{passive:true});
 
   // ========== COGNITIVE-LOAD-OPTIMIZED RENDER ==========
-  // PRINCIPLE: Only 2-3 things visible at rest. Everything else on hover.
-  // Row = PRIMARY (checkbox + name) + at-a-glance SIGNAL (priority stripe on left border, due date chip if relevant)
-  // Actions like star/play/sub/delete appear on hover. Status/tags/description appear on hover.
-  // Subtask counter shown compactly only if parent has children.
+  const detailed=(typeof getCardDensity==='function'&&getCardDensity()==='detailed');
 
   const chevron=kids
     ?'<button class="task-chevron'+(t.collapsed?' collapsed':'')+'" onclick="toggleCollapse('+t.id+')" title="'+(t.collapsed?'Expand':'Collapse')+'">▸</button>'
@@ -271,7 +268,7 @@ function renderTaskItem(t,depth){
   // List indicator dot — only show if viewing All and >1 list has tasks (otherwise pure noise)
   const taskOwnerList=lists.find(l=>l.id===t.listId);
   const listsWithTasks=new Set(tasks.filter(x=>!x.archived&&x.status!=='done').map(x=>x.listId));
-  if(taskOwnerList&&activeListId==='all'&&listsWithTasks.size>1){
+  if(detailed&&taskOwnerList&&activeListId==='all'&&listsWithTasks.size>1){
     signalChips+='<span class="task-sig sig-list" style="background:transparent;padding:0" title="List: '+esc(taskOwnerList.name)+'"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:'+taskOwnerList.color+'"></span></span>';
   }
   if(t.dueDate&&!isDone){
@@ -282,32 +279,32 @@ function renderTaskItem(t,depth){
       signalChips+='<span class="task-sig due-future">'+dueLabel+'</span>';
     }
   }
-  // Subtask progress (compact)
   const prog=getSubtaskProgress(t.id);
-  if(prog){
+  if(detailed&&prog){
     signalChips+='<span class="task-sig sig-subs" title="'+prog.done+' of '+prog.total+' subtasks done">'+prog.done+'/'+prog.total+'</span>';
   }
-  // Recurring icon (simple)
   if(t.recur){
     signalChips+='<span class="task-sig sig-recur" title="Repeats '+t.recur+'">↻</span>';
+    const st=(typeof getHabitStreak==='function')?getHabitStreak(t):0;
+    if(st>0)signalChips+='<span class="task-sig sig-streak" title="Consecutive-day streak">'+st+'d</span>';
   }
-  // Active timer indicator
   if(isActive){
     signalChips+='<span class="task-sig sig-active" title="Tracking time">● '+fmtHMS(rolledTime)+'</span>';
+  }else if(rolledTime>0){
+    signalChips+='<span class="task-sig sig-time" title="Time tracked">'+fmtHMS(rolledTime)+'</span>';
   }
-  // Category badge (values alignment)
-  if(t.category){
+  if(detailed&&t.category){
     const catSvg=(typeof window.categoryIcon==='function')?window.categoryIcon(t.category):'';
-    signalChips+='<span class="task-sig sig-cat" title="'+(t.valuesNote||t.category)+'"><span class="sig-cat-ic">'+catSvg+'</span>'+t.category+'</span>';
+    const catLbl=(typeof getCategoryDef==='function')?getCategoryDef(t.category).label:t.category;
+    signalChips+='<span class="task-sig sig-cat" title="'+(t.valuesNote||catLbl)+'"><span class="sig-cat-ic">'+catSvg+'</span>'+esc(catLbl)+'</span>';
   }
-  // Values alignment dots
-  if(t.valuesAlignment&&t.valuesAlignment.length){
+  if(detailed&&t.valuesAlignment&&t.valuesAlignment.length){
     signalChips+='<span class="task-sig sig-values" title="Serves: '+t.valuesAlignment.join(', ')+'">◈</span>';
   }
-  if(window._dupSimMap && window._dupSimMap.get(t.id) >= 0.9){
+  if(detailed&&window._dupSimMap && window._dupSimMap.get(t.id) >= 0.9){
     signalChips+='<span class="task-sig task-dup-badge" title="Very similar to another task">⧉ dup</span>';
   }
-  if(typeof isParetoTop==='function' && isParetoTop(t.id)){
+  if(typeof isParetoTop==='function' && isParetoTop(t.id) && (detailed || (typeof smartView==='string' && smartView==='impact'))){
     const sc=(typeof getImpactScore==='function'?getImpactScore(t.id):0);
     const zapIc=(typeof window.icon==='function')?window.icon('zap',{size:11}):'';
     signalChips+='<span class="task-sig sig-pareto" title="High-leverage task (top ~20% by impact'+(sc?' · score '+sc.toFixed(1):'')+')"><span class="sig-cat-ic">'+zapIc+'</span>impact</span>';
@@ -384,10 +381,13 @@ function renderBoard(visibleTasks){
       e.preventDefault();col.classList.remove('drop-target');
       const srcId=parseInt(e.dataTransfer.getData('text/plain'));
       const src=findTask(srcId);if(!src)return;
-      src.status=st;
-      if(st==='done'){src.completedAt=timeNow();if(src.recur)spawnRecurringClone(src)}
-      else src.completedAt=null;
-      renderTaskList();saveState('user');
+      if(st==='done'){
+        if(src.recur)habitCompleteInPlace(src);
+        else{src.status='done';src.completedAt=timeNow()}
+      }else{
+        src.status=st;src.completedAt=null;
+      }
+      renderTaskList();renderBanner();saveState('user');
     };
     col.innerHTML='<div class="board-col-hdr"><span class="status-badge '+status.cls+'">'+status.label+'</span><span class="cc-count">'+colTasks.length+'</span></div><div class="board-col-body"></div>';
     const body=col.querySelector('.board-col-body');
@@ -434,7 +434,7 @@ function openTaskDetail(id){
   gid('mdTracked').textContent=fmtHMS(getRolledUpTime(id))+' · '+getRolledUpSessions(id)+' sessions';
   const path=getTaskPath(id);
   const pathStr=path.length>1?path.slice(0,-1).join(' › ')+' › ':'';
-  gid('mdStats').innerHTML='<span><b>Path:</b> '+esc(pathStr)+'<b style="color:#e2e8f0">'+esc(t.name)+'</b></span> · <span>Created '+(t.created||'—')+'</span>'+(t.completedAt?' · <span>Done '+t.completedAt+'</span>':'');
+  gid('mdStats').innerHTML='<span><b>Path:</b> '+esc(pathStr)+'<b class="md-stat-name">'+esc(t.name)+'</b></span> · <span>Created '+(t.created||'—')+'</span>'+(t.completedAt?' · <span>Done '+t.completedAt+'</span>':'');
   // List selector
   const listSel=gid('mdList');listSel.innerHTML='';
   lists.forEach(l=>{const opt=document.createElement('option');opt.value=l.id;opt.textContent=l.name;if((t.listId||lists[0].id)===l.id)opt.selected=true;listSel.appendChild(opt)});
@@ -443,25 +443,32 @@ function openTaskDetail(id){
   STATUS_ORDER.forEach(st=>{
     const b=document.createElement('button');b.className='mfield-chip-btn'+((t.status||'open')===st?' active':'');
     b.textContent=STATUSES[st].label;
-    b.onclick=function(){t.status=st;gid('mdCheckbox').classList.toggle('checked',st==='done');gid('mdCheckbox').textContent=st==='done'?'✓':'';[...sChips.children].forEach(c=>c.classList.remove('active'));b.classList.add('active')};
+    b.onclick=function(){
+      if(t.recur&&st==='done'){
+        habitCompleteInPlace(t, gid('mdCompletionNote')?gid('mdCompletionNote').value:'');
+        gid('mdCheckbox').classList.remove('checked');gid('mdCheckbox').textContent='';
+        gid('mdDue').value=t.dueDate||'';
+        gid('mdTracked').textContent=fmtHMS(getRolledUpTime(t.id))+' · '+getRolledUpSessions(t.id)+' sessions';
+        if(gid('mdCompletionNote'))gid('mdCompletionNote').value='';
+        renderMdHabitHistory(t);
+        [...sChips.children].forEach(c=>c.classList.remove('active'));
+        const ob=STATUS_ORDER.findIndex(x=>x==='open');
+        if(ob>=0&&sChips.children[ob])sChips.children[ob].classList.add('active');
+        return;
+      }
+      t.status=st;
+      gid('mdCheckbox').classList.toggle('checked',st==='done');gid('mdCheckbox').textContent=st==='done'?'✓':'';
+      [...sChips.children].forEach(c=>c.classList.remove('active'));b.classList.add('active');
+    };
     sChips.appendChild(b)
   });
   // Priority chips
   const pChips=gid('mdPriorityChips');pChips.innerHTML='';
   ['urgent','high','normal','low','none'].forEach(pr=>{
-    const b=document.createElement('button');b.className='mfield-chip-btn'+((t.priority||'none')===pr?' active':'');
-    b.style.color=pr!=='none'?({urgent:'#c0392b',high:'#e67e22',normal:'#3d8bcc',low:'#7f8c8d'}[pr]):'';
+    const b=document.createElement('button');b.className='mfield-chip-btn'+((t.priority||'none')===pr?' active':'')+(pr!=='none'?' md-priority--'+pr:'');
     b.textContent=PRIORITIES[pr].label;
     b.onclick=function(){t.priority=pr;[...pChips.children].forEach(c=>c.classList.remove('active'));b.classList.add('active')};
     pChips.appendChild(b)
-  });
-  // Type chips
-  const tChips=gid('mdTypeChips');tChips.innerHTML='';
-  [['task','Task'],['bug','Bug'],['idea','Idea'],['errand','Errand'],['waiting','Waiting']].forEach(([key,lbl])=>{
-    const b=document.createElement('button');b.className='mfield-chip-btn'+((t.type||'task')===key?' active':'');
-    b.textContent=lbl;
-    b.onclick=function(){t.type=key;[...tChips.children].forEach(c=>c.classList.remove('active'));b.classList.add('active')};
-    tChips.appendChild(b)
   });
   // Effort chips
   const eChips=gid('mdEffortChips');eChips.innerHTML='';
@@ -479,9 +486,12 @@ function openTaskDetail(id){
     b.onclick=function(){t.energyLevel=t.energyLevel===key?null:key;[...enChips.children].forEach(c=>c.classList.remove('active'));if(t.energyLevel)b.classList.add('active')};
     enChips.appendChild(b)
   });
-  // Context chips
+  // Context chips (from Settings → Classifications)
   const cxChips=gid('mdContextChips');cxChips.innerHTML='';
-  [['work','Work'],['home','Home'],['phone','Phone'],['computer','Computer'],['errands','Errands']].forEach(([key,lbl])=>{
+  const ctxRows=(typeof getActiveContexts==='function')?getActiveContexts():[];
+  ctxRows.forEach(row=>{
+    const key=row.id;
+    const lbl=row.label||key;
     const b=document.createElement('button');b.className='mfield-chip-btn'+((t.context||null)===key?' active':'');
     b.textContent=lbl;
     b.onclick=function(){t.context=t.context===key?null:key;[...cxChips.children].forEach(c=>c.classList.remove('active'));if(t.context)b.classList.add('active')};
@@ -499,9 +509,11 @@ function openTaskDetail(id){
   // Tags
   renderTagsEditor(id);
   // Category chips
-  const CATS=[['health','Health'],['finance','Finance'],['work','Work'],['relationships','Relationships'],['learning','Learning'],['home','Home'],['personal','Personal'],['other','Other']];
   const catChips=gid('mdCategoryChips');catChips.innerHTML='';
-  CATS.forEach(([key,lbl])=>{
+  const catRows=(typeof getActiveCategories==='function')?getActiveCategories():[];
+  catRows.forEach(row=>{
+    const key=row.id;
+    const lbl=row.label||key;
     const b=document.createElement('button');b.className='mfield-chip-btn'+((t.category||null)===key?' active':'');
     b.textContent=lbl;
     b.onclick=function(){t.category=t.category===key?null:key;[...catChips.children].forEach(c=>c.classList.remove('active'));if(t.category)b.classList.add('active')};
@@ -515,8 +527,24 @@ function openTaskDetail(id){
   // Blocked by
   renderBlockedBy(id);
   refreshMdSimilarTasks(id);
+  renderMdHabitHistory(t);
   gid('taskModal').classList.add('open');
   setTimeout(()=>gid('mdName').focus(),50)
+}
+
+function renderMdHabitHistory(t){
+  const el=gid('mdHabitHistory');if(!el)return;
+  if(!t||!t.recur||!Array.isArray(t.completions)||!t.completions.length){
+    el.innerHTML='<span class="intel-muted">Complete this repeating task to build a history here.</span>';
+    return;
+  }
+  const rows=t.completions.slice().reverse().slice(0,14).map(c=>{
+    const sec=c&&c.sec||0;
+    const note=c&&c.note?'<span class="habit-hist-note">'+esc(c.note)+'</span>':'';
+    return '<div class="habit-hist-row"><span class="habit-hist-date">'+(c&&c.date||'—')+'</span><span class="habit-hist-sec">'+fmtHMS(sec)+'</span>'+note+'</div>';
+  }).join('');
+  const sum=(typeof getHabitTotalSec==='function')?getHabitTotalSec(t):0;
+  el.innerHTML='<div class="habit-hist-sum">Logged in completions: <strong>'+fmtHMS(sum)+'</strong></div><div class="habit-hist-list">'+rows+'</div>';
 }
 
 async function refreshMdSimilarTasks(id){
@@ -576,13 +604,18 @@ function saveTaskDetail(){
   t.estimateMin=parseInt(gid('mdEstimate').value)||0;
   t.description=gid('mdDesc').value;
   t.url=gid('mdUrl').value.trim()||null;
-  t.completionNote=gid('mdCompletionNote').value.trim()||null;
+  const compNote=gid('mdCompletionNote')?gid('mdCompletionNote').value.trim():'';
   const ra=gid('mdRemindAt')?gid('mdRemindAt').value:'';
   if(ra!==t.remindAt){t.remindAt=ra||null;t.reminderFired=false}
   t.listId=parseInt(gid('mdList').value)||t.listId;
-  if(t.status==='done'&&!t.completedAt)t.completedAt=timeNow();
-  if(t.status!=='done')t.completedAt=null;
-  closeTaskDetail();renderTaskList();saveState('user')
+  if(t.recur&&t.status==='done'){
+    habitCompleteInPlace(t, compNote);
+  }else{
+    t.completionNote=compNote||null;
+    if(t.status==='done'&&!t.completedAt)t.completedAt=timeNow();
+    if(t.status!=='done')t.completedAt=null;
+  }
+  closeTaskDetail();renderTaskList();renderBanner();saveState('user')
 }
 function deleteTaskFromModal(){
   if(!editingTaskId)return;
@@ -591,17 +624,28 @@ function deleteTaskFromModal(){
 function toggleTaskDone(){
   if(!editingTaskId)return;
   const t=findTask(editingTaskId);if(!t)return;
-  if(t.status==='done'){t.status='open';t.completedAt=null;gid('mdCheckbox').classList.remove('checked');gid('mdCheckbox').textContent=''}
-  else{t.status='done';t.completedAt=timeNow();gid('mdCheckbox').classList.add('checked');gid('mdCheckbox').textContent='✓'}
-  // Update status chips
+  if(t.status==='done'){
+    t.status='open';t.completedAt=null;
+    gid('mdCheckbox').classList.remove('checked');gid('mdCheckbox').textContent='';
+  }else if(t.recur){
+    habitCompleteInPlace(t, gid('mdCompletionNote')?gid('mdCompletionNote').value:'');
+    gid('mdCheckbox').classList.remove('checked');gid('mdCheckbox').textContent='';
+    gid('mdDue').value=t.dueDate||'';
+    gid('mdTracked').textContent=fmtHMS(getRolledUpTime(editingTaskId))+' · '+getRolledUpSessions(editingTaskId)+' sessions';
+    if(gid('mdCompletionNote'))gid('mdCompletionNote').value='';
+    renderMdHabitHistory(t);
+  }else{
+    t.status='done';t.completedAt=timeNow();
+    gid('mdCheckbox').classList.add('checked');gid('mdCheckbox').textContent='✓';
+  }
   const sChips=gid('mdStatusChips');if(sChips){[...sChips.children].forEach((c,i)=>c.classList.toggle('active',STATUS_ORDER[i]===t.status))}
 }
 
 function renderBanner(){
   const b=gid('banner');
-  if(!activeTaskId){b.style.display='none';return}
-  const t=findTask(activeTaskId);if(!t){b.style.display='none';return}
-  b.style.display='block';
+  if(!activeTaskId){b.classList.remove('is-visible');return}
+  const t=findTask(activeTaskId);if(!t){b.classList.remove('is-visible');return}
+  b.classList.add('is-visible');
   const path=getTaskPath(activeTaskId);
   const bel=gid('bannerTask');
   if(path.length>1){
@@ -619,14 +663,18 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&gid('taskModal').cl
 // ========== LOG ==========
 function addLog(name,durSec,type){timeLog.unshift({id:++logIdCtr,name,durSec,type,time:timeNow()});renderLog();saveState('user')}
 function removeLog(id){timeLog=timeLog.filter(l=>l.id!==id);renderLog();saveState('user')}
-function renderLog(){const list=gid('logList');list.querySelectorAll('.log-item').forEach(e=>e.remove());if(!timeLog.length){gid('logEmpty').style.display='';return}gid('logEmpty').style.display='none';timeLog.slice(0,40).forEach(l=>{const d=document.createElement('div');d.className='log-item';const col=l.type==='work'?'var(--work)':l.type==='short'?'var(--short)':l.type==='quick'?'#48b5e0':'var(--long)';const lid=l.id||0;d.innerHTML=`<div class="log-dot" style="background:${col}"></div><span class="log-name">${esc(l.name)}</span><span class="log-dur">${fmtShort(l.durSec)}</span><span class="log-time">${l.time}</span>${lid?`<button class="log-del" onclick="removeLog(${lid})" title="Remove">×</button>`:''}`;list.appendChild(d)})}
+function renderLog(){const list=gid('logList');list.querySelectorAll('.log-item').forEach(e=>e.remove());if(!timeLog.length){gid('logEmpty').style.display='';return}gid('logEmpty').style.display='none';timeLog.slice(0,40).forEach(l=>{const d=document.createElement('div');d.className='log-item';const dotCls='log-dot'+(l.type==='work'?' log-dot--work':l.type==='short'?' log-dot--short':l.type==='quick'?' log-dot--quick':' log-dot--long');const lid=l.id||0;d.innerHTML=`<div class="${dotCls}"></div><span class="log-name">${esc(l.name)}</span><span class="log-dur">${fmtShort(l.durSec)}</span><span class="log-time">${l.time}</span>${lid?`<button class="log-del" onclick="removeLog(${lid})" title="Remove">×</button>`:''}`;list.appendChild(d)})}
 function clearLog(){timeLog=[];renderLog();saveState('user')}
 
 // ========== TAB NAVIGATION ==========
 function showTab(tab){
   activeTab=tab;
   document.querySelectorAll('[data-tab]').forEach(el=>{el.style.display=el.dataset.tab===tab?'':'none'});
-  document.querySelectorAll('.nav-tab').forEach(el=>{el.classList.toggle('active',el.dataset.navtab===tab)});
+  document.querySelectorAll('.nav-tab').forEach(el=>{
+    const isActive=el.dataset.navtab===tab;
+    el.classList.toggle('active',isActive);
+    if(isActive) el.setAttribute('aria-current','page'); else el.removeAttribute('aria-current');
+  });
   // Auto-open settings accordion when user switches to Settings tab
   if(tab==='settings'&&!settingsOpen)toggleSettings();
   // Scroll to top of content for clean view

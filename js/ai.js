@@ -136,20 +136,13 @@ function executeIntelOp(op){
     }
     case 'MARK_DONE':{
       const t = findTask(a.id); if(!t) return null;
-      const beforeLen = tasks.length;
       snap = { type: 'updated', id: t.id, before: { ...t } };
+      if(t.recur){
+        habitCompleteInPlace(t, a.completionNote ? String(a.completionNote) : '');
+        break;
+      }
       t.status = 'done'; t.completedAt = timeNow();
       if(a.completionNote) t.completionNote = String(a.completionNote);
-      if(t.recur){
-        spawnRecurringClone(t);
-        if(tasks.length > beforeLen){
-          const cloneId = tasks[tasks.length - 1].id;
-          snap = { type: 'batch', snaps: [
-            { type: 'updated', id: t.id, before: snap.before },
-            { type: 'created', id: cloneId },
-          ] };
-        }
-      }
       break;
     }
     case 'REOPEN':{
@@ -558,13 +551,17 @@ function _renderBreakdown(){
     if(t.priority === 'urgent') by[t.category].urgent++;
     if(t.priority === 'high') by[t.category].high++;
   });
-  const rows = Object.entries(by).sort((x, y) => y[1].count - x[1].count).map(([c, s]) => `
+  const rows = Object.entries(by).sort((x, y) => y[1].count - x[1].count).map(([c, s]) => {
+    const cd = (typeof getCategoryDef === 'function') ? getCategoryDef(c) : { label: c, icon: (CAT_ICON[c] || 'pin') };
+    const icn = cd.icon || CAT_ICON[c] || 'pin';
+    return `
     <div class="breakdown-row">
-      <span class="breakdown-cat"><span class="breakdown-cat-ic">${(window.icon && window.icon(CAT_ICON[c] || 'pin', {size:14})) || ''}</span> ${c}</span>
+      <span class="breakdown-cat"><span class="breakdown-cat-ic">${(window.icon && window.icon(icn, {size:14})) || ''}</span> ${cd.label || c}</span>
       <span class="breakdown-count">${s.count}</span>
       ${s.urgent ? `<span class="breakdown-badge urgent">${s.urgent}!</span>` : ''}
       ${s.high ? `<span class="breakdown-badge high">${s.high}↑</span>` : ''}
-    </div>`).join('');
+    </div>`;
+  }).join('');
   el.innerHTML = rows || '<span style="color:var(--text-3);font-size:12px">Run alignment to see</span>';
 }
 
@@ -897,11 +894,11 @@ function maybeShowEnhanceBtn(){
   if(!btn || !inp) return;
   const len = inp.value.trim().length;
   const showable = (typeof isIntelReady === 'function' && isIntelReady()) && len >= 3;
-  btn.style.display = showable ? '' : 'none';
+  btn.classList.toggle('u-hidden', !showable);
   if((len < 3 || window._smartAddPreview) && !btn.disabled){
     window._smartAddPreview = null;
     const prev = document.getElementById('smartAddPreview');
-    if(prev){ prev.innerHTML = ''; prev.style.display = 'none'; }
+    if(prev){ prev.innerHTML = ''; prev.classList.remove('is-visible'); }
   }
 }
 
@@ -909,7 +906,7 @@ document.addEventListener('visibilitychange', () => {
   if(document.hidden && window._smartAddPreview){
     window._smartAddPreview = null;
     const prev = document.getElementById('smartAddPreview');
-    if(prev){ prev.innerHTML = ''; prev.style.display = 'none'; }
+    if(prev){ prev.innerHTML = ''; prev.classList.remove('is-visible'); }
   }
 });
 
@@ -931,16 +928,14 @@ async function smartAddEnhance(){
   try{
     const sugg = await predictMetadata(raw, 5);
     const PR = ['urgent','high','normal','low','none'];
-    const CAT = LIFE_CATS;
     const EFF = ['xs','s','m','l','xl'];
-    const CTX = ['work','home','phone','computer','errands'];
     const EN = ['high','low'];
 
     const cleaned = {};
     if(sugg.priority && PR.includes(sugg.priority) && sugg.priority !== 'none') cleaned.priority = sugg.priority;
-    if(sugg.category && CAT.includes(sugg.category)) cleaned.category = sugg.category;
+    if(sugg.category && typeof sugg.category === 'string' && sugg.category.trim()) cleaned.category = sugg.category.trim();
     if(sugg.effort && EFF.includes(sugg.effort)) cleaned.effort = sugg.effort;
-    if(sugg.context && CTX.includes(sugg.context)) cleaned.context = sugg.context;
+    if(sugg.context && typeof sugg.context === 'string' && sugg.context.trim()) cleaned.context = sugg.context.trim();
     if(sugg.energyLevel && EN.includes(sugg.energyLevel)) cleaned.energyLevel = sugg.energyLevel;
     if(Array.isArray(sugg.tags)) cleaned.tags = sugg.tags.filter(t => typeof t === 'string' && t.length && t.length < 25).slice(0, 5);
     if(sugg.dueDate && /^\d{4}-\d{2}-\d{2}$/.test(sugg.dueDate)) cleaned.dueDate = sugg.dueDate;
@@ -948,7 +943,7 @@ async function smartAddEnhance(){
     if(Object.keys(cleaned).length === 0){
       if(prev){
         prev.innerHTML = '<span class="smart-add-empty">No confident suggestions — add manually or keep typing</span>';
-        prev.style.display = '';
+        prev.classList.add('is-visible');
       }
     } else {
       window._smartAddPreview = cleaned;
@@ -966,20 +961,25 @@ function _renderSmartAddChips(s){
   const prev = document.getElementById('smartAddPreview');
   if(!prev) return;
   const effortTips = { xs:'Extra small — ~15 min', s:'Small — ~1 hr', m:'Medium — ~half day', l:'Large — ~full day', xl:'Extra large — multi-day' };
-  const ctxTips = { work:'At your desk/workplace', home:'At home', phone:'Requires a phone call', computer:'Requires a computer', errands:'Out and about' };
   const chips = [];
   if(s.priority) chips.push(`<span class="sa-chip sa-priority sa-p-${s.priority}" data-tip="Priority — tap to remove" onclick="smartAddRemove('priority')">priority: ${s.priority} ×</span>`);
   const ic = (n, size) => (window.icon && window.icon(n, {size: size||13})) || '';
-  if(s.category) chips.push(`<span class="sa-chip" data-tip="Category — tap to remove" onclick="smartAddRemove('category')"><span class="sa-chip-ic">${ic(CAT_ICON[s.category] || 'pin')}</span> ${s.category} ×</span>`);
+  if(s.category){
+    const cd=(typeof getCategoryDef==='function')?getCategoryDef(s.category):{label:s.category,icon:CAT_ICON[s.category]||'pin'};
+    chips.push(`<span class="sa-chip" data-tip="Category — tap to remove" onclick="smartAddRemove('category')"><span class="sa-chip-ic">${ic(cd.icon||'pin')}</span> ${esc(cd.label||s.category)} ×</span>`);
+  }
   if(s.effort) chips.push(`<span class="sa-chip" data-tip="${effortTips[s.effort] || 'Effort'} — tap to remove" onclick="smartAddRemove('effort')">effort: ${s.effort.toUpperCase()} ×</span>`);
-  if(s.context) chips.push(`<span class="sa-chip" data-tip="${ctxTips[s.context] || 'Context'} — tap to remove" onclick="smartAddRemove('context')">${s.context} ×</span>`);
+  if(s.context){
+    const xd=(typeof getContextDef==='function')?getContextDef(s.context):{label:s.context};
+    chips.push(`<span class="sa-chip" data-tip="Context — tap to remove" onclick="smartAddRemove('context')">${esc(xd.label||s.context)} ×</span>`);
+  }
   if(s.energyLevel) chips.push(`<span class="sa-chip" data-tip="Energy — tap to remove" onclick="smartAddRemove('energyLevel')"><span class="sa-chip-ic">${ic(s.energyLevel === 'high' ? 'flame' : 'leaf')}</span> ${s.energyLevel} ×</span>`);
   if(s.dueDate) chips.push(`<span class="sa-chip" data-tip="Due date — tap to remove" onclick="smartAddRemove('dueDate')"><span class="sa-chip-ic">${ic('calendar')}</span> ${s.dueDate} ×</span>`);
   if(s.tags && s.tags.length) s.tags.forEach(tag => chips.push(`<span class="sa-chip" data-tip="Tag — tap to remove" onclick="smartAddRemoveTag('${esc(tag)}')">#${esc(tag)} ×</span>`));
   prev.innerHTML = `
     <span class="smart-add-hint">Suggestions — tap to remove, Enter to add:</span>
     <div class="sa-chips">${chips.join('')}</div>`;
-  prev.style.display = '';
+  prev.classList.add('is-visible');
 }
 
 function smartAddRemove(field){
@@ -989,7 +989,7 @@ function smartAddRemove(field){
      (Object.keys(window._smartAddPreview).length === 1 && window._smartAddPreview.tags && !window._smartAddPreview.tags.length)){
     window._smartAddPreview = null;
     const prev = document.getElementById('smartAddPreview');
-    if(prev){ prev.innerHTML = ''; prev.style.display = 'none'; }
+    if(prev){ prev.innerHTML = ''; prev.classList.remove('is-visible'); }
   } else {
     _renderSmartAddChips(window._smartAddPreview);
   }
@@ -1002,7 +1002,7 @@ function smartAddRemoveTag(tag){
   if(Object.keys(window._smartAddPreview).length === 0){
     window._smartAddPreview = null;
     const prev = document.getElementById('smartAddPreview');
-    if(prev){ prev.innerHTML = ''; prev.style.display = 'none'; }
+    if(prev){ prev.innerHTML = ''; prev.classList.remove('is-visible'); }
   } else {
     _renderSmartAddChips(window._smartAddPreview);
   }
@@ -1034,9 +1034,9 @@ async function applySmartAddAndSubmit(){
   inp.value = '';
   window._smartAddPreview = null;
   const prev = document.getElementById('smartAddPreview');
-  if(prev){ prev.innerHTML = ''; prev.style.display = 'none'; }
+  if(prev){ prev.innerHTML = ''; prev.classList.remove('is-visible'); }
   const btn = document.getElementById('taskEnhanceBtn');
-  if(btn) btn.style.display = 'none';
+  if(btn) btn.classList.add('u-hidden');
 
   renderTaskList();
   if(typeof renderBanner === 'function') renderBanner();
@@ -1064,14 +1064,14 @@ function openWhatNext(){
           <span class="wn-name">${esc(x.t.name)}</span>
           <span class="wn-meta">${x.t.dueDate ? esc(x.t.dueDate) : 'no date'} · ${esc(x.t.priority || 'none')}</span>
         </button>`).join('')
-      : '<span style="color:var(--text-3);font-size:12px">Nothing queued — add tasks or clear filters.</span>';
+      : '<span class="what-next-empty">Nothing queued — add tasks or clear filters.</span>';
   }
-  o.style.display = '';
+  o.classList.add('open');
 }
 
 function closeWhatNext(){
   const o = document.getElementById('whatNextOverlay');
-  if(o) o.style.display = 'none';
+  if(o) o.classList.remove('open');
 }
 
 function toggleTaskSearchSemantic(){
