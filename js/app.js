@@ -1,5 +1,5 @@
 // ── App version — bumped on each release ───────────────────────────────────
-const APP_VERSION = 'v21';
+const APP_VERSION = 'v22';
 const APP_BUILD_DATE = '2026-04-20';
 
 // ── Persistent storage — protects task data from "Clear browsing history" ──
@@ -60,8 +60,9 @@ if ('serviceWorker' in navigator && !window.location.protocol.startsWith('file')
       const banner = document.createElement('div');
       banner.id = 'updateBanner';
       banner.className = 'update-banner';
+      const sparkIc = (window.icon && window.icon('sparkles', {size:14})) || '';
       banner.innerHTML = `
-        <span>✨ New version available</span>
+        <span class="update-banner-msg">${sparkIc}<span>New version available</span></span>
         <button onclick="applyUpdate()">Reload to update</button>
         <button onclick="dismissUpdate()" class="update-dismiss">Later</button>`;
       document.body.appendChild(banner);
@@ -244,8 +245,10 @@ if(activeTab==='settings'&&!settingsOpen)toggleSettings();
 (function(){
   const status=gid('pwaStatus');if(!status)return;
   const isStandalone=window.matchMedia('(display-mode: standalone)').matches||window.navigator.standalone===true;
-  if(isStandalone){status.textContent='✓ Running as app';return}
-  if(location.protocol==='file:'){status.textContent='⚠ Served via file:// — host over HTTP to install';return}
+  const okIc = (window.icon && window.icon('checkCircle', {size:13})) || '';
+  const warnIc = (window.icon && window.icon('alertTriangle', {size:13})) || '';
+  if(isStandalone){status.innerHTML=okIc+' Running as app';return}
+  if(location.protocol==='file:'){status.innerHTML=warnIc+' Served via file:// — host over HTTP to install';return}
   if(!('serviceWorker' in navigator)){status.textContent='Browser does not support PWA';return}
   setTimeout(()=>{
     if(window._swRegistered===false){ status.textContent='Offline cache unavailable in this browser'; return; }
@@ -291,18 +294,20 @@ async function renderSystemInfo(info){
   const el = document.getElementById('systemInfo');
   if(!el) return;
   const data = info || await checkStorageQuota();
+  const okIc = (window.icon && window.icon('checkCircle', {size:13})) || '';
+  const warnIc = (window.icon && window.icon('alertTriangle', {size:13})) || '';
   const storageLine = data
-    ? `${data.persistent ? '<span class="sys-info-ok">✓ Protected</span>' : '<span class="sys-info-warn">⚠ Not protected — task data may be cleared by "Clear browsing history"</span>'} · Using ${data.usedMB} MB / ${data.quotaMB} MB (${data.pct}%)`
+    ? `${data.persistent ? `<span class="sys-info-ok">${okIc} Protected</span>` : `<span class="sys-info-warn">${warnIc} Not protected — task data may be cleared by "Clear browsing history"</span>`} · Using ${data.usedMB} MB / ${data.quotaMB} MB (${data.pct}%)`
     : 'Storage info unavailable in this browser';
   const onlineLine = navigator.onLine
-    ? '<span class="sys-info-ok">✓ Online</span>'
-    : '<span class="sys-info-warn">● Offline — tasks work, sync paused</span>';
+    ? `<span class="sys-info-ok">${okIc} Online</span>`
+    : `<span class="sys-info-warn">${warnIc} Offline — tasks work, sync paused</span>`;
   el.innerHTML = `
     <div><strong>Version:</strong> ${APP_VERSION} (built ${APP_BUILD_DATE})</div>
     <div><strong>Network:</strong> ${onlineLine}</div>
     <div><strong>Storage:</strong> ${storageLine}</div>
     <div><strong>Intelligence:</strong> ${typeof isIntelReady === 'function' && isIntelReady()
-      ? `<span class="sys-info-ok">✓ Embeddings ready (${typeof getIntelDevice === 'function' ? getIntelDevice() || 'runtime' : ''})</span>`
+      ? `<span class="sys-info-ok">${okIc} Embeddings ready (${typeof getIntelDevice === 'function' ? getIntelDevice() || 'runtime' : ''})</span>`
       : '<span style="color:var(--text-3)">Loads in background (~33 MB, cached offline)</span>'}</div>`;
 }
 // Initial render + re-render when online status changes
@@ -319,13 +324,22 @@ setTimeout(() => {
   const txt = document.getElementById('intelProgressTxt');
   const retry = document.getElementById('intelRetryBtn');
   if(w) w.style.display = '';
-  intelLoad(p => {
-    const v = p && p.progress != null ? Math.round(p.progress * 100) : 0;
-    if(bar) bar.style.width = v + '%';
-    if(pct) pct.textContent = v + '%';
-    if(txt) txt.textContent = (p && p.status) ? String(p.status).slice(0, 72) : '';
-    if(typeof syncHeaderAIChip === 'function') syncHeaderAIChip('loading', v + '%');
-  }).then(() => {
+  const onProgress = (typeof _makeProgressAggregator === 'function')
+    ? _makeProgressAggregator((v, ev) => {
+        if(bar) bar.style.width = v + '%';
+        if(pct) pct.textContent = v + '%';
+        const status = ev && ev.status ? String(ev.status) : '';
+        const file = ev && ev.file ? ' · ' + String(ev.file).split('/').pop() : '';
+        if(txt) txt.textContent = (status + file).slice(0, 80);
+        if(typeof syncHeaderAIChip === 'function') syncHeaderAIChip('loading', v + '%');
+      })
+    : (p => { /* fallback (shouldn't happen) */
+        const v = p && p.progress != null ? Math.round(p.progress) : 0;
+        if(bar) bar.style.width = v + '%';
+        if(pct) pct.textContent = v + '%';
+        if(typeof syncHeaderAIChip === 'function') syncHeaderAIChip('loading', v + '%');
+      });
+  intelLoad(onProgress).then(() => {
     if(w) w.style.display = 'none';
     if(retry) retry.style.display = 'none';
     if(typeof ensureSchwartzEmbeddings === 'function'){

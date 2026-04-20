@@ -220,8 +220,9 @@ function saveState(reason){
       const w = document.createElement('div');
       w.id = 'quotaWarning';
       w.className = 'quota-warning';
+      const warnIc = (window.icon && window.icon('alertTriangle', {size:14})) || '';
       w.innerHTML = `
-        ⚠ Storage nearly full — new changes may not be saved.
+        <span class="quota-warning-msg">${warnIc}<span>Storage nearly full — new changes may not be saved.</span></span>
         <button onclick="document.getElementById('quotaWarning').remove()">Dismiss</button>
         <button onclick="exportData();document.getElementById('quotaWarning').remove()">Backup now</button>`;
       document.body.appendChild(w);

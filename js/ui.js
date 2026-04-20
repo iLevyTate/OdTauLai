@@ -113,28 +113,29 @@ function closeCmdK(){gid('cmdkOverlay').classList.remove('open')}
 function renderCmdK(){
   const q=gid('cmdkInput').value.toLowerCase().trim();
   const results=gid('cmdkResults');
+  const ic=(n)=>(typeof window.icon==='function'?window.icon(n):'');
   // Build items: actions + tasks + views
   const actions=[
-    {type:'action',label:'Go to Tasks',icon:'☰',kbd:'1',run:()=>showTab('tasks')},
-    {type:'action',label:'Go to Timer',icon:'◉',kbd:'2',run:()=>showTab('focus')},
-    {type:'action',label:'Go to Tools',icon:'✦',kbd:'3',run:()=>showTab('tools')},
-    {type:'action',label:'Go to Data',icon:'▤',kbd:'4',run:()=>showTab('data')},
-    {type:'action',label:'Go to Settings',icon:'⚙',kbd:'5',run:()=>showTab('settings')},
-    {type:'action',label:'Today view',icon:'📅',run:()=>{showTab('tasks');setSmartView('today')}},
-    {type:'action',label:'Overdue view',icon:'⚠',run:()=>{showTab('tasks');setSmartView('overdue')}},
-    {type:'action',label:'Starred view',icon:'★',run:()=>{showTab('tasks');setSmartView('starred')}},
-    {type:'action',label:'Impact view (Pareto 80/20)',icon:'⚡',run:()=>{showTab('tasks');setSmartView('impact')}},
-    {type:'action',label:'Sort by Impact (Pareto)',icon:'⚡',run:()=>{showTab('tasks');const s=gid('taskSortSel');if(s){s.value='impact';if(typeof updateTaskFilters==='function')updateTaskFilters()}}},
-    {type:'action',label:'Archive view',icon:'🗂',run:()=>{showTab('tasks');setSmartView('archived')}},
-    {type:'action',label:'List view',icon:'☰',run:()=>{showTab('tasks');setTaskView('list')}},
-    {type:'action',label:'Board view',icon:'▦',run:()=>{showTab('tasks');setTaskView('board')}},
-    {type:'action',label:'Calendar view',icon:'🗓',run:()=>{showTab('tasks');setTaskView('calendar')}},
-    {type:'action',label:'Toggle theme',icon:'🌗',run:()=>toggleTheme()},
-    {type:'action',label:'Start focus timer',icon:'▶',run:()=>{showTab('focus');if(!running)startTimer()}},
-    {type:'action',label:'Add new list',icon:'+',run:()=>{showTab('tasks');addList()}},
-    {type:'action',label:'Harmonize all fields (embeddings)',icon:'✴',run:()=>{showTab('tools');if(typeof intelHarmonizeFields==='function')intelHarmonizeFields()}},
-    {type:'action',label:'Find duplicate tasks',icon:'📋',run:()=>{showTab('tools');if(typeof intelFindDuplicatesUI==='function')intelFindDuplicatesUI()}},
-    {type:'action',label:'Toggle semantic search',icon:'◎',run:()=>{showTab('tasks');if(typeof isIntelReady !== 'function' || !isIntelReady()){if(typeof syncHeaderAIChip === 'function') syncHeaderAIChip('error', 'Load model first — open Tools');showTab('tools');return}const cb=gid('taskSearchSemantic');if(cb){cb.checked=!cb.checked;if(typeof toggleTaskSearchSemantic==='function')toggleTaskSearchSemantic()}}},
+    {type:'action',label:'Go to Tasks',icon:ic('list'),kbd:'1',run:()=>showTab('tasks')},
+    {type:'action',label:'Go to Timer',icon:ic('timer'),kbd:'2',run:()=>showTab('focus')},
+    {type:'action',label:'Go to Tools',icon:ic('toolSparkle'),kbd:'3',run:()=>showTab('tools')},
+    {type:'action',label:'Go to Data',icon:ic('database'),kbd:'4',run:()=>showTab('data')},
+    {type:'action',label:'Go to Settings',icon:ic('gear'),kbd:'5',run:()=>showTab('settings')},
+    {type:'action',label:'Today view',icon:ic('calendar'),run:()=>{showTab('tasks');setSmartView('today')}},
+    {type:'action',label:'Overdue view',icon:ic('alertTriangle'),run:()=>{showTab('tasks');setSmartView('overdue')}},
+    {type:'action',label:'Starred view',icon:ic('star'),run:()=>{showTab('tasks');setSmartView('starred')}},
+    {type:'action',label:'Impact view (Pareto 80/20)',icon:ic('zap'),run:()=>{showTab('tasks');setSmartView('impact')}},
+    {type:'action',label:'Sort by Impact (Pareto)',icon:ic('zap'),run:()=>{showTab('tasks');const s=gid('taskSortSel');if(s){s.value='impact';if(typeof updateTaskFilters==='function')updateTaskFilters()}}},
+    {type:'action',label:'Archive view',icon:ic('archive'),run:()=>{showTab('tasks');setSmartView('archived')}},
+    {type:'action',label:'List view',icon:ic('list'),run:()=>{showTab('tasks');setTaskView('list')}},
+    {type:'action',label:'Board view',icon:ic('grid'),run:()=>{showTab('tasks');setTaskView('board')}},
+    {type:'action',label:'Calendar view',icon:ic('calendar'),run:()=>{showTab('tasks');setTaskView('calendar')}},
+    {type:'action',label:'Toggle theme',icon:ic('moon'),run:()=>toggleTheme()},
+    {type:'action',label:'Start focus timer',icon:ic('play'),run:()=>{showTab('focus');if(!running)startTimer()}},
+    {type:'action',label:'Add new list',icon:ic('plus'),run:()=>{showTab('tasks');addList()}},
+    {type:'action',label:'Harmonize all fields (embeddings)',icon:ic('harmonize'),run:()=>{showTab('tools');if(typeof intelHarmonizeFields==='function')intelHarmonizeFields()}},
+    {type:'action',label:'Find duplicate tasks',icon:ic('copy'),run:()=>{showTab('tools');if(typeof intelFindDuplicatesUI==='function')intelFindDuplicatesUI()}},
+    {type:'action',label:'Toggle semantic search',icon:ic('search'),run:()=>{showTab('tasks');if(typeof isIntelReady !== 'function' || !isIntelReady()){if(typeof syncHeaderAIChip === 'function') syncHeaderAIChip('error', 'Load model first — open Tools');showTab('tools');return}const cb=gid('taskSearchSemantic');if(cb){cb.checked=!cb.checked;if(typeof toggleTaskSearchSemantic==='function')toggleTaskSearchSemantic()}}},
   ];
   const items=[];
   // Match actions
@@ -296,8 +297,8 @@ function renderTaskItem(t,depth){
   }
   // Category badge (values alignment)
   if(t.category){
-    const catIcon={health:'❤',finance:'💰',work:'💼',relationships:'🤝',learning:'📚',home:'🏠',personal:'🧘',other:'📌'}[t.category]||'📌';
-    signalChips+='<span class="task-sig sig-cat" title="'+(t.valuesNote||t.category)+'">'+catIcon+' '+t.category+'</span>';
+    const catSvg=(typeof window.categoryIcon==='function')?window.categoryIcon(t.category):'';
+    signalChips+='<span class="task-sig sig-cat" title="'+(t.valuesNote||t.category)+'"><span class="sig-cat-ic">'+catSvg+'</span>'+t.category+'</span>';
   }
   // Values alignment dots
   if(t.valuesAlignment&&t.valuesAlignment.length){
@@ -308,7 +309,8 @@ function renderTaskItem(t,depth){
   }
   if(typeof isParetoTop==='function' && isParetoTop(t.id)){
     const sc=(typeof getImpactScore==='function'?getImpactScore(t.id):0);
-    signalChips+='<span class="task-sig sig-pareto" title="High-leverage task (top ~20% by impact'+(sc?' · score '+sc.toFixed(1):'')+')">⚡ impact</span>';
+    const zapIc=(typeof window.icon==='function')?window.icon('zap',{size:11}):'';
+    signalChips+='<span class="task-sig sig-pareto" title="High-leverage task (top ~20% by impact'+(sc?' · score '+sc.toFixed(1):'')+')"><span class="sig-cat-ic">'+zapIc+'</span>impact</span>';
   }
 
   // Hover-only metadata (status badge + tags + description preview) — hidden by default, reveal on hover
@@ -398,7 +400,8 @@ function renderBoard(visibleTasks){
       card.onclick=function(){openTaskDetail(t.id)};
       const path=getTaskPath(t.id);
       const breadcrumb=path.length>1?'<div style="font-size:10px;color:var(--text-3);margin-bottom:4px">'+esc(path.slice(0,-1).join(' › '))+'</div>':'';
-      const due=t.dueDate?'<span class="due-chip'+(getDueClass(t.dueDate)?' '+getDueClass(t.dueDate):'')+'">📅 '+fmtDue(t.dueDate)+'</span>':'';
+      const dueIc=(typeof window.icon==='function')?window.icon('calendar',{size:12}):'';
+      const due=t.dueDate?'<span class="due-chip'+(getDueClass(t.dueDate)?' '+getDueClass(t.dueDate):'')+'">'+dueIc+' '+fmtDue(t.dueDate)+'</span>':'';
       const tags=(t.tags||[]).slice(0,2).map(tg=>'<span class="tag-chip">'+esc(tg)+'</span>').join('');
       const time=getRolledUpTime(t.id)>0?'<span class="task-elapsed" style="font-size:10px">'+fmtHMS(getRolledUpTime(t.id))+'</span>':'';
       card.innerHTML=breadcrumb
@@ -454,7 +457,7 @@ function openTaskDetail(id){
   });
   // Type chips
   const tChips=gid('mdTypeChips');tChips.innerHTML='';
-  [['task','📋 Task'],['bug','🐛 Bug'],['idea','💡 Idea'],['errand','🏃 Errand'],['waiting','⏳ Waiting']].forEach(([key,lbl])=>{
+  [['task','Task'],['bug','Bug'],['idea','Idea'],['errand','Errand'],['waiting','Waiting']].forEach(([key,lbl])=>{
     const b=document.createElement('button');b.className='mfield-chip-btn'+((t.type||'task')===key?' active':'');
     b.textContent=lbl;
     b.onclick=function(){t.type=key;[...tChips.children].forEach(c=>c.classList.remove('active'));b.classList.add('active')};
@@ -470,7 +473,7 @@ function openTaskDetail(id){
   });
   // Energy chips
   const enChips=gid('mdEnergyChips');enChips.innerHTML='';
-  [['high','⚡ High energy'],['low','🌿 Low energy']].forEach(([key,lbl])=>{
+  [['high','High energy'],['low','Low energy']].forEach(([key,lbl])=>{
     const b=document.createElement('button');b.className='mfield-chip-btn'+((t.energyLevel||null)===key?' active':'');
     b.textContent=lbl;
     b.onclick=function(){t.energyLevel=t.energyLevel===key?null:key;[...enChips.children].forEach(c=>c.classList.remove('active'));if(t.energyLevel)b.classList.add('active')};
@@ -478,7 +481,7 @@ function openTaskDetail(id){
   });
   // Context chips
   const cxChips=gid('mdContextChips');cxChips.innerHTML='';
-  [['work','💼 Work'],['home','🏠 Home'],['phone','📱 Phone'],['computer','💻 Computer'],['errands','🚗 Errands']].forEach(([key,lbl])=>{
+  [['work','Work'],['home','Home'],['phone','Phone'],['computer','Computer'],['errands','Errands']].forEach(([key,lbl])=>{
     const b=document.createElement('button');b.className='mfield-chip-btn'+((t.context||null)===key?' active':'');
     b.textContent=lbl;
     b.onclick=function(){t.context=t.context===key?null:key;[...cxChips.children].forEach(c=>c.classList.remove('active'));if(t.context)b.classList.add('active')};
@@ -496,7 +499,7 @@ function openTaskDetail(id){
   // Tags
   renderTagsEditor(id);
   // Category chips
-  const CATS=[['health','❤ Health'],['finance','💰 Finance'],['work','💼 Work'],['relationships','🤝 Relationships'],['learning','📚 Learning'],['home','🏠 Home'],['personal','🧘 Personal'],['other','📌 Other']];
+  const CATS=[['health','Health'],['finance','Finance'],['work','Work'],['relationships','Relationships'],['learning','Learning'],['home','Home'],['personal','Personal'],['other','Other']];
   const catChips=gid('mdCategoryChips');catChips.innerHTML='';
   CATS.forEach(([key,lbl])=>{
     const b=document.createElement('button');b.className='mfield-chip-btn'+((t.category||null)===key?' active':'');

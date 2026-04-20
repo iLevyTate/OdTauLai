@@ -48,7 +48,7 @@
       console.warn('External sw.js failed, falling back to inline SW:', err);
       // Fallback: inline SW via blob URL
       const swCode = `
-        const CACHE = 'odtaulai-v21-inline';
+        const CACHE = 'odtaulai-v22-inline';
         self.addEventListener('install', e => self.skipWaiting());
         self.addEventListener('activate', e => e.waitUntil(clients.claim()));
         self.addEventListener('fetch', e => {

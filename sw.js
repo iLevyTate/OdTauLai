@@ -1,5 +1,5 @@
-// ODTAULAI Service Worker v21 — ambient intelligence (Transformers.js / HF CDN pass-through)
-const CACHE_NAME = 'odtaulai-v21';
+// ODTAULAI Service Worker v22 — ambient intelligence (Transformers.js / HF CDN pass-through)
+const CACHE_NAME = 'odtaulai-v22';
 
 const ASSETS = [
   './',
@@ -8,6 +8,7 @@ const ASSETS = [
   './favicon.ico',
   './css/main.css',
   './js/pwa.js',
+  './js/icons.js',
   './js/utils.js',
   './js/storage.js',
   './js/audio.js',

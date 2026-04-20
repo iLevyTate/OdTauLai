@@ -4,18 +4,19 @@
  */
 
 const LIFE_CATS = ['health','finance','work','relationships','learning','home','personal','other'];
-const CAT_ICON  = {health:'❤',finance:'💰',work:'💼',relationships:'🤝',learning:'📚',home:'🏠',personal:'🧘',other:'📌'};
+// Category / Schwartz icons are UI_ICONS keys, resolved to SVG at render time via window.icon()
+const CAT_ICON  = {health:'heart',finance:'dollar',work:'briefcase',relationships:'users',learning:'book',home:'home',personal:'leaf',other:'pin'};
 const SCHWARTZ = {
-  'self-direction':{ icon:'🧭', def:'Independent thought, creativity, freedom to choose your own goals.' },
-  'stimulation':   { icon:'⚡', def:'Excitement, novelty, challenge, variety over routine.' },
-  'hedonism':      { icon:'🌟', def:'Pleasure, enjoyment, comfort, sensory gratification.' },
-  'achievement':   { icon:'🏆', def:'Personal success, demonstrated competence, goal achievement.' },
-  'power':         { icon:'👑', def:'Social status, authority, control over resources and people.' },
-  'security':      { icon:'🛡', def:'Safety, stability, harmony — reducing risk and uncertainty.' },
-  'conformity':    { icon:'🤝', def:'Meeting obligations, honoring commitments, maintaining harmony.' },
-  'tradition':     { icon:'🏛', def:'Respect for cultural customs, family traditions.' },
-  'benevolence':   { icon:'❤', def:'Welfare of close others — family, friends, community.' },
-  'universalism':  { icon:'🌍', def:'Welfare of all people and nature — justice, sustainability.' },
+  'self-direction':{ icon:'compass', def:'Independent thought, creativity, freedom to choose your own goals.' },
+  'stimulation':   { icon:'zap',     def:'Excitement, novelty, challenge, variety over routine.' },
+  'hedonism':      { icon:'sparkles',def:'Pleasure, enjoyment, comfort, sensory gratification.' },
+  'achievement':   { icon:'trophy',  def:'Personal success, demonstrated competence, goal achievement.' },
+  'power':         { icon:'crown',   def:'Social status, authority, control over resources and people.' },
+  'security':      { icon:'shield',  def:'Safety, stability, harmony — reducing risk and uncertainty.' },
+  'conformity':    { icon:'users',   def:'Meeting obligations, honoring commitments, maintaining harmony.' },
+  'tradition':     { icon:'columns', def:'Respect for cultural customs, family traditions.' },
+  'benevolence':   { icon:'heart',   def:'Welfare of close others — family, friends, community.' },
+  'universalism':  { icon:'globe',   def:'Welfare of all people and nature — justice, sustainability.' },
 };
 const VALUE_KEYS = Object.keys(SCHWARTZ);
 

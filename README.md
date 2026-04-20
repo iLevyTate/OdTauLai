@@ -1,148 +1,365 @@
+<div align="center">
+
+<img src="icons/icon-512.png" alt="ODTAULAI" width="128" height="128" />
+
 # ODTAULAI
 
-**O**n **d**evice **t**ask **a**pp **u**sing **l**ocal **a**mbient **i**ntelligence.
+**On‑Device Task App Using Local Ambient Intelligence**
 
-A privacy-first Pomodoro timer + ClickUp-style task manager that runs entirely in your browser. A compact **embedding model** runs on your device so features can treat tasks by **meaning and context** (semantic similarity)—not just matching words. No account, no tracking, no sync by default. Everything stays on your device.
+*A Pomodoro timer and ClickUp‑style task manager that understands what your tasks **mean** — on your device, offline, with no account, no telemetry, no cloud LLM.*
 
-<img src="icons/icon-512.png" alt="ODTAULAI" width="120" />
+<sub>Vanilla JS · No build step · PWA · ~33 MB on‑device model · MIT</sub>
 
-## Features
+</div>
 
-**Pomodoro Timer**
-- Focus / Short Break / Long Break phases with auto-cycling
-- Quick Timers (multi-instance) with presets (1m through 1h)
-- Stopwatch with lap tracking
-- Repeating chimes (e.g., posture check every 15min)
-- Background audio keepalive — chimes fire even when tab is minimized
+---
 
-**ClickUp-Style Tasks**
-- Nested tasks with subtasks
-- Statuses: Open / In Progress / Review / Blocked / Done
-- Priorities: Urgent / High / Normal / Low (with color-coded left stripe)
-- Due dates, reminders, recurring tasks (daily/weekdays/weekly/monthly)
-- Tags, starred pins, time tracking per task
-- Natural-language quick add: `Buy milk tomorrow @urgent #shopping !star ~daily`
+## How to say it
 
-**Smart Views**
-- Today, Week, Overdue, Unscheduled, Starred, Completed, Archive
-- Group by priority, status, due date, or list
-- List / Board (kanban) / Calendar views
-- Search, filter, sort
+**ODTAULAI** → **“ode‑TOW‑lie”** *(/oʊdˈtaʊlaɪ/)* — two syllables, stress on the middle: *ode* · **Tow** · *lie*.
 
-**Productivity**
-- Cmd+K command palette
-- Drag-drop reorder
-- Mobile swipe: right to complete, left to delete (both with haptic feedback)
-- Dark / light theme
-- CSV / Markdown / TXT export
-- Full offline support (PWA)
+Prefer letters? `O‑D‑T‑A‑U‑L‑A‑I` works too. It's an acronym, so both are fine:
 
-## Installation
+> **O**n‑**d**evice **t**ask **a**pp **u**sing **l**ocal **a**mbient **i**ntelligence.
 
-### Quick start (local)
+Not a chatbot. Not a wrapper around somebody else's API. Not a subscription. Just a very fast, very private task app that happens to understand the meaning of your tasks — geometrically, in a vector space, right on your machine.
 
-1. **Open directly:** Double-click `index.html` — works in any modern browser from `file://`. Data persists in localStorage.
+---
 
-2. **Serve locally** (recommended, enables PWA install):
-   ```bash
-   # Python 3
-   python3 -m http.server 8080
+## Why ODTAULAI
 
-   # Node
-   npx serve .
+| Everyone else | ODTAULAI |
+|---|---|
+| Cloud sync, accounts, trackers | Nothing leaves the device. No account. No analytics. |
+| "AI" = cloud LLM, your text leaves the device | On‑device embeddings. Text stays local. |
+| Heavy SPA, 10 MB of JS, a build pipeline | Vanilla JS, no bundler, no framework, no build |
+| Timer **or** tasks **or** calendar | Timer + tasks + calendar feeds + P2P sync + AI, one file server |
+| Destructive AI "fix it for me" buttons | AI **proposes** updates — you preview, apply, undo |
 
-   # Then visit http://localhost:8080
-   ```
+**Local‑first isn't a marketing word here.** Open the app offline. Read the source. Search the repo for `fetch(`. The only outbound calls are the one‑time model download from the Hugging Face CDN (cached forever after) and the optional calendar feeds / P2P sync **you** turn on.
 
-3. **Install as app:**
-   - **Chrome/Edge desktop:** Click the install icon in the address bar
-   - **iOS Safari:** Share button → Add to Home Screen
-   - **Android Chrome:** Menu (⋮) → Install app
-   - **Firefox:** Address bar → install icon (desktop only)
+---
 
-### Deploy to the web
+## Highlights
 
-See [DEPLOY.md](DEPLOY.md) for step-by-step guides for:
-- GitHub Pages
-- Netlify (drag-and-drop)
-- Vercel
-- Cloudflare Pages
-- Your own server
+### The ambient intelligence (the headline feature)
 
-## File structure
+A compact sentence‑embedding model — **`Xenova/gte-small`**, 384 dimensions, about 33 MB — loads into your browser via **Transformers.js**. Every task title + description is encoded into a vector. Cosine similarity in that vector space lets the app reason about **meaning and context**, not just keywords.
+
+Runs on **WebGPU** when available, **WASM** everywhere else (including iPhone). First load downloads the model weights from the Hugging Face / jsDelivr CDN; after that it's cached by the browser and the app is fully offline.
+
+What you actually get from it:
+
+- **Semantic search** — toggle `◎ Semantic` next to the search box. `"bills"` finds `"pay the electricity"`.
+- **Smart‑add suggestions** — type a new task and the app predicts category, priority, effort, context, energy, tags, and target list from your existing tasks via kNN.
+- **Harmonize all fields** — one click proposes updates for every task: values (Schwartz), category, priority, effort, context, energy, tags (merged, never wiped). Preview diffs. Apply what you want. Undo the last 10 batches.
+- **Auto‑organize into lists** — route tasks to the list whose name + description matches best. Preview before apply.
+- **Duplicate detection** — near‑duplicate pairs by cosine ≥ 0.9, with archive‑and‑merge flow.
+- **Similar tasks** — top neighbors surface in the task detail drawer.
+- **Align values only** — narrow button for Schwartz‑only alignment if you don't want other fields touched.
+
+Strictly **not** a chat LLM: no free‑form generation, no "assistant" loop, no calls to OpenAI / Anthropic / anyone. The "understanding" is geometric.
+
+### Impact scoring (Pareto 80/20)
+
+A derived impact score ranks every active task from signals you already have — priority, due urgency, **how many other tasks this one unblocks**, values alignment, starred, **multiplied by an effort inverse** (`xs → 1.35x`, `xl → 0.7x`). Classic 80/20: high output, low input, rises.
+
+- Smart view chip **`⚡ Impact`** — live count of the top ~20% (capped at 20).
+- Sort option **`Sort: Impact (Pareto 80/20)`**.
+- Inline **`⚡ impact`** badge on items in the top set, tooltip shows the numeric score.
+- No new fields on tasks. No persisted state. Recomputed each render from live data.
+
+### Deep‑work timer
+
+- **Pomodoro** with Focus / Short Break / Long Break and auto‑cycle, configurable per‑phase durations, long‑break cadence.
+- **Quick Timers** — spawn multiple named countdowns (tea, pasta, stretch) with presets from 1 min → 1 hr.
+- **Stopwatch** with laps.
+- **Repeating chimes** (e.g. posture check every 15 min).
+- **Background‑safe audio** — timers still chime when the tab is minimized: audio events are pre‑scheduled on the Web Audio clock (immune to `setInterval` throttling), a silent 20 Hz oscillator keeps the tab alive, **Media Session API** puts controls in the OS, **Wake Lock** on mobile.
+- **Picture‑in‑picture mini timer** that follows you across tabs.
+
+### ClickUp‑style tasks
+
+- **Nested subtasks**, arbitrary depth, collapsible.
+- **Statuses**: Open / In Progress / Review / Blocked / Done — cycle with a click.
+- **Priorities**: Urgent / High / Normal / Low / None with coloured left‑stripe.
+- **Due dates** with smart chips (overdue / today / soon / future), **start dates**, **reminders**, **recurring** (daily / weekdays / weekly / monthly).
+- **Tags**, **starred pins**, **per‑task time tracking** with rollup from subtasks.
+- **Blockers** (`blockedBy`) — real dependency graph, used by the impact score.
+- **Effort** (xs/s/m/l/xl), **energy level**, **context** (`@home`, `@phone`, `@errands`).
+- **Values alignment** (Schwartz human values) per task.
+- **Checklists**, **notes**, **URL**, **completion notes** per task.
+- **Multiple lists** with colours and descriptions (descriptions drive AI list routing).
+
+### Input superpowers
+
+- **Natural‑language quick add** (via `chrono-node`):
+  `Buy milk tomorrow @urgent #shopping !star ~daily`
+- **Bulk paste import** — paste multi‑line text into the task input, a preview modal opens with one task per line; edit before committing. Skips lines >200 chars.
+- **Smart‑add enhancement** — hit the `✦` button next to the input to prefill category, priority, tags, and list from embeddings before you submit.
+- **Drag‑and‑drop reorder**, subtask drop, list drop.
+- **Mobile swipe gestures** — swipe right to complete, swipe left to archive, with haptic feedback.
+
+### Views & navigation
+
+- **List / Board (kanban) / Calendar** — all three, switchable, keyboard‑accessible.
+- **Smart views**: All, Today, Week, Overdue, Unscheduled, Starred, **Impact (Pareto)**, Completed, Archive.
+- **Group by** priority, status, due date, or list.
+- **Command palette** (Cmd / Ctrl + K) — fuzzy over tasks, actions, views, lists, AI commands, theme, sort, sync, everything.
+- **Dark and light themes** with a one‑key toggle.
+- **Responsive** down to 320 px; touch‑first on mobile; full keyboard on desktop.
+
+### Calendar feeds (read‑only iCal / ICS)
+
+- Subscribe to any public `.ics` URL — Google Calendar, Outlook, Fastmail, Proton, personal CalDAV exports.
+- Parsed entirely in the browser (full VEVENT / VTIMEZONE / RRULE / EXDATE expansion, 180‑day window).
+- Events appear alongside your tasks in the Calendar view.
+- Per‑feed colour and visibility toggle.
+
+### Optional P2P sync (off by default)
+
+- **WebRTC via PeerJS** — paste a short code on your second device, they're linked.
+- **Zero server‑side state** — the PeerJS signalling server brokers the handshake; your task payload goes direct device‑to‑device.
+- **Beta** — you can turn it off, wipe, and forget it ever existed.
+
+### Data portability
+
+- **Export**: full JSON (everything), CSV (spreadsheet), Markdown (human‑readable).
+- **Import**: JSON round‑trips perfectly; CSV and plain‑text task lists import cleanly.
+- **Clear all** with confirmation — real delete, nothing hiding on a server.
+
+### PWA & offline
+
+- Installs as a standalone app on Chrome/Edge/Safari/Firefox (desktop), iOS Safari (Add to Home Screen), Android Chrome.
+- **Works offline** after first visit — service worker precaches the shell.
+- **Manifest shortcuts**: jump straight to "Focus Timer" or "New Task" from the OS app icon.
+- **Launch handler** — deep links focus the existing window instead of spawning duplicates.
+
+### Bells, whistles, and quality‑of‑life
+
+- **Undo stack** for AI batches (last 10).
+- **Save indicator** shows only on user‑initiated saves, throttled to 4 s, auto‑hides after 900 ms — no nagging.
+- **Today banner** — only shown when there's something urgent (overdue or due‑today). Zero noise when your day is clean.
+- **Storage telemetry** — Settings shows IndexedDB quota, whether persistent storage is granted, online/offline state.
+- **Optional persistent storage** prompt so "Clear browsing data" doesn't nuke your tasks.
+- **Haptic feedback** on destructive mobile gestures.
+- **Accessibility**: `aria‑live` regions for the AI status chip, semantic search gated with a visible disabled state when the model isn't ready, focusable and keyboard‑navigable everywhere.
+
+---
+
+## Getting started
+
+### The 10‑second path
+
+```bash
+git clone https://github.com/<you>/STUPInD.git ODTAULAI
+cd ODTAULAI
+python3 -m http.server 8080
+# open http://localhost:8080
+```
+
+Or just **double‑click `index.html`** — it works from `file://` too. You lose service‑worker offline and PWA install, but everything else runs.
+
+### One‑click deploys
+
+| Host | Command | Notes |
+|---|---|---|
+| Netlify Drop | drag the repo to https://app.netlify.com/drop | 30 seconds, free, HTTPS |
+| GitHub Pages | push, enable Pages on `main /` | free, permanent URL |
+| Vercel | `npx vercel` | free, instant |
+| Cloudflare Pages | connect GitHub, no build command, output `/` | free, great custom domains |
+| Caddy | `caddy file-server --domain example.com --root .` | auto‑HTTPS one‑liner |
+
+Full walkthroughs with Nginx configs, troubleshooting, custom icons, and manifest `id` guidance live in **[DEPLOY.md](DEPLOY.md)**.
+
+### Install as an app
+
+- **Chrome / Edge desktop** — click the install icon in the address bar.
+- **Safari macOS** — File → Add to Dock.
+- **iOS Safari** — Share → Add to Home Screen.
+- **Android Chrome** — ⋮ → Install app.
+- **Firefox desktop** — address bar install icon (desktop only).
+
+---
+
+## Privacy, explicitly
+
+ODTAULAI **does not**:
+
+- collect any data,
+- send your tasks anywhere,
+- use analytics, tracking, or cookies,
+- require an account, email, or phone number,
+- sync across devices unless you explicitly opt into the beta P2P feature.
+
+ODTAULAI **does**:
+
+- store app state in `localStorage`,
+- store the embedding cache in `IndexedDB`,
+- fetch the embedding model once from the Hugging Face / jsDelivr CDN, then cache it,
+- fetch calendar feeds you subscribe to (those servers see you),
+- open a WebRTC connection to a device you explicitly pair with (PeerJS signalling server sees the handshake, not the payload).
+
+You can verify all of the above by searching the source for `fetch(`, `XMLHttpRequest`, or `new WebSocket(` — there are no other network calls.
+
+---
+
+## Architecture
+
+No framework, no bundler, no transpiler. Just **HTML, CSS, and vanilla JS modules** loaded in order from `index.html`.
 
 ```
 ODTAULAI/
-├── index.html
-├── manifest.json
-├── sw.js
-├── favicon.ico
-├── css/main.css
-├── js/                         App modules (utils → … → app.js)
-├── icons/                      PWA icons (192, 512, maskable, apple-touch, etc.)
-├── README.md
-└── DEPLOY.md
+├── index.html                single source of truth for the UI
+├── manifest.json             PWA manifest
+├── sw.js                     service worker (shell precache)
+├── css/main.css              themed design system with CSS variables
+├── js/
+│   ├── utils.js              helpers, date, DOM
+│   ├── storage.js            localStorage + IndexedDB persistence
+│   ├── nlparse.js            natural-language quick-add (chrono-node)
+│   ├── tasks.js              task model, filtering, sorting, impact scoring
+│   ├── timer.js              pomodoro, quick timers, stopwatch, chimes
+│   ├── audio.js              Web Audio scheduling + wake-lock
+│   ├── ui.js                 renderers, command palette, task item
+│   ├── ai.js                 Transformers.js pipeline, semantic features
+│   ├── intel.js              intelligence bootstrap + status
+│   ├── intel-features.js     harmonize, auto-organize, duplicates
+│   ├── embed-store.js        IndexedDB vector cache
+│   ├── calfeeds.js           iCal / ICS parser + renderer
+│   ├── sync.js               WebRTC P2P (PeerJS)
+│   ├── pwa.js                service-worker registration + update flow
+│   ├── app.js                boot, version, routing
+│   └── vendor/peerjs.min.js  offline fallback for P2P signalling client
+├── icons/                    PWA icons (192, 512, maskable, apple-touch, etc.)
+├── DEPLOY.md
+└── README.md
 ```
+
+**Runtime dependencies** are loaded from CDNs on demand, never bundled:
+
+| Library | Purpose | When |
+|---|---|---|
+| `@huggingface/transformers` | on‑device embeddings | first time you use an AI feature |
+| `Xenova/gte-small` | 384‑dim sentence embedding model (~33 MB) | first AI feature use, then cached |
+| `chrono-node` | natural‑language dates | first time you quick‑add with dates |
+| `peerjs` | WebRTC signalling client | only if you enable P2P sync |
+
+Everything else is hand‑written.
+
+---
+
+## Keyboard cheat sheet
+
+| Action | Shortcut |
+|---|---|
+| Command palette | `Cmd/Ctrl + K` |
+| Go to Tasks / Focus / Tools / Data / Settings | `1` / `2` / `3` / `4` / `5` *(from palette)* |
+| Toggle theme | palette → "Toggle theme" |
+| Toggle semantic search | palette → "Toggle semantic search" |
+| Impact view | palette → "Impact view" |
+| Sort by Impact | palette → "Sort by Impact" |
+| Start / stop focus timer | palette → "Start focus timer" |
+| Add new list | palette → "Add new list" |
+| Find duplicates | palette → "Find duplicate tasks" |
+| Harmonize all fields | palette → "Harmonize all fields" |
+
+All palette actions fuzzy‑match — you rarely need to remember the exact label.
+
+## Quick‑add cheat sheet
+
+```
+Buy milk tomorrow @urgent #shopping !star ~daily
+│         │         │        │         │     └─ recurrence: daily | weekdays | weekly | monthly
+│         │         │        │         └─ star flag
+│         │         │        └─ tag
+│         │         └─ priority: urgent | high | normal | low
+│         └─ date: natural language (chrono-node — "next Monday at 3pm", "in 2 hours", …)
+└─ task name
+```
+
+Paste multiple lines at once for **bulk import** — you'll get a preview modal.
+
+---
 
 ## Browser support
 
-| Browser | Local use | PWA install | Background audio | Offline |
-|---------|-----------|-------------|------------------|---------|
-| Chrome desktop | ✓ | ✓ | ✓ (while open) | ✓ |
-| Chrome Android | ✓ | ✓ | ✓ (while open) | ✓ |
-| Safari macOS | ✓ | ✓ | ✓ | ✓ |
-| Safari iOS | ✓ | ✓ (Add to Home) | ⚠ limited | ✓ |
-| Firefox | ✓ | desktop only | ✓ | ✓ |
-| Edge | ✓ | ✓ | ✓ | ✓ |
+| Browser | Local use | PWA install | Background audio | Offline | WebGPU AI |
+|---|---|---|---|---|---|
+| Chrome / Edge desktop | Yes | Yes | Yes (while open) | Yes | Yes |
+| Chrome Android | Yes | Yes | Yes (while open) | Yes | partial |
+| Safari macOS | Yes | Yes | Yes | Yes | Yes (17+) |
+| Safari iOS | Yes | Add to Home | limited | Yes | WASM fallback |
+| Firefox | Yes | desktop only | Yes | Yes | WASM fallback |
 
-## Privacy
+The AI falls back from **WebGPU → WASM** automatically; no action required from you.
 
-**ODTAULAI does not:**
-- Collect any data
-- Send anything to any server
-- Use analytics, tracking, or cookies
-- Require an account or login
-- Sync across devices (intentionally — your data never leaves your device)
+---
 
-**All data is stored in:** `localStorage` (app state) and IndexedDB (embedding cache for the on-device intelligence model). Clearing site data wipes everything. Optional P2P sync is separate and off by default.
+## FAQ
 
-## Ambient intelligence (meaning and context, not chat)
+**Is my task text ever sent to a server?**
+No. The embedding model runs locally via Transformers.js. The only outbound calls are the one‑time model download from Hugging Face / jsDelivr and whatever integrations you explicitly enable (calendar feeds, P2P sync).
 
-ODTAULAI is **not** a conversational LLM: it does not write essays, hold chat, or call cloud APIs with your task text. It **does** use a small **sentence embedding** model so the app can reason about **what your tasks mean**—similar ideas match even when the wording differs.
+**Why a small embedding model instead of a chat LLM?**
+Chat LLMs (a) don't fit on a phone, (b) need to talk to a cloud, (c) invent plausible nonsense ("hallucinate"), and (d) are overkill for "what does this task mean?". A 33 MB embedding model answers that question deterministically, on‑device, in milliseconds, without generating anything.
 
-**Transformers.js** loads **Xenova/gte-small** (~33 MB, 384 dimensions), which turns each task (title + description) into a vector. Cosine similarity in that space approximates **semantic** closeness: context and meaning for search, neighbors, duplicates, and list routing. Runs via **WebGPU** when available, otherwise **WASM** (including **iPhone**).
+**How do I get the AI features to work?**
+Open the **Tools** tab. The embedding model downloads on first use (one time, ~33 MB). After that, everything is instant. A status chip in the header shows load progress; click it to retry if something fails.
 
-**What it does**
-- **Semantic search** — optional “Semantic” toggle next to the task search box; ranks tasks by cosine similarity to your query.
-- **Smart-add suggestions** — kNN over your existing tasks predicts category, priority, tags, effort, etc.
-- **Harmonize all fields** — Settings → Intelligence: one action proposes **updates** from embeddings + similar tasks: **values** (Schwartz), **category**, **priority**, **effort**, **context**, **energy**, **tags** (merged, not wiped). Preview each change, apply selected, undo. Use **Align values only** for Schwartz-only; use **Auto-organize into lists** to **move** tasks between lists by list name/description similarity.
-- **Duplicate detection** — flags rows similar to another task (≥0.9 cosine); Settings → Find duplicates / merge.
-- **Values alignment** — same Schwartz cosine pipeline as harmonize; narrow “values only” button if you do not want category/priority touched.
-- **What next?** — rule-based ranking (priority, due date, blockers, optional time/energy fit); **no embeddings**.
-- **Similar tasks** — top semantic neighbors in the task detail drawer.
-- **Auto-organize into lists** — optional routing of tasks to the list whose name + description best matches by embedding (preview / apply / undo).
+**Will clearing site data delete my tasks?**
+Yes — grant **persistent storage** in Settings to prevent this. Or export JSON periodically; it round‑trips perfectly.
 
-**Destructive actions** (archive / delete) stay in your hands: intelligence proposes **updates** and **moves**; merging duplicates still uses archive+merge flows you confirm.
+**Can I sync across devices without the cloud?**
+Yes — the beta P2P sync uses WebRTC. Your data goes peer‑to‑peer; only the handshake touches a signalling server.
 
-**What it does *not* do**
-- No free-form chat, no story-writing, no generative “assistant” loop. Features are **deterministic**: embed text → compare vectors → apply rules. The “understanding” is **geometric** (embeddings), not a model that invents new prose about your tasks.
+**How do I run this on a corporate network that blocks CDNs?**
+Host `@huggingface/transformers`, the model files, `chrono-node`, and `peerjs` yourself; update the CDN URLs in `js/ai.js`, `js/nlparse.js`, and `js/sync.js`.
 
-Model files are fetched from **Hugging Face / jsDelivr** on first use, then cached by the browser; the service worker does not cache those URLs so the runtime cache works as intended.
+**Can I remove the AI entirely?**
+Yes — it's strictly opt‑in. If you never visit the Tools tab or toggle semantic search, nothing downloads. Delete `js/ai.js`, `js/intel.js`, `js/intel-features.js`, `js/embed-store.js` and remove their `<script>` tags to strip it from the bundle.
 
-## Background audio — how it works
+**Why vanilla JS?**
+Frameworks rot. `git clone`, open in any browser, and in 10 years this will still work. No npm install, no lockfile drift, no "recompile the universe to change a button."
 
-The timer keeps playing chimes when the tab is minimized/backgrounded by:
-1. Pre-scheduling audio events on the Web Audio clock (unaffected by setInterval throttling)
-2. Playing a silent 20Hz oscillator at 0.0001 gain to keep the tab "active" in the browser's eyes
-3. Registering with the Media Session API (appears in OS media controls)
-4. Requesting a Wake Lock on mobile
+---
 
-**Limitation:** When the browser is *fully closed*, nothing runs. Install as a PWA for the OS to treat it more like a standalone app.
+## Not in scope (deliberately)
+
+- Generative chat / LLM writing assistants.
+- Cloud accounts, user profiles, team features.
+- Analytics. Telemetry. A/B tests. "Engagement."
+- Push notifications to your phone while the app is fully closed (browsers don't allow this without a cloud backend — by design).
+
+If you need any of the above, this isn't the right app. That's the point.
+
+---
+
+## Contributing
+
+Pull requests welcome. Keep it:
+
+- vanilla (no framework, no build step),
+- local‑first (no new outbound calls without an opt‑in),
+- small (every feature earns its kilobytes),
+- accessible (keyboard and screen reader).
+
+Run `node --check js/*.js` before committing. There's no test framework — verification is manual: 360 / 390 / 640 / 960 widths, both themes, `file://` and HTTPS, first‑load embedding progress visible, PWA install still works.
+
+---
 
 ## License
 
-MIT. Do what you want.
+MIT. Do what you want. Attribution appreciated but not required.
 
 ## Credits
 
-Built with vanilla JavaScript, HTML, CSS — no frameworks, no build step. Runtime loads **@huggingface/transformers** and **chrono-node** from CDN when needed.
+Built with:
+- [Transformers.js](https://huggingface.co/docs/transformers.js) — on‑device inference.
+- [`Xenova/gte-small`](https://huggingface.co/Xenova/gte-small) — the embedding model.
+- [chrono-node](https://github.com/wanasit/chrono) — natural‑language date parsing.
+- [PeerJS](https://peerjs.com/) — WebRTC signalling client.
+
+Inspired by ClickUp, Things, Todoist, OmniFocus, and the long‑standing tradition of Pomodoro apps that don't need an account.
+
+Everything else — vanilla HTML, CSS, JS, and a lot of care.

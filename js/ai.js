@@ -291,14 +291,14 @@ function _describeOp(op){
   const t = a.id ? findTask(a.id) : null;
   const nm = t ? `"${t.name.slice(0,40)}"` : (a.name ? `"${String(a.name).slice(0,40)}"` : '');
   switch(op.name){
-    case 'CREATE_TASK': return `➕ Create ${nm}` + _flds(a, ['priority','category','dueDate','effort']);
+    case 'CREATE_TASK': return `Create ${nm}` + _flds(a, ['priority','category','dueDate','effort']);
     case 'UPDATE_TASK': return `✎ Update ${nm}` + _chgs(t, a);
     case 'MARK_DONE': return `✓ Done: ${nm}` + (a.completionNote ? ` — "${String(a.completionNote).slice(0,40)}"` : '');
     case 'REOPEN': return `↻ Reopen: ${nm}`;
     case 'TOGGLE_STAR': return `${t?.starred ? '☆ Unstar' : '★ Star'}: ${nm}`;
-    case 'ARCHIVE_TASK': return `📦 Archive: ${nm}`;
+    case 'ARCHIVE_TASK': return `Archive: ${nm}`;
     case 'RESTORE_TASK': return `♻ Restore: ${nm}`;
-    case 'DELETE_TASK': return `🗑 DELETE FOREVER: ${nm}`;
+    case 'DELETE_TASK': return `DELETE FOREVER: ${nm}`;
     case 'DUPLICATE_TASK': return `⎘ Duplicate: ${nm}`;
     case 'MOVE_TASK': return `↱ Move ${nm} → parent #${a.newParentId || '(top)'}`;
     case 'CHANGE_LIST': { const l = lists.find(x => x.id === a.listId); return `↦ Move ${nm} → "${l?.name || '#' + a.listId}"`; }
@@ -560,7 +560,7 @@ function _renderBreakdown(){
   });
   const rows = Object.entries(by).sort((x, y) => y[1].count - x[1].count).map(([c, s]) => `
     <div class="breakdown-row">
-      <span class="breakdown-cat">${CAT_ICON[c] || '📌'} ${c}</span>
+      <span class="breakdown-cat"><span class="breakdown-cat-ic">${(window.icon && window.icon(CAT_ICON[c] || 'pin', {size:14})) || ''}</span> ${c}</span>
       <span class="breakdown-count">${s.count}</span>
       ${s.urgent ? `<span class="breakdown-badge urgent">${s.urgent}!</span>` : ''}
       ${s.high ? `<span class="breakdown-badge high">${s.high}↑</span>` : ''}
@@ -578,7 +578,7 @@ function _renderValuesGrid(){
     const rank = sel ? _cfg.dominant.indexOf(key) + 1 : null;
     return `<div class="schwartz-card ${sel ? 'selected' : ''}" onclick="aiToggleValue('${key}')">
       <div class="schwartz-card-top">
-        <span class="schwartz-icon">${v.icon}</span>
+        <span class="schwartz-icon">${(window.icon && window.icon(v.icon, {size:16})) || ''}</span>
         <span class="schwartz-name">${key}</span>
         ${sel ? `<span class="schwartz-rank">#${rank}</span>` : ''}
       </div>
@@ -686,6 +686,57 @@ function renderAIPanel(){
   syncSemanticSearchUi();
 }
 
+/**
+ * Aggregates Transformers.js v3 progress callbacks.
+ * The callback fires per file (tokenizer.json, config.json, onnx/model_fp16.onnx…)
+ * with events { status, name, file, loaded, total, progress }.
+ * `progress` is already a percentage (0..100) per file — so showing it directly
+ * makes the bar reset each time a new file starts. Aggregating by bytes across
+ * files gives a single monotonic 0..100 for the whole model download.
+ */
+function _makeProgressAggregator(onUpdate){
+  const files = new Map(); // file path -> {loaded, total, done}
+  let lastEmittedPct = -1;
+  return function(ev){
+    if(!ev || typeof ev !== 'object') return;
+    const file = ev.file || ev.name || '_';
+    const entry = files.get(file) || {loaded: 0, total: 0, done: false};
+    if(ev.status === 'progress'){
+      if(Number.isFinite(ev.loaded)) entry.loaded = ev.loaded;
+      if(Number.isFinite(ev.total) && ev.total > 0) entry.total = ev.total;
+      // Fallback when byte counts missing: convert per-file percent into synthetic bytes.
+      if((!entry.total || !entry.loaded) && Number.isFinite(ev.progress)){
+        entry.total = 100;
+        entry.loaded = Math.min(100, Math.max(0, ev.progress));
+      }
+    }else if(ev.status === 'done'){
+      entry.done = true;
+      if(entry.total > 0) entry.loaded = entry.total;
+    }else if(ev.status === 'initiate' || ev.status === 'download'){
+      // seed entry so the file counts toward the total as soon as we know it exists
+    }
+    files.set(file, entry);
+
+    let sumLoaded = 0, sumTotal = 0;
+    for(const v of files.values()){
+      if(v.total > 0){ sumLoaded += v.loaded; sumTotal += v.total; }
+    }
+    // If we truly have no byte counts yet, fall back to count-of-files progress.
+    let pct;
+    if(sumTotal > 0){
+      pct = Math.max(0, Math.min(100, Math.round((sumLoaded / sumTotal) * 100)));
+    }else{
+      const doneCount = [...files.values()].filter(v => v.done).length;
+      pct = files.size ? Math.round((doneCount / files.size) * 100) : 0;
+    }
+    // Never go backwards once we've emitted a higher number — avoids visual jitter
+    // when Transformers.js emits `initiate` for a new file mid-stream.
+    if(pct < lastEmittedPct) pct = lastEmittedPct;
+    lastEmittedPct = pct;
+    onUpdate(pct, ev, entry);
+  };
+}
+
 function intelRetryLoad(){
   if(typeof intelLoad !== 'function') return;
   const w = document.getElementById('intelProgressWrap');
@@ -695,13 +746,15 @@ function intelRetryLoad(){
   const btn = document.getElementById('intelRetryBtn');
   if(btn) btn.style.display = 'none';
   if(w) w.style.display = '';
-  intelLoad(p => {
-    const v = p && (p.progress != null ? Math.round(p.progress * 100) : 0);
+  const onProgress = _makeProgressAggregator((v, ev) => {
     if(bar) bar.style.width = v + '%';
     if(pct) pct.textContent = v + '%';
-    if(txt) txt.textContent = (p && p.status) ? String(p.status).slice(0, 60) : '';
+    const status = ev && ev.status ? String(ev.status) : '';
+    const file = ev && ev.file ? ' · ' + String(ev.file).split('/').pop() : '';
+    if(txt) txt.textContent = (status + file).slice(0, 80);
     syncHeaderAIChip('loading', v + '%');
-  }).then(() => {
+  });
+  intelLoad(onProgress).then(() => {
     if(w) w.style.display = 'none';
     if(typeof ensureSchwartzEmbeddings === 'function'){
       ensureSchwartzEmbeddings().catch(() => {});
@@ -905,7 +958,7 @@ async function smartAddEnhance(){
     console.warn('[smart-add]', err);
   }finally{
     _intelBusy = false;
-    if(btn){ btn.disabled = false; btn.textContent = '✨'; }
+    if(btn){ btn.disabled = false; btn.innerHTML = (window.icon && window.icon('sparkles')) || ''; }
   }
 }
 
@@ -916,11 +969,12 @@ function _renderSmartAddChips(s){
   const ctxTips = { work:'At your desk/workplace', home:'At home', phone:'Requires a phone call', computer:'Requires a computer', errands:'Out and about' };
   const chips = [];
   if(s.priority) chips.push(`<span class="sa-chip sa-priority sa-p-${s.priority}" data-tip="Priority — tap to remove" onclick="smartAddRemove('priority')">priority: ${s.priority} ×</span>`);
-  if(s.category) chips.push(`<span class="sa-chip" data-tip="Category — tap to remove" onclick="smartAddRemove('category')">${CAT_ICON[s.category] || '📌'} ${s.category} ×</span>`);
+  const ic = (n, size) => (window.icon && window.icon(n, {size: size||13})) || '';
+  if(s.category) chips.push(`<span class="sa-chip" data-tip="Category — tap to remove" onclick="smartAddRemove('category')"><span class="sa-chip-ic">${ic(CAT_ICON[s.category] || 'pin')}</span> ${s.category} ×</span>`);
   if(s.effort) chips.push(`<span class="sa-chip" data-tip="${effortTips[s.effort] || 'Effort'} — tap to remove" onclick="smartAddRemove('effort')">effort: ${s.effort.toUpperCase()} ×</span>`);
   if(s.context) chips.push(`<span class="sa-chip" data-tip="${ctxTips[s.context] || 'Context'} — tap to remove" onclick="smartAddRemove('context')">${s.context} ×</span>`);
-  if(s.energyLevel) chips.push(`<span class="sa-chip" data-tip="Energy — tap to remove" onclick="smartAddRemove('energyLevel')">${s.energyLevel === 'high' ? '⚡' : '🌿'} ${s.energyLevel} ×</span>`);
-  if(s.dueDate) chips.push(`<span class="sa-chip" data-tip="Due date — tap to remove" onclick="smartAddRemove('dueDate')">📅 ${s.dueDate} ×</span>`);
+  if(s.energyLevel) chips.push(`<span class="sa-chip" data-tip="Energy — tap to remove" onclick="smartAddRemove('energyLevel')"><span class="sa-chip-ic">${ic(s.energyLevel === 'high' ? 'flame' : 'leaf')}</span> ${s.energyLevel} ×</span>`);
+  if(s.dueDate) chips.push(`<span class="sa-chip" data-tip="Due date — tap to remove" onclick="smartAddRemove('dueDate')"><span class="sa-chip-ic">${ic('calendar')}</span> ${s.dueDate} ×</span>`);
   if(s.tags && s.tags.length) s.tags.forEach(tag => chips.push(`<span class="sa-chip" data-tip="Tag — tap to remove" onclick="smartAddRemoveTag('${esc(tag)}')">#${esc(tag)} ×</span>`));
   prev.innerHTML = `
     <span class="smart-add-hint">Suggestions — tap to remove, Enter to add:</span>

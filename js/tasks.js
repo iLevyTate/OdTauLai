@@ -607,7 +607,8 @@ function toggleTaskDoneQuick(id){
       const row=document.querySelector('.task-item[data-task-id="'+id+'"]');
       if(row){
         row.classList.add('just-done');
-        const spark=document.createElement('span');spark.className='done-sparkle';spark.textContent='✨';
+        const spark=document.createElement('span');spark.className='done-sparkle';
+        spark.innerHTML=(window.icon && window.icon('sparkles',{size:20}))||'';
         const rect=row.getBoundingClientRect();
         spark.style.cssText='left:'+(rect.left+32)+'px;top:'+(rect.top+10)+'px;position:fixed;z-index:2000';
         document.body.appendChild(spark);
@@ -922,9 +923,15 @@ function renderTaskList(){
       // Has tasks, but filter/view excludes all
       empty.innerHTML='<div style="font-size:28px;margin-bottom:8px;opacity:.6">🔍</div><div style="font-weight:500;margin-bottom:4px">No tasks match your filters</div><div style="font-size:12px;opacity:.7">Try adjusting the Filters panel, or switch to the "All" smart view.</div>';
     } else if(smartView==='archived'){
-      empty.innerHTML='<div style="font-size:28px;margin-bottom:8px;opacity:.6">📦</div><div style="font-weight:500;margin-bottom:4px">Archive is empty</div><div style="font-size:12px;opacity:.7">Archived tasks will appear here when you archive them from the menu.</div>';
+      {
+        const ic=(window.icon && window.icon('archive',{size:28}))||'';
+        empty.innerHTML='<div class="empty-ic" style="opacity:.6;margin-bottom:8px">'+ic+'</div><div style="font-weight:500;margin-bottom:4px">Archive is empty</div><div style="font-size:12px;opacity:.7">Archived tasks will appear here when you archive them from the menu.</div>';
+      }
     } else {
-      empty.innerHTML='<div style="font-size:28px;margin-bottom:8px;opacity:.6">✨</div><div style="font-weight:500;margin-bottom:4px">No tasks yet</div><div style="font-size:12px;opacity:.7;margin-bottom:8px">Type above to add one, or try a quick-add shortcut:</div><div style="font-size:11px;opacity:.55;font-family:var(--font-mono,monospace);line-height:1.6">Buy milk <span style="color:var(--accent,#48b5e0)">tomorrow @urgent #shopping</span></div>';
+      {
+        const ic=(window.icon && window.icon('sparkles',{size:28}))||'';
+        empty.innerHTML='<div class="empty-ic" style="opacity:.6;margin-bottom:8px">'+ic+'</div><div style="font-weight:500;margin-bottom:4px">No tasks yet</div><div style="font-size:12px;opacity:.7;margin-bottom:8px">Type above to add one, or try a quick-add shortcut:</div><div style="font-size:11px;opacity:.55;font-family:var(--font-mono,monospace);line-height:1.6">Buy milk <span style="color:var(--accent,#48b5e0)">tomorrow @urgent #shopping</span></div>';
+      }
     }
     return;
   }

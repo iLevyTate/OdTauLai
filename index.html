@@ -103,7 +103,7 @@
         <input class="task-input" id="taskInput" placeholder="Add a task… or paste multiple lines to import"
           oninput="maybeShowEnhanceBtn()"
           onkeydown="if(event.key==='Enter'){if(window._smartAddPreview){applySmartAddAndSubmit()}else{addTask()}}">
-        <button class="task-enhance-btn" id="taskEnhanceBtn" onclick="smartAddEnhance()" style="display:none" title="Suggest metadata from your task history (embeddings)">✨</button>
+        <button class="task-enhance-btn" id="taskEnhanceBtn" onclick="smartAddEnhance()" style="display:none" title="Suggest metadata from your task history (embeddings)" data-icon="sparkles" aria-label="Smart-add suggestions"></button>
       </div>
       <button class="task-add" onclick="if(window._smartAddPreview){applySmartAddAndSubmit()}else{addTask()}">+ Add</button>
     </div>
@@ -121,15 +121,15 @@
 
     <!-- Smart views only — lightweight navigation -->
     <div class="smart-views" id="smartViews">
-      <button class="sv-chip active" data-view="all" onclick="setSmartView('all')"><span class="sv-icon">☰</span>All<span class="sv-count" id="svcAll">0</span></button>
-      <button class="sv-chip" data-view="today" onclick="setSmartView('today')"><span class="sv-icon">📅</span>Today<span class="sv-count" id="svcToday">0</span></button>
-      <button class="sv-chip" data-view="week" onclick="setSmartView('week')"><span class="sv-icon">🗓</span>Week<span class="sv-count" id="svcWeek">0</span></button>
-      <button class="sv-chip" data-view="overdue" onclick="setSmartView('overdue')"><span class="sv-icon">⚠</span>Overdue<span class="sv-count" id="svcOverdue">0</span></button>
-      <button class="sv-chip" data-view="unscheduled" onclick="setSmartView('unscheduled')"><span class="sv-icon">○</span>Unscheduled<span class="sv-count" id="svcUnscheduled">0</span></button>
-      <button class="sv-chip" data-view="starred" onclick="setSmartView('starred')"><span class="sv-icon">★</span>Starred<span class="sv-count" id="svcStarred">0</span></button>
-      <button class="sv-chip" data-view="impact" onclick="setSmartView('impact')" title="Top ~20% by leverage — derived from priority, due, effort, unblocks, values, star"><span class="sv-icon">⚡</span>Impact<span class="sv-count" id="svcImpact">0</span></button>
-      <button class="sv-chip" data-view="completed" onclick="setSmartView('completed')"><span class="sv-icon">✓</span>Done<span class="sv-count" id="svcCompleted">0</span></button>
-      <button class="sv-chip" data-view="archived" onclick="setSmartView('archived')"><span class="sv-icon">🗂</span>Archive<span class="sv-count" id="svcArchived">0</span></button>
+      <button class="sv-chip active" data-view="all" onclick="setSmartView('all')"><span class="sv-icon" data-icon="list"></span>All<span class="sv-count" id="svcAll">0</span></button>
+      <button class="sv-chip" data-view="today" onclick="setSmartView('today')"><span class="sv-icon" data-icon="calendar"></span>Today<span class="sv-count" id="svcToday">0</span></button>
+      <button class="sv-chip" data-view="week" onclick="setSmartView('week')"><span class="sv-icon" data-icon="calendarWeek"></span>Week<span class="sv-count" id="svcWeek">0</span></button>
+      <button class="sv-chip" data-view="overdue" onclick="setSmartView('overdue')"><span class="sv-icon" data-icon="alertTriangle"></span>Overdue<span class="sv-count" id="svcOverdue">0</span></button>
+      <button class="sv-chip" data-view="unscheduled" onclick="setSmartView('unscheduled')"><span class="sv-icon" data-icon="circleDashed"></span>Unscheduled<span class="sv-count" id="svcUnscheduled">0</span></button>
+      <button class="sv-chip" data-view="starred" onclick="setSmartView('starred')"><span class="sv-icon" data-icon="star"></span>Starred<span class="sv-count" id="svcStarred">0</span></button>
+      <button class="sv-chip" data-view="impact" onclick="setSmartView('impact')" title="Top ~20% by leverage — derived from priority, due, effort, unblocks, values, star"><span class="sv-icon" data-icon="zap"></span>Impact<span class="sv-count" id="svcImpact">0</span></button>
+      <button class="sv-chip" data-view="completed" onclick="setSmartView('completed')"><span class="sv-icon" data-icon="checkCircle"></span>Done<span class="sv-count" id="svcCompleted">0</span></button>
+      <button class="sv-chip" data-view="archived" onclick="setSmartView('archived')"><span class="sv-icon" data-icon="archive"></span>Archive<span class="sv-count" id="svcArchived">0</span></button>
     </div>
 
     <!-- Compact control bar: view toggle + filters button -->
@@ -150,9 +150,9 @@
     <div class="task-toolbar" id="filtersPanel" style="display:none">
       <!-- View selector (mobile-only, when controlbar view-toggle is hidden) -->
       <div class="view-toggle mobile-view-toggle" style="width:100%">
-        <button id="viewListMobile" class="active" onclick="setTaskView('list');updateMobileViewToggle()" style="flex:1">☰ List</button>
-        <button id="viewBoardMobile" onclick="setTaskView('board');updateMobileViewToggle()" style="flex:1">⊞ Board</button>
-        <button id="viewCalMobile" onclick="setTaskView('calendar');updateMobileViewToggle()" style="flex:1">📅 Cal</button>
+        <button id="viewListMobile" class="active" onclick="setTaskView('list');updateMobileViewToggle()" style="flex:1"><span class="mv-ic" data-icon="list"></span> List</button>
+        <button id="viewBoardMobile" onclick="setTaskView('board');updateMobileViewToggle()" style="flex:1"><span class="mv-ic" data-icon="grid"></span> Board</button>
+        <button id="viewCalMobile" onclick="setTaskView('calendar');updateMobileViewToggle()" style="flex:1"><span class="mv-ic" data-icon="calendar"></span> Cal</button>
       </div>
       <div class="task-toolbar-row">
         <select class="task-tb-sel" id="filterStatus" onchange="updateTaskFilters()">
@@ -175,14 +175,14 @@
       <div class="task-toolbar-row">
         <select class="task-tb-sel" id="filterCategory" onchange="updateTaskFilters()">
           <option value="all">Any category</option>
-          <option value="health">❤ Health</option>
-          <option value="finance">💰 Finance</option>
-          <option value="work">💼 Work</option>
-          <option value="relationships">🤝 Relationships</option>
-          <option value="learning">📚 Learning</option>
-          <option value="home">🏠 Home</option>
-          <option value="personal">🧘 Personal</option>
-          <option value="other">📌 Other</option>
+          <option value="health">Health</option>
+          <option value="finance">Finance</option>
+          <option value="work">Work</option>
+          <option value="relationships">Relationships</option>
+          <option value="learning">Learning</option>
+          <option value="home">Home</option>
+          <option value="personal">Personal</option>
+          <option value="other">Other</option>
         </select>
       </div>
       <div class="task-toolbar-row">
@@ -222,7 +222,7 @@
 
     <!-- Archived notice (only shown in archive view) -->
     <div class="archived-notice" id="archivedNotice" style="display:none">
-      <span>📦 Viewing archived tasks — click the restore button (↺) to bring them back</span>
+      <span class="archived-notice-inner"><span class="archived-notice-ic" data-icon="archive"></span>Viewing archived tasks — click the restore button (<span class="archived-notice-restore" data-icon="rotateCcw"></span>) to bring them back</span>
       <button onclick="if(confirm('Permanently delete ALL archived tasks? This cannot be undone.'))emptyArchive()">Empty Archive</button>
     </div>
 
@@ -667,6 +667,7 @@
 </div>
 
 <!-- App modules — load order matters (globals first, init last) -->
+<script src="js/icons.js"></script>
 <script src="js/utils.js"></script>
 <script src="js/storage.js"></script>
 <script src="js/audio.js"></script>

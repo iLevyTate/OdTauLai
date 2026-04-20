@@ -1827,6 +1827,36 @@
 .intel-dup-sim{font-variant-numeric:tabular-nums;color:var(--accent)}
 .task-dup-badge{background:rgba(232,168,56,.12);color:#e8a838;border:1px solid rgba(232,168,56,.35)!important}
 .task-sig.sig-pareto{background:var(--accent-bg);color:var(--accent);border:1px solid var(--accent-border);font-weight:600;letter-spacing:.01em}
+
+/* ===== Shared icon library (SVG, monochrome, inherits currentColor) ===== */
+.ui-ic{display:inline-block;vertical-align:-0.18em;flex-shrink:0;color:currentColor}
+[data-icon]{display:inline-flex;align-items:center;justify-content:center;line-height:0}
+/* Contextual sizing — outer span controls the footprint, SVG fills it */
+.sv-icon .ui-ic{width:13px;height:13px}
+.nav-tab-icon .ui-ic{width:17px;height:17px}
+.mv-ic .ui-ic{width:14px;height:14px}
+.ft-icon .ui-ic{width:13px;height:13px}
+.sig-cat-ic .ui-ic{width:11px;height:11px}
+.task-enhance-btn .ui-ic{width:15px;height:15px}
+.cmdk-icon .ui-ic{width:15px;height:15px;vertical-align:-0.22em}
+.archived-notice-ic .ui-ic,.archived-notice-restore .ui-ic{width:14px;height:14px;vertical-align:-0.2em}
+/* On narrow screens the sv-chips need their wrapper to not override SVG sizing */
+@media(max-width:640px){.sv-icon .ui-ic{width:12px;height:12px}}
+@media(max-width:380px){.sv-icon .ui-ic{width:12px;height:12px}}
+.archived-notice-inner{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
+.archived-notice-restore{display:inline-flex;align-items:center;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-2);margin:0 2px}
+/* sig-cat inline icon alignment on task cards */
+.sig-cat-ic{display:inline-flex;align-items:center;margin-right:3px;vertical-align:-0.15em;color:currentColor}
+/* breakdown category icon */
+.breakdown-cat-ic{display:inline-flex;align-items:center;margin-right:4px;vertical-align:-0.2em;color:var(--accent)}
+/* smart-add chip inline icon */
+.sa-chip-ic{display:inline-flex;align-items:center;margin-right:3px;vertical-align:-0.15em}
+/* update banner + quota warning */
+.update-banner-msg,.quota-warning-msg{display:inline-flex;align-items:center;gap:6px}
+/* empty state icon wrapper */
+.empty-ic{display:flex;justify-content:center;line-height:0;color:var(--text-3)}
+.empty-ic .ui-ic{width:32px;height:32px}
+.done-sparkle .ui-ic{width:22px;height:22px;color:var(--accent)}
 .task-search-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap;width:100%}
 .task-search-row .task-search{flex:1;min-width:140px}
 .task-search-semantic{font-size:11px;color:var(--text-3);display:flex;align-items:center;gap:5px;white-space:nowrap;cursor:pointer;user-select:none}
