@@ -18,6 +18,86 @@ function _loadCfg(){
 }
 function _saveCfg(){ try{ localStorage.setItem(INTEL_CFG_KEY, JSON.stringify(_cfg)); }catch(e){} }
 
+/** Header pill: model load / ready / error — visible on every tab */
+function syncHeaderAIChip(state, msg){
+  const chip = document.getElementById('headerAIChip');
+  if(!chip) return;
+  chip.classList.remove('ai-chip--idle','ai-chip--syncing','ai-chip--ok','ai-chip--err');
+  let cls = 'ai-chip--idle';
+  if(state === 'loading' || state === 'working' || state === 'syncing') cls = 'ai-chip--syncing';
+  else if(state === 'ready' || state === 'ok') cls = 'ai-chip--ok';
+  else if(state === 'error') cls = 'ai-chip--err';
+  chip.classList.add(cls);
+  const busy = state === 'loading' || state === 'working' || state === 'syncing';
+  chip.setAttribute('aria-busy', busy ? 'true' : 'false');
+  const label = chip.querySelector('.ai-chip-label');
+  if(label){
+    if(state === 'loading' || state === 'working' || state === 'syncing'){
+      const m = (msg || '').trim();
+      const pct = m.match(/^(\d+)%/);
+      label.textContent = pct ? pct[1] + '%' : '…';
+    }else if(state === 'ready' || state === 'ok') label.textContent = '✓';
+    else if(state === 'error') label.textContent = '!';
+    else label.textContent = 'AI';
+  }
+  let desc = 'Task understanding (on-device)';
+  if(state === 'loading' || state === 'working' || state === 'syncing'){
+    const m = (msg || '').trim();
+    desc = m ? 'Loading model: ' + m.slice(0, 100) : 'Loading model…';
+  }else if(state === 'ready' || state === 'ok'){
+    desc = (msg && String(msg).trim()) ? String(msg).slice(0, 120) : 'Embeddings ready';
+  }else if(state === 'error'){
+    desc = (msg && String(msg).trim()) ? String(msg).slice(0, 100) + '. Tap to retry.' : 'Model load failed. Tap to retry.';
+  }
+  chip.setAttribute('aria-label', desc);
+  const live = document.getElementById('aiChipLive');
+  if(live) live.textContent = desc;
+  if(state === 'error'){
+    chip.title = (msg && String(msg).trim()) ? String(msg).slice(0, 72) + ' — tap to retry' : 'Model load failed — tap to retry';
+  }else if(busy){
+    chip.title = (msg && String(msg).length < 80) ? String(msg) : 'Loading embedding model…';
+  }else if(state === 'ready' || state === 'ok'){
+    chip.title = (msg && String(msg).length < 80) ? String(msg) : 'Task understanding — open Tools';
+  }else{
+    chip.title = 'Task understanding (on-device) — open Tools';
+  }
+}
+
+/** Semantic search checkbox: disabled until embeddings are ready (avoids silent no-op). */
+function syncSemanticSearchUi(){
+  const cb = document.getElementById('taskSearchSemantic');
+  const lab = cb && cb.closest('.task-search-semantic');
+  if(!cb) return;
+  const ready = typeof isIntelReady === 'function' && isIntelReady();
+  if(!ready){
+    const hadChecked = cb.checked;
+    cb.disabled = true;
+    cb.checked = false;
+    window._taskSearchSemantic = false;
+    if(hadChecked) window._semanticScores = null;
+    if(lab){
+      lab.title = 'Load the embedding model first (header AI chip or Tools tab)';
+      lab.classList.add('task-search-semantic--disabled');
+    }
+    if(hadChecked && typeof updateTaskFilters === 'function') updateTaskFilters();
+  }else{
+    cb.disabled = false;
+    if(lab){
+      lab.title = 'Rank by meaning (requires model loaded)';
+      lab.classList.remove('task-search-semantic--disabled');
+    }
+  }
+}
+
+function headerAIClick(){
+  const chip = document.getElementById('headerAIChip');
+  if(chip && chip.classList.contains('ai-chip--err') && typeof intelRetryLoad === 'function'){
+    intelRetryLoad();
+    return;
+  }
+  if(typeof showTab === 'function') showTab('tools');
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // TASK MUTATIONS (used by pending ops + duplicate merge)
 // ══════════════════════════════════════════════════════════════════════════════
@@ -386,14 +466,16 @@ function _setIntelStateClass(el, state){
 
 function _setIntelStatus(state, msg){
   const el = document.getElementById('intelStatus');
-  if(!el) return;
-  el.textContent = msg;
-  _setIntelStateClass(el, state);
+  if(el){
+    el.textContent = msg;
+    _setIntelStateClass(el, state);
+  }
+  syncHeaderAIChip(state, msg);
 }
 
 async function aiAlign(){
   if(typeof isIntelReady !== 'function' || !isIntelReady()){
-    _setIntelStatus('error', 'Load intelligence model first');
+    _setIntelStatus('error', 'Load the model first (AI chip or Tools)');
     return;
   }
   if(_intelBusy){ _setIntelStatus('error', 'Busy — try again'); return; }
@@ -498,10 +580,18 @@ function renderAIPanel(){
   const ready = typeof isIntelReady === 'function' && isIntelReady();
   const dev = typeof getIntelDevice === 'function' ? getIntelDevice() : null;
 
+  const embedModel = (typeof window !== 'undefined' && window.INTEL_EMBED_MODEL) || 'Xenova/gte-small';
   panel.innerHTML = `
-    <div class="intel-desc">
-      <strong>Ambient intelligence</strong> — <span class="intel-nogen">no chat, no generative replies</span>.
-      A small on-device <strong>embedding model</strong> encodes each task’s <strong>meaning and context</strong> as a vector (semantic similarity, not literal keyword matching). That powers search, duplicate detection, smart-add hints, list routing, similar tasks, <strong>harmonize</strong> (values + category, priority, effort, tags), and list moves—using <strong>${typeof INTEL_EMBED_MODEL !== 'undefined' ? INTEL_EMBED_MODEL : 'gte-small'}</strong> (~33 MB). Runs locally; your text never goes to a cloud LLM.
+    <div class="intel-desc intel-desc-short">
+      <strong>Understand your tasks</strong> — runs on this device; <span class="intel-nogen">no cloud LLM, no chat</span>.
+      <ul class="intel-start-list">
+        <li><strong>Search by meaning</strong> — turn on <em>Semantic</em> next to the task search (Tasks tab).</li>
+        <li><strong>Smart-add</strong> — tap <strong>✨</strong> beside a new task for suggested fields.</li>
+        <li><strong>Bulk cleanup</strong> — <em>Harmonize</em>, <em>Align values</em>, <em>Auto-organize</em>, and <em>Find duplicates</em> preview changes before you apply.</li>
+      </ul>
+      <details class="intel-details"><summary>How it works</summary>
+        <p class="intel-details-body">A small on-device embedding model (<strong>${embedModel}</strong>, ~33 MB) encodes each task’s meaning as a vector. Cosine similarity drives semantic search, duplicate detection, smart-add hints, list routing, similar tasks, and harmonize proposals. Your task text stays local.</p>
+      </details>
     </div>
     <div id="intelProgressWrap" class="intel-progress-wrap" style="display:none">
       <div class="intel-progress-track"><div class="intel-progress-bar" id="intelProgressBar" style="width:0%"></div></div>
@@ -536,6 +626,9 @@ function renderAIPanel(){
   _renderValuesGrid();
   _renderBreakdown();
   _renderUndoBtn();
+  if(ready) syncHeaderAIChip('ready', `Ready via ${dev || 'CPU'}`);
+  else syncHeaderAIChip('loading', 'Loading model…');
+  syncSemanticSearchUi();
 }
 
 function intelRetryLoad(){
@@ -552,6 +645,7 @@ function intelRetryLoad(){
     if(bar) bar.style.width = v + '%';
     if(pct) pct.textContent = v + '%';
     if(txt) txt.textContent = (p && p.status) ? String(p.status).slice(0, 60) : '';
+    syncHeaderAIChip('loading', v + '%');
   }).then(() => {
     if(w) w.style.display = 'none';
     if(typeof ensureSchwartzEmbeddings === 'function'){
@@ -560,8 +654,10 @@ function intelRetryLoad(){
     renderAIPanel();
     if(typeof maybeShowEnhanceBtn === 'function') maybeShowEnhanceBtn();
   }).catch(() => {
+    if(w) w.style.display = 'none';
     if(btn) btn.style.display = '';
     _setIntelStatus('error', 'Could not load model');
+    syncSemanticSearchUi();
   });
 }
 
@@ -711,7 +807,7 @@ document.addEventListener('visibilitychange', () => {
 
 async function smartAddEnhance(){
   if(typeof isIntelReady !== 'function' || !isIntelReady()){
-    _setIntelStatus('error', 'Intelligence model still loading');
+    _setIntelStatus('error', 'Model still loading — check the AI chip or open Tools');
     return;
   }
   if(_intelBusy) return;
@@ -871,6 +967,8 @@ function closeWhatNext(){
 
 function toggleTaskSearchSemantic(){
   const cb = document.getElementById('taskSearchSemantic');
+  if(!cb || cb.disabled) return;
+  if(typeof isIntelReady === 'function' && !isIntelReady()) return;
   window._taskSearchSemantic = cb ? cb.checked : false;
   if(!window._taskSearchSemantic){
     window._semanticScores = null;
@@ -898,3 +996,6 @@ window.intelRetryLoad = intelRetryLoad;
 window.intelApplyPending = intelApplyPending;
 window.intelRejectPending = intelRejectPending;
 window.intelToggleAllPending = intelToggleAllPending;
+window.syncHeaderAIChip = syncHeaderAIChip;
+window.syncSemanticSearchUi = syncSemanticSearchUi;
+window.headerAIClick = headerAIClick;

@@ -117,7 +117,7 @@ function renderCmdK(){
   const actions=[
     {type:'action',label:'Go to Tasks',icon:'☰',kbd:'1',run:()=>showTab('tasks')},
     {type:'action',label:'Go to Timer',icon:'◉',kbd:'2',run:()=>showTab('focus')},
-    {type:'action',label:'Go to Tools',icon:'⏱',kbd:'3',run:()=>showTab('tools')},
+    {type:'action',label:'Go to Tools',icon:'✦',kbd:'3',run:()=>showTab('tools')},
     {type:'action',label:'Go to Data',icon:'▤',kbd:'4',run:()=>showTab('data')},
     {type:'action',label:'Go to Settings',icon:'⚙',kbd:'5',run:()=>showTab('settings')},
     {type:'action',label:'Today view',icon:'📅',run:()=>{showTab('tasks');setSmartView('today')}},
@@ -130,6 +130,9 @@ function renderCmdK(){
     {type:'action',label:'Toggle theme',icon:'🌗',run:()=>toggleTheme()},
     {type:'action',label:'Start focus timer',icon:'▶',run:()=>{showTab('focus');if(!running)startTimer()}},
     {type:'action',label:'Add new list',icon:'+',run:()=>{showTab('tasks');addList()}},
+    {type:'action',label:'Harmonize all fields (embeddings)',icon:'✴',run:()=>{showTab('tools');if(typeof intelHarmonizeFields==='function')intelHarmonizeFields()}},
+    {type:'action',label:'Find duplicate tasks',icon:'📋',run:()=>{showTab('tools');if(typeof intelFindDuplicatesUI==='function')intelFindDuplicatesUI()}},
+    {type:'action',label:'Toggle semantic search',icon:'◎',run:()=>{showTab('tasks');if(typeof isIntelReady !== 'function' || !isIntelReady()){if(typeof syncHeaderAIChip === 'function') syncHeaderAIChip('error', 'Load model first — open Tools');showTab('tools');return}const cb=gid('taskSearchSemantic');if(cb){cb.checked=!cb.checked;if(typeof toggleTaskSearchSemantic==='function')toggleTaskSearchSemantic()}}},
   ];
   const items=[];
   // Match actions
@@ -512,7 +515,7 @@ async function refreshMdSimilarTasks(id){
   const acc = gid('mdSimilarAccordion');
   if(!body) return;
   if(typeof isIntelReady !== 'function' || !isIntelReady()){
-    body.innerHTML = '<span class="intel-muted">Load intelligence (Settings) for similar tasks.</span>';
+    body.innerHTML = '<span class="intel-muted">Load the model (AI chip or Tools → Task understanding) for similar tasks.</span>';
     if(acc) acc.classList.remove('open');
     return;
   }

@@ -1,6 +1,6 @@
 // ── App version — bumped on each release ───────────────────────────────────
-const APP_VERSION = 'v17';
-const APP_BUILD_DATE = '2026-04-19';
+const APP_VERSION = 'v19';
+const APP_BUILD_DATE = '2026-04-20';
 
 // ── Persistent storage — protects task data from "Clear browsing history" ──
 // Chrome/Edge/Firefox: survives normal clears when granted
@@ -292,17 +292,17 @@ async function renderSystemInfo(info){
   if(!el) return;
   const data = info || await checkStorageQuota();
   const storageLine = data
-    ? `${data.persistent ? '<span style="color:#2ecc71">✓ Protected</span>' : '<span style="color:#e67e22">⚠ Not protected — task data may be cleared by "Clear browsing history"</span>'} · Using ${data.usedMB} MB / ${data.quotaMB} MB (${data.pct}%)`
+    ? `${data.persistent ? '<span class="sys-info-ok">✓ Protected</span>' : '<span class="sys-info-warn">⚠ Not protected — task data may be cleared by "Clear browsing history"</span>'} · Using ${data.usedMB} MB / ${data.quotaMB} MB (${data.pct}%)`
     : 'Storage info unavailable in this browser';
   const onlineLine = navigator.onLine
-    ? '<span style="color:#2ecc71">✓ Online</span>'
-    : '<span style="color:#e67e22">● Offline — tasks work, sync paused</span>';
+    ? '<span class="sys-info-ok">✓ Online</span>'
+    : '<span class="sys-info-warn">● Offline — tasks work, sync paused</span>';
   el.innerHTML = `
     <div><strong>Version:</strong> ${APP_VERSION} (built ${APP_BUILD_DATE})</div>
     <div><strong>Network:</strong> ${onlineLine}</div>
     <div><strong>Storage:</strong> ${storageLine}</div>
     <div><strong>Intelligence:</strong> ${typeof isIntelReady === 'function' && isIntelReady()
-      ? `<span style="color:#2ecc71">✓ Embeddings ready (${typeof getIntelDevice === 'function' ? getIntelDevice() || 'runtime' : ''})</span>`
+      ? `<span class="sys-info-ok">✓ Embeddings ready (${typeof getIntelDevice === 'function' ? getIntelDevice() || 'runtime' : ''})</span>`
       : '<span style="color:var(--text-3)">Loads in background (~33 MB, cached offline)</span>'}</div>`;
 }
 // Initial render + re-render when online status changes
@@ -324,6 +324,7 @@ setTimeout(() => {
     if(bar) bar.style.width = v + '%';
     if(pct) pct.textContent = v + '%';
     if(txt) txt.textContent = (p && p.status) ? String(p.status).slice(0, 72) : '';
+    if(typeof syncHeaderAIChip === 'function') syncHeaderAIChip('loading', v + '%');
   }).then(() => {
     if(w) w.style.display = 'none';
     if(retry) retry.style.display = 'none';
@@ -336,6 +337,8 @@ setTimeout(() => {
   }).catch(() => {
     if(w) w.style.display = 'none';
     if(retry) retry.style.display = '';
+    if(typeof syncHeaderAIChip === 'function') syncHeaderAIChip('error', 'Load failed');
     if(typeof renderAIPanel === 'function') renderAIPanel();
+    else if(typeof syncSemanticSearchUi === 'function') syncSemanticSearchUi();
   });
 }, 1000);

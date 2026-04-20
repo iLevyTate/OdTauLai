@@ -2,7 +2,30 @@
 function updateConfig(){cfg.work=Math.max(1,parseInt(gid('cfgWork').value)||25);cfg.short=Math.max(1,parseInt(gid('cfgShort').value)||5);cfg.long=Math.max(1,parseInt(gid('cfgLong').value)||15);cfg.cycle=Math.max(2,parseInt(gid('cfgCycle').value)||4);if(!running&&!finished){setPhaseTime();renderPips()}saveState()}
 function toggleOpt(id){const el=gid(id);el.classList.toggle('on');if(id==='togBreak')cfg.autoBreak=el.classList.contains('on');if(id==='togWork')cfg.autoWork=el.classList.contains('on');if(id==='togSound'){cfg.sound=el.classList.contains('on');if(running){if(cfg.sound)schedulePhaseAudio();else cancelScheduledAudio()}}if(id==='togLink')cfg.linkTask=el.classList.contains('on');if(id==='togNotif'){cfg.notif=el.classList.contains('on');if(cfg.notif)reqNotifPerm()}saveState()}
 let settingsOpen=false;
-function toggleSettings(){settingsOpen=!settingsOpen;gid('settingsBody').style.maxHeight=settingsOpen?'800px':'0';gid('settingsArrow').style.transform=settingsOpen?'rotate(180deg)':''}
+function toggleSettings(){
+  const body=gid('settingsBody'),arrow=gid('settingsArrow');
+  if(!body)return;
+  settingsOpen=!settingsOpen;
+  if(settingsOpen){
+    body.style.overflowY='auto';
+    const cap=Math.floor(window.innerHeight*0.92);
+    body.style.maxHeight=Math.min(body.scrollHeight+8,cap)+'px';
+  }else{
+    body.style.maxHeight='0';
+    body.style.overflowY='';
+  }
+  if(arrow)arrow.style.transform=settingsOpen?'rotate(180deg)':'';
+}
+function _reflowSettingsIfOpen(){
+  if(!settingsOpen)return;
+  const body=gid('settingsBody');
+  if(!body)return;
+  body.style.overflowY='auto';
+  const cap=Math.floor(window.innerHeight*0.92);
+  body.style.maxHeight=Math.min(body.scrollHeight+8,cap)+'px';
+}
+window.addEventListener('resize',_reflowSettingsIfOpen);
+window.addEventListener('orientationchange',_reflowSettingsIfOpen);
 
 // ========== STATE ==========
 let cfg={work:25,short:5,long:15,cycle:4,autoBreak:true,autoWork:false,sound:true,linkTask:true,notif:true};

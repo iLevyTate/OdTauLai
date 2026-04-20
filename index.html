@@ -40,7 +40,7 @@
 <div class="container">
 
   <div class="header">
-    <h1><img src="icons/icon-192.png" alt="" class="header-logo" width="32" height="32" onerror="this.style.display='none'">ODTAULAI</h1>
+    <h1><img src="icons/favicon-32.png" alt="" class="header-logo" width="32" height="32" onerror="this.style.display='none'">ODTAULAI</h1>
     <div class="header-mid">
       <div class="header-date" id="headerDate"></div>
       <button type="button" class="what-next-pill" id="whatNextBtn" onclick="openWhatNext()" title="Top-ranked next actions">What next?</button>
@@ -68,7 +68,7 @@
       <span>Timer</span>
     </button>
     <button class="nav-tab" data-navtab="tools" onclick="showTab('tools')">
-      <span class="nav-tab-icon">⏱</span>
+      <span class="nav-tab-icon">✦</span>
       <span>Tools</span>
     </button>
     <button class="nav-tab" data-navtab="data" onclick="showTab('data')">
@@ -80,6 +80,11 @@
       <span>Settings</span>
     </button>
     </div>
+    <button type="button" id="headerAIChip" class="ai-chip ai-chip--idle" onclick="headerAIClick()" title="Task understanding — opens Tools">
+      <span class="ai-chip-dot" aria-hidden="true"></span>
+      <span class="ai-chip-label" aria-hidden="true">AI</span>
+      <span id="aiChipLive" class="ai-chip-sr" aria-live="polite"></span>
+    </button>
     <button id="themeToggleBtn" onclick="toggleTheme()" title="Toggle theme" style="width:38px;height:38px;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-sm);color:var(--text-2);font-size:16px;cursor:pointer">🌙</button>
     <button onclick="openCmdK()" title="Command palette (Ctrl+K)" style="width:38px;height:38px;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-sm);color:var(--text-2);font-size:14px;cursor:pointer">⌘K</button>
   </div>
@@ -87,7 +92,7 @@
   <!-- Tasks (primary ClickUp-style task manager) -->
   <div class="panel" data-tab="tasks" style="padding:14px">
     <div class="shdr">
-      <div class="sdot" style="background:#e056a0;box-shadow:0 0 8px rgba(224,86,160,.5)"></div>
+      <div class="sdot" style="background:#e056a0"></div>
       <span class="slbl">Task Manager</span>
       <span class="scnt" id="taskCountBadge">0 active</span>
     </div>
@@ -104,6 +109,15 @@
     </div>
     <div id="smartAddPreview" class="smart-add-preview" style="display:none"></div>
     <div class="qa-hint">QUICK ADD: <code>today</code> / <code>tomorrow</code> / weekdays · natural dates (e.g. next Friday, in 3 days) · <code>@urgent</code> <code>@high</code> <code>@low</code> · <code>#tag</code> · <code>!star</code> · <code>~daily</code> <code>~weekly</code></div>
+
+    <div class="task-search-bar">
+      <div class="task-search-row">
+        <input type="text" class="task-search" id="taskSearch" placeholder="🔍 Search tasks…" oninput="updateTaskFilters()">
+        <label class="task-search-semantic" title="Rank by meaning (requires model loaded)">
+          <input type="checkbox" id="taskSearchSemantic" onchange="toggleTaskSearchSemantic()"> Semantic
+        </label>
+      </div>
+    </div>
 
     <!-- Smart views only — lightweight navigation -->
     <div class="smart-views" id="smartViews">
@@ -133,12 +147,6 @@
 
     <!-- Collapsible filter panel (hidden by default on mobile) -->
     <div class="task-toolbar" id="filtersPanel" style="display:none">
-      <div class="task-search-row">
-        <input type="text" class="task-search" id="taskSearch" placeholder="🔍 Search tasks..." oninput="updateTaskFilters()">
-        <label class="task-search-semantic" title="Rank by meaning (requires intelligence loaded)">
-          <input type="checkbox" id="taskSearchSemantic" onchange="toggleTaskSearchSemantic()"> Semantic
-        </label>
-      </div>
       <!-- View selector (mobile-only, when controlbar view-toggle is hidden) -->
       <div class="view-toggle mobile-view-toggle" style="width:100%">
         <button id="viewListMobile" class="active" onclick="setTaskView('list');updateMobileViewToggle()" style="flex:1">☰ List</button>
@@ -229,7 +237,7 @@
   <!-- Pomodoro Focus Timer -->
   <div class="panel" data-tab="focus" style="padding:20px">
     <div class="shdr">
-      <div class="sdot" style="background:var(--accent);box-shadow:0 0 8px var(--accent)"></div>
+      <div class="sdot" style="background:var(--accent)"></div>
       <span class="slbl">Focus Timer</span>
       <span class="scnt" id="pomoCycleLabel">Pomodoro</span>
     </div>
@@ -255,7 +263,7 @@
   <!-- Quick Timers -->
   <div class="panel" data-tab="focus">
     <div class="shdr">
-      <div class="sdot" style="background:#48b5e0;box-shadow:0 0 8px rgba(72,181,224,.5)"></div>
+      <div class="sdot" style="background:#48b5e0"></div>
       <span class="slbl">Quick Timers</span>
       <span class="scnt" id="qtCount">0 timers</span>
     </div>
@@ -279,9 +287,19 @@
     <div class="qt-list" id="qtList"><div class="iempty" id="qtEmpty">No quick timers — add one or tap a preset</div></div>
   </div>
 
+  <!-- Task understanding (on-device embeddings) -->
+  <div class="panel" data-tab="tools">
+    <div class="shdr">
+      <div class="sdot" style="background:var(--accent)"></div>
+      <span class="slbl">Task understanding</span>
+      <span class="scnt" style="font-size:11px;color:var(--text-3)">On device</span>
+    </div>
+    <div id="intelPanel" style="width:100%"></div>
+  </div>
+
   <!-- Stopwatch -->
   <div class="panel" data-tab="tools">
-    <div class="shdr"><div class="sdot" style="background:#9b59b6;box-shadow:0 0 8px rgba(155,89,182,.5)"></div><span class="slbl">Stopwatch</span></div>
+    <div class="shdr"><div class="sdot" style="background:#9b59b6"></div><span class="slbl">Stopwatch</span></div>
     <div style="text-align:center">
       <div id="swDisplay" style="font-size:42px;font-weight:800;color:#e2e8f0;letter-spacing:3px;font-variant-numeric:tabular-nums;margin-bottom:12px">00:00:00</div>
       <div style="display:flex;gap:10px;justify-content:center">
@@ -295,13 +313,13 @@
 
   <!-- Log -->
   <div class="panel" data-tab="data">
-    <div class="shdr"><div class="sdot" style="background:var(--long);box-shadow:0 0 8px var(--long-glow)"></div><span class="slbl">Time Log</span><button class="small-btn" onclick="clearLog()">Clear</button></div>
+    <div class="shdr"><div class="sdot" style="background:var(--long)"></div><span class="slbl">Time Log</span><button class="small-btn" onclick="clearLog()">Clear</button></div>
     <div class="log-list" id="logList"><div class="log-empty" id="logEmpty">Completed sessions appear here</div></div>
   </div>
 
   <!-- Settings -->
   <div class="panel" data-tab="settings">
-    <div class="stitle" onclick="toggleSettings()"><div class="sdot" style="background:#3d8bcc;box-shadow:0 0 8px rgba(61,139,204,.5)"></div><span class="slbl">Settings</span><span class="sarrow" id="settingsArrow">▼</span></div>
+    <div class="stitle" onclick="toggleSettings()"><div class="sdot" style="background:#3d8bcc"></div><span class="slbl">Settings</span><span class="sarrow" id="settingsArrow">▼</span></div>
     <div class="sbody" id="settingsBody" style="max-height:0">
       <div class="srow"><span class="sr-lbl">Focus Duration</span><input type="number" class="sinput" id="cfgWork" value="25" min="1" max="120" onchange="updateConfig()"><span class="sunit">min</span></div>
       <div class="srow"><span class="sr-lbl">Short Break</span><input type="number" class="sinput" id="cfgShort" value="5" min="1" max="30" onchange="updateConfig()"><span class="sunit">min</span></div>
@@ -324,11 +342,10 @@
         </span>
       </div>
 
-
-      <!-- Intelligence -->
-      <div class="srow" style="flex-direction:column;align-items:flex-start;gap:10px;padding:14px 0 0;border-top:1px solid var(--border);margin-top:6px">
-        <span class="sr-lbl" style="font-size:12px;letter-spacing:.06em">Intelligence — On Device</span>
-        <div id="intelPanel" style="width:100%"></div>
+      <!-- Task understanding lives under Tools -->
+      <div class="srow" style="padding:14px 0 0;border-top:1px solid var(--border);margin-top:6px;justify-content:space-between;gap:10px">
+        <span class="sr-lbl" style="font-size:13px">Task understanding</span>
+        <button type="button" class="btn-ghost btn-sm" onclick="showTab('tools')" style="flex-shrink:0">Open in Tools →</button>
       </div>
 
       <!-- P2P Sync -->
@@ -359,7 +376,7 @@
 
   <!-- Intervals -->
   <div class="panel" data-tab="tools">
-    <div class="shdr"><div class="sdot" style="background:#3d8bcc;box-shadow:0 0 8px rgba(61,139,204,.5)"></div><span class="slbl">Repeating Chimes</span><span class="scnt" id="intCount">0 set</span></div>
+    <div class="shdr"><div class="sdot" style="background:#3d8bcc"></div><span class="slbl">Repeating Chimes</span><span class="scnt" id="intCount">0 set</span></div>
     <div class="iform">
       <div style="flex:1 1 100px"><label class="fl">Label</label><input class="fi fi-w" id="intLabel" placeholder="e.g. Posture check"></div>
       <div style="display:flex;gap:6px;align-items:flex-end"><div><label class="fl">Min</label><input type="number" class="fi fi-n" id="intMin" value="5" min="0" max="999"></div><div><label class="fl">Sec</label><input type="number" class="fi fi-n" id="intSec" value="0" min="0" max="59"></div></div>
@@ -371,7 +388,7 @@
 
   <!-- Stats & Export -->
   <div class="panel" data-tab="data">
-    <div class="shdr"><div class="sdot" style="background:var(--long);box-shadow:0 0 8px var(--long-glow)"></div><span class="slbl">Today's Stats</span><button class="small-btn" onclick="resetStats()">Reset Day</button></div>
+    <div class="shdr"><div class="sdot" style="background:var(--long)"></div><span class="slbl">Today's Stats</span><button class="small-btn" onclick="resetStats()">Reset Day</button></div>
     <div class="stat-grid">
       <div class="stat-box"><div class="stat-val wc" id="statPomos">0</div><div class="stat-lbl">Sessions</div></div>
       <div class="stat-box"><div class="stat-val tc" id="statFocus">0m</div><div class="stat-lbl">Focus Time</div></div>
@@ -420,7 +437,7 @@
 
   <!-- Past Days Archive -->
   <div class="panel" data-tab="data">
-    <div class="shdr"><div class="sdot" style="background:#8e44ad;box-shadow:0 0 8px rgba(142,68,173,.5)"></div><span class="slbl">Past Days</span><span class="scnt" id="archiveCount">0 days</span></div>
+    <div class="shdr"><div class="sdot" style="background:#8e44ad"></div><span class="slbl">Past Days</span><span class="scnt" id="archiveCount">0 days</span></div>
     <div id="archiveList" style="max-height:400px;overflow-y:auto"><div class="iempty" id="archiveEmpty">History will appear here after each day</div></div>
     <div style="display:flex;gap:8px;margin-top:8px">
       <button class="export-btn export-csv" onclick="exportAllCSV()">Export All History (.csv)</button>
