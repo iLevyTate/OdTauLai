@@ -128,8 +128,7 @@ function defaultTaskProps(){return{
   // v5 — values alignment
   category:null,        // life area: health|finance|work|relationships|learning|home|personal|other
   valuesAlignment:[],   // which user values this task serves e.g. ['security','benevolence']
-  valuesNote:null,      // Short note from values alignment
-  completions:[],       // v6 recurring habit log: {date, sec, note?}
+  valuesNote:null       // Short note from values alignment
 }}
 
 let _dupRefreshTimer = null;
@@ -449,8 +448,7 @@ function emptyArchive(){
 function setSmartView(v){
   smartView=v;
   document.querySelectorAll('.sv-chip').forEach(el=>{el.classList.toggle('active',el.dataset.view===v)});
-  const notice=gid('archivedNotice');if(notice)notice.classList.toggle('is-visible',v==='archived');
-  const sh=gid('filterShowDone');if(sh){sh.disabled=v!=='all';if(v==='all')sh.checked=!!taskFilters.showDone}
+  const notice=gid('archivedNotice');if(notice)notice.style.display=v==='archived'?'flex':'none';
   renderTaskList();saveState('user')
 }
 
@@ -567,53 +565,21 @@ function advanceRecurringDate(dateStr,recurType){
   else if(recurType==='monthly')d.setMonth(d.getMonth()+1);
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 }
-/** @deprecated v24+ recurring tasks stay on one card — use habitCompleteInPlace */
-function spawnRecurringClone(_t){}
-
-function _sumCompletionSecs(t){
-  if(!t||!Array.isArray(t.completions))return 0;
-  return t.completions.reduce((s,c)=>s+(parseInt(c&&c.sec,10)||0),0);
-}
-/** Log one completion for a recurring task; keeps status open and advances due date. */
-function habitCompleteInPlace(t, optNote){
-  if(!t||!t.recur)return false;
-  if(activeTaskId===t.id&&taskStartedAt){
-    t.totalSec=(t.totalSec||0)+Math.floor((Date.now()-taskStartedAt)/1000);
-    taskStartedAt=null;activeTaskId=null;
-  }
-  if(!Array.isArray(t.completions))t.completions=[];
-  const sessionDelta=Math.max(0,(t.totalSec||0)-_sumCompletionSecs(t));
-  const entry={date:todayISO(),sec:sessionDelta};
-  const n=optNote!=null?String(optNote).trim():'';
-  if(n)entry.note=n;
-  t.completions.push(entry);
-  t.sessions=(t.sessions||0)+1;
-  t.dueDate=advanceRecurringDate(t.dueDate||todayISO(),t.recur);
-  t.status='open';
-  t.completedAt=null;
-  t.completionNote=null;
-  return true;
-}
-function getHabitStreak(t){
-  if(!t||!t.recur||!Array.isArray(t.completions)||!t.completions.length)return 0;
-  const done=new Set(t.completions.map(c=>c&&c.date).filter(Boolean));
-  function iso(d){
-    return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
-  }
-  let check=new Date();
-  check.setHours(12,0,0,0);
-  if(!done.has(iso(check)))check.setDate(check.getDate()-1);
-  let streak=0;
-  while(done.has(iso(check))){
-    streak++;
-    check.setDate(check.getDate()-1);
-    if(streak>730)break;
-  }
-  return streak;
-}
-function getHabitTotalSec(t){
-  if(!t)return 0;
-  return _sumCompletionSecs(t);
+function spawnRecurringClone(t){
+  if(!t.recur)return;
+  const newDue=advanceRecurringDate(t.dueDate||todayISO(),t.recur);
+  tasks.push({
+    id:++taskIdCtr,name:t.name,totalSec:0,sessions:0,created:timeNowFull(),
+    parentId:t.parentId,collapsed:false,archived:false,completedAt:null,
+    status:'open',priority:t.priority,tags:[...(t.tags||[])],
+    dueDate:newDue,startDate:null,estimateMin:t.estimateMin,
+    description:t.description,starred:t.starred,listId:t.listId,
+    recur:t.recur,order:Date.now(),remindAt:null,reminderFired:false,
+    type:t.type||'task',effort:t.effort||null,energyLevel:t.energyLevel||null,
+    context:t.context||null,blockedBy:[],checklist:[],notes:[],
+    url:t.url||null,completionNote:null,
+    category:t.category||null,valuesAlignment:[...(t.valuesAlignment||[])],valuesNote:null,
+  });
 }
 
 // Status/Priority quick-change
@@ -631,25 +597,12 @@ function toggleTaskDoneQuick(id){
   event&&event.stopPropagation();
   const t=findTask(id);if(!t)return;
   if(t.status==='done'){t.status='open';t.completedAt=null}
-  else if(t.recur){
-    habitCompleteInPlace(t);
-    haptic(15);
-    setTimeout(()=>{
-      const row=document.querySelector('.task-item[data-task-id="'+id+'"]');
-      if(row){
-        row.classList.add('just-done');
-        const spark=document.createElement('span');spark.className='done-sparkle';
-        spark.innerHTML=(window.icon && window.icon('sparkles',{size:20}))||'';
-        const rect=row.getBoundingClientRect();
-        spark.style.cssText='left:'+(rect.left+32)+'px;top:'+(rect.top+10)+'px;position:fixed;z-index:2000';
-        document.body.appendChild(spark);
-        setTimeout(()=>spark.remove(),700);
-      }
-    },10);
-  }else{
+  else{
     t.status='done';t.completedAt=timeNow();
     if(activeTaskId===id){toggleTask(id)}
+    if(t.recur)spawnRecurringClone(t);
     haptic(15);
+    // Dopamine: animate the row + a little sparkle
     setTimeout(()=>{
       const row=document.querySelector('.task-item[data-task-id="'+id+'"]');
       if(row){
@@ -663,7 +616,7 @@ function toggleTaskDoneQuick(id){
       }
     },10);
   }
-  renderTaskList();renderBanner();saveState('user')
+  renderTaskList();saveState('user')
 }
 
 // Haptic helper — vibrate on supporting devices (iOS Safari + all Android)
@@ -763,8 +716,6 @@ function updateTaskFilters(){
   taskFilters.status=gid('filterStatus').value;
   taskFilters.priority=gid('filterPriority').value;
   taskFilters.category=(gid('filterCategory')||{}).value||'all';
-  const sd=gid('filterShowDone');
-  if(smartView==='all'&&sd)taskFilters.showDone=!!sd.checked;
   taskSortBy=gid('taskSortSel').value;
   const g=gid('groupBySel');if(g)taskGroupBy=g.value;
   const sem=gid('taskSearchSemantic');
@@ -795,9 +746,9 @@ function setTaskView(v){
   if(gid('viewListMobile'))gid('viewListMobile').classList.toggle('active',v==='list');
   if(gid('viewBoardMobile'))gid('viewBoardMobile').classList.toggle('active',v==='board');
   if(gid('viewCalMobile'))gid('viewCalMobile').classList.toggle('active',v==='calendar');
-  gid('taskList').classList.toggle('u-hidden',v!=='list');
-  gid('boardView').classList.toggle('u-hidden',v!=='board');
-  if(gid('calendarView'))gid('calendarView').classList.toggle('u-hidden',v!=='calendar');
+  gid('taskList').style.display=v==='list'?'':'none';
+  gid('boardView').style.display=v==='board'?'flex':'none';
+  if(gid('calendarView'))gid('calendarView').style.display=v==='calendar'?'':'none';
   document.body.classList.toggle('cal-active-mobile',v==='calendar');
   renderTaskList();
   saveState('user')
@@ -824,7 +775,6 @@ function matchesFilters(t){
   else if(smartView==='starred'){if(!t.starred||t.status==='done')return false}
   else if(smartView==='impact'){if(t.status==='done'||!_paretoTopSet.has(t.id))return false}
   else if(smartView==='completed'){if(t.status!=='done')return false}
-  else if(smartView==='all'&&!taskFilters.showDone&&t.status==='done')return false
   // Search — semantic (cosine) or substring
   if(taskFilters.search){
     const semActive = window._taskSearchSemantic && window._semanticScores && window._semanticScores.size > 0;
@@ -906,15 +856,15 @@ function renderTodayBanner(){
   const banner=gid('todayBanner');
   if(banner){
     const hasUrgent=overdue>0||dueToday>0;
-    banner.classList.toggle('is-visible',hasUrgent);
+    banner.style.display=hasUrgent?'':'none';
   }
 }
 
 function toggleFiltersPanel(){
   const panel=gid('filtersPanel');if(!panel)return;
   const btn=gid('filtersToggle');
-  const isOpen=panel.classList.contains('filters-panel--open');
-  panel.classList.toggle('filters-panel--open',!isOpen);
+  const isOpen=panel.style.display!=='none';
+  panel.style.display=isOpen?'none':'';
   if(btn)btn.classList.toggle('active',!isOpen);
 }
 
@@ -929,9 +879,8 @@ function updateFiltersActiveBadge(){
   if(pr&&pr.value!=='all')count++;
   if(so&&so.value!=='manual'&&so.value!=='smart')count++;
   if(gr&&gr.value!=='none')count++;
-  const sd=gid('filterShowDone');if(sd&&sd.checked)count++;
-  if(count>0){badge.textContent=count;badge.classList.add('is-active');}
-  else{badge.classList.remove('is-active');}
+  if(count>0){badge.textContent=count;badge.style.display='';}
+  else{badge.style.display='none';}
 }
 
 function renderSmartViewCounts(){
@@ -942,8 +891,7 @@ function renderSmartViewCounts(){
   const weekAhead=new Date();weekAhead.setDate(weekAhead.getDate()+7);
   const weekEnd=weekAhead.getFullYear()+'-'+String(weekAhead.getMonth()+1).padStart(2,'0')+'-'+String(weekAhead.getDate()).padStart(2,'0');
   const set=(id,n)=>{const el=gid(id);if(el)el.textContent=n};
-  const allN=active.filter(t=>taskFilters.showDone||t.status!=='done').length;
-  set('svcAll',allN);
+  set('svcAll',active.length);
   set('svcToday',activeNotDone.filter(t=>t.dueDate===today).length);
   set('svcWeek',activeNotDone.filter(t=>t.dueDate&&t.dueDate>=today&&t.dueDate<=weekEnd).length);
   set('svcOverdue',activeNotDone.filter(t=>t.dueDate&&t.dueDate<today).length);
@@ -958,10 +906,6 @@ function renderSmartViewCounts(){
 function renderTaskList(){
   const list=gid('taskList');
   if(!list)return;
-  if(typeof ensureClassificationCfg==='function')ensureClassificationCfg(cfg);
-  syncFilterCategoryOptions();
-  initCardDensityCheckbox();
-  const fd=gid('filterShowDone');if(fd){fd.disabled=smartView!=='all';if(smartView==='all')fd.checked=!!taskFilters.showDone}
   renderLists();
   refreshParetoTopSet();
   renderTodayBanner();
@@ -977,16 +921,16 @@ function renderTaskList(){
     empty.style.display='';
     if(tasks.length){
       // Has tasks, but filter/view excludes all
-      empty.innerHTML='<div class="empty"><div class="empty__icon" aria-hidden="true">🔍</div><div class="empty__title">No tasks match your filters</div><div class="empty__hint">Try adjusting the Filters panel, or switch to the "All" smart view.</div></div>';
+      empty.innerHTML='<div style="font-size:28px;margin-bottom:8px;opacity:.6">🔍</div><div style="font-weight:500;margin-bottom:4px">No tasks match your filters</div><div style="font-size:12px;opacity:.7">Try adjusting the Filters panel, or switch to the "All" smart view.</div>';
     } else if(smartView==='archived'){
       {
         const ic=(window.icon && window.icon('archive',{size:28}))||'';
-        empty.innerHTML='<div class="empty"><div class="empty__icon">'+ic+'</div><div class="empty__title">Archive is empty</div><div class="empty__hint">Archived tasks will appear here when you archive them from the menu.</div></div>';
+        empty.innerHTML='<div class="empty-ic" style="opacity:.6;margin-bottom:8px">'+ic+'</div><div style="font-weight:500;margin-bottom:4px">Archive is empty</div><div style="font-size:12px;opacity:.7">Archived tasks will appear here when you archive them from the menu.</div>';
       }
     } else {
       {
         const ic=(window.icon && window.icon('sparkles',{size:28}))||'';
-        empty.innerHTML='<div class="empty"><div class="empty__icon">'+ic+'</div><div class="empty__title">No tasks yet</div><div class="empty__hint">Type above to add one, or try a quick-add shortcut:</div><div class="empty__sample">Buy milk <span class="empty__accent">tomorrow @urgent #shopping</span></div></div>';
+        empty.innerHTML='<div class="empty-ic" style="opacity:.6;margin-bottom:8px">'+ic+'</div><div style="font-weight:500;margin-bottom:4px">No tasks yet</div><div style="font-size:12px;opacity:.7;margin-bottom:8px">Type above to add one, or try a quick-add shortcut:</div><div style="font-size:11px;opacity:.55;font-family:var(--font-mono,monospace);line-height:1.6">Buy milk <span style="color:var(--accent,#48b5e0)">tomorrow @urgent #shopping</span></div>';
       }
     }
     return;
@@ -1189,141 +1133,6 @@ function renderBlockedBy(taskId){
     c.innerHTML=`${bt.status==='done'?'✓ ':''}<span>${esc(bt.name.slice(0,30))}</span><button onclick="removeBlockedBy(${taskId},${bid})">×</button>`;
     chips.appendChild(c);
   });
-}
-
-function getCardDensity(){
-  try{
-    const v=localStorage.getItem('stupind_card_density');
-    return v==='detailed'?'detailed':'compact';
-  }catch(e){return'compact'}
-}
-function setCardDensity(mode){
-  try{
-    localStorage.setItem('stupind_card_density',mode==='detailed'?'detailed':'compact');
-  }catch(e){}
-  const el=gid('cardDensityDetailed');if(el)el.checked=(mode==='detailed');
-  renderTaskList();
-}
-function setCardDensityFromUi(){
-  const el=gid('cardDensityDetailed');
-  setCardDensity(el&&el.checked?'detailed':'compact');
-}
-function initCardDensityCheckbox(){
-  const el=gid('cardDensityDetailed');if(!el)return;
-  el.checked=getCardDensity()==='detailed';
-}
-function syncFilterCategoryOptions(){
-  const sel=gid('filterCategory');if(!sel)return;
-  const cur=sel.value||'all';
-  const defs=typeof getActiveCategories==='function'?getActiveCategories():[];
-  sel.innerHTML='<option value="all">Any category</option>';
-  defs.forEach(d=>{
-    const o=document.createElement('option');
-    o.value=d.id;
-    o.textContent=d.label||d.id;
-    sel.appendChild(o);
-  });
-  if([...sel.options].some(o=>o.value===cur))sel.value=cur;
-  else sel.value='all';
-}
-const CLASSIFICATION_ICON_CHOICES=['pin','heart','dollar','briefcase','users','book','home','leaf','zap','star','phone','monitor','car','clipboard','calendar','folder','globe','lightbulb','bug','sparkles','gear'];
-function _slugClassId(s){
-  let x=String(s||'').toLowerCase().replace(/[^a-z0-9_-]+/g,'-').replace(/^-+|-+$/g,'').slice(0,32);
-  return x||('c-'+(Date.now()%1e9));
-}
-function _moveArr(arr,idx,dir){
-  const j=idx+dir;if(j<0||j>=arr.length)return;
-  const tmp=arr[idx];arr[idx]=arr[j];arr[j]=tmp;
-}
-function renderClassificationSettings(){
-  const root=gid('classificationSettingsRoot');if(!root)return;
-  ensureClassificationCfg(cfg);
-  const escAttr=s=>String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
-  const catRows=(cfg.categories||[]).map((row,i)=>{
-    const hid=!!row.hidden;
-    const icons=CLASSIFICATION_ICON_CHOICES.map(ic=>'<option value="'+ic+'" '+(row.icon===ic?'selected':'')+'>'+ic+'</option>').join('');
-    return '<div class="class-row"><div class="class-row-main">'
-      +'<input type="text" class="sinput class-label-in" data-kind="cat" data-idx="'+i+'" value="'+escAttr(row.label||'')+'" aria-label="Category label">'
-      +'<select class="sinput class-icon-sel" data-kind="cat" data-idx="'+i+'" aria-label="Icon">'+icons+'</select>'
-      +'<button type="button" class="small-btn class-up" data-kind="cat" data-idx="'+i+'">↑</button>'
-      +'<button type="button" class="small-btn class-down" data-kind="cat" data-idx="'+i+'">↓</button>'
-      +'<label class="class-hide-lbl"><input type="checkbox" data-kind="cat" data-idx="'+i+'" '+(hid?'checked':'')+'>Hide</label>'
-      +'</div><code class="class-id-hint">'+esc(row.id)+'</code></div>';
-  }).join('');
-  const ctxRows=(cfg.contexts||[]).map((row,i)=>{
-    const hid=!!row.hidden;
-    const icons=CLASSIFICATION_ICON_CHOICES.map(ic=>'<option value="'+ic+'" '+(row.icon===ic?'selected':'')+'>'+ic+'</option>').join('');
-    return '<div class="class-row"><div class="class-row-main">'
-      +'<input type="text" class="sinput class-label-in" data-kind="ctx" data-idx="'+i+'" value="'+escAttr(row.label||'')+'" aria-label="Context label">'
-      +'<select class="sinput class-icon-sel" data-kind="ctx" data-idx="'+i+'">'+icons+'</select>'
-      +'<button type="button" class="small-btn class-up" data-kind="ctx" data-idx="'+i+'">↑</button>'
-      +'<button type="button" class="small-btn class-down" data-kind="ctx" data-idx="'+i+'">↓</button>'
-      +'<label class="class-hide-lbl"><input type="checkbox" data-kind="ctx" data-idx="'+i+'" '+(hid?'checked':'')+'>Hide</label>'
-      +'</div><code class="class-id-hint">'+esc(row.id)+'</code></div>';
-  }).join('');
-  root.innerHTML=
-    '<div class="srow" style="flex-direction:column;align-items:stretch;gap:10px">'
-    +'<span class="sr-lbl" style="font-size:12px">Life categories</span>'
-    +'<div class="class-list" id="classListCat">'+(catRows||'')+'</div>'
-    +'<div class="class-add-row"><input type="text" class="sinput" id="newCatLabel" placeholder="New category label…">'
-    +'<button type="button" class="btn-ghost btn-sm" onclick="addClassificationRow(\'cat\')">Add</button></div></div>'
-    +'<div class="srow" style="flex-direction:column;align-items:stretch;gap:10px;margin-top:12px">'
-    +'<span class="sr-lbl" style="font-size:12px">Contexts</span>'
-    +'<div class="class-list" id="classListCtx">'+(ctxRows||'')+'</div>'
-    +'<div class="class-add-row"><input type="text" class="sinput" id="newCtxLabel" placeholder="New context label…">'
-    +'<button type="button" class="btn-ghost btn-sm" onclick="addClassificationRow(\'ctx\')">Add</button></div></div>';
-  root.querySelectorAll('.class-label-in').forEach(inp=>{
-    inp.onchange=function(){
-      const k=inp.dataset.kind==='cat'?'categories':'contexts';
-      const idx=parseInt(inp.dataset.idx,10);
-      if(cfg[k][idx])cfg[k][idx].label=inp.value.trim()||cfg[k][idx].id;
-      saveState('user');syncFilterCategoryOptions();renderTaskList();
-    };
-  });
-  root.querySelectorAll('.class-icon-sel').forEach(sel=>{
-    sel.onchange=function(){
-      const k=sel.dataset.kind==='cat'?'categories':'contexts';
-      const idx=parseInt(sel.dataset.idx,10);
-      if(cfg[k][idx])cfg[k][idx].icon=sel.value;
-      saveState('user');renderTaskList();
-    };
-  });
-  root.querySelectorAll('.class-hide-lbl input').forEach(cb=>{
-    cb.onchange=function(){
-      const k=cb.dataset.kind==='cat'?'categories':'contexts';
-      const idx=parseInt(cb.dataset.idx,10);
-      if(cfg[k][idx])cfg[k][idx].hidden=cb.checked;
-      saveState('user');syncFilterCategoryOptions();renderTaskList();
-    };
-  });
-  root.querySelectorAll('.class-up').forEach(btn=>{
-    btn.onclick=function(){
-      const k=btn.dataset.kind==='cat'?'categories':'contexts';
-      const idx=parseInt(btn.dataset.idx,10);
-      _moveArr(cfg[k],idx,-1);
-      saveState('user');renderClassificationSettings();syncFilterCategoryOptions();
-    };
-  });
-  root.querySelectorAll('.class-down').forEach(btn=>{
-    btn.onclick=function(){
-      const k=btn.dataset.kind==='cat'?'categories':'contexts';
-      const idx=parseInt(btn.dataset.idx,10);
-      _moveArr(cfg[k],idx,1);
-      saveState('user');renderClassificationSettings();syncFilterCategoryOptions();
-    };
-  });
-}
-function addClassificationRow(kind){
-  const isCat=kind==='cat';
-  const inp=gid(isCat?'newCatLabel':'newCtxLabel');
-  const label=(inp&&inp.value||'').trim();
-  if(!label)return;
-  const id=_slugClassId(label);
-  const list=isCat?cfg.categories:cfg.contexts;
-  if(list.some(r=>r.id===id)){alert('That id already exists — pick a different label.');return}
-  list.push({id,label,icon:isCat?'pin':'monitor',hidden:false});
-  if(inp)inp.value='';
-  saveState('user');renderClassificationSettings();syncFilterCategoryOptions();renderTaskList();
 }
 
 (function(){

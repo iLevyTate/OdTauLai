@@ -36,46 +36,46 @@
 </head>
 <body>
 <!-- Offline status indicator — only visible when navigator.onLine is false -->
-<div id="onlineStatus" class="offline-indicator u-hidden"></div>
+<div id="onlineStatus" class="offline-indicator" style="display:none"></div>
 <div class="container">
 
   <div class="header">
-    <h1><img src="icons/favicon-32.png" alt="" class="header-logo" width="32" height="32" onerror="this.classList.add('u-hidden')">ODTAULAI</h1>
+    <h1><img src="icons/favicon-32.png" alt="" class="header-logo" width="32" height="32" onerror="this.style.display='none'">ODTAULAI</h1>
     <div class="header-mid">
       <div class="header-date" id="headerDate"></div>
       <button type="button" class="what-next-pill" id="whatNextBtn" onclick="openWhatNext()" title="Top-ranked next actions">What next?</button>
     </div>
   </div>
 
-  <div id="banner" class="tracking-banner">
-    <div class="tracking-banner__inner">
-      <div class="tracking-banner__pulse" aria-hidden="true"></div>
-      <span class="tracking-banner__label">Tracking</span>
-      <span id="bannerTask" class="tracking-banner__task"></span>
-      <span id="bannerTime" class="tracking-banner__time"></span>
+  <div id="banner" style="display:none;width:100%;padding:10px 14px;background:#0d1a2d;border:1px solid #1a2d44;border-radius:10px;margin-bottom:14px">
+    <div style="display:flex;align-items:center;gap:8px">
+      <div style="width:8px;height:8px;border-radius:50%;background:var(--work);animation:pulse 1.5s infinite"></div>
+      <span style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#5a8ab5">Tracking</span>
+      <span id="bannerTask" style="font-size:12px;font-weight:600;color:#b0c4d8;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+      <span id="bannerTime" style="font-size:14px;font-weight:800;color:var(--work);font-variant-numeric:tabular-nums"></span>
     </div>
   </div>
 
   <!-- Main Nav Tabs -->
-  <div class="header-nav-row">
-    <div class="nav-tabs" id="navTabs">
-    <button type="button" class="nav-tab active" data-navtab="tasks" onclick="showTab('tasks')" aria-current="page">
+  <div style="display:flex;gap:8px;align-items:center;width:100%;max-width:960px;margin-bottom:10px">
+    <div class="nav-tabs" id="navTabs" style="flex:1;margin-bottom:0">
+    <button class="nav-tab active" data-navtab="tasks" onclick="showTab('tasks')">
       <span class="nav-tab-icon">☰</span>
       <span>Tasks</span>
     </button>
-    <button type="button" class="nav-tab" data-navtab="focus" onclick="showTab('focus')">
+    <button class="nav-tab" data-navtab="focus" onclick="showTab('focus')">
       <span class="nav-tab-icon">◉</span>
       <span>Timer</span>
     </button>
-    <button type="button" class="nav-tab" data-navtab="tools" onclick="showTab('tools')">
+    <button class="nav-tab" data-navtab="tools" onclick="showTab('tools')">
       <span class="nav-tab-icon">✦</span>
       <span>Tools</span>
     </button>
-    <button type="button" class="nav-tab" data-navtab="data" onclick="showTab('data')">
+    <button class="nav-tab" data-navtab="data" onclick="showTab('data')">
       <span class="nav-tab-icon">▤</span>
       <span>Data</span>
     </button>
-    <button type="button" class="nav-tab" data-navtab="settings" onclick="showTab('settings')">
+    <button class="nav-tab" data-navtab="settings" onclick="showTab('settings')">
       <span class="nav-tab-icon">⚙</span>
       <span>Settings</span>
     </button>
@@ -85,14 +85,14 @@
       <span class="ai-chip-label" aria-hidden="true">AI</span>
       <span id="aiChipLive" class="ai-chip-sr" aria-live="polite"></span>
     </button>
-    <button type="button" id="themeToggleBtn" class="btn btn--icon" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle light or dark theme">🌙</button>
-    <button type="button" class="btn btn--icon" onclick="openCmdK()" title="Command palette (Ctrl+K)" aria-label="Open command palette">⌘K</button>
+    <button id="themeToggleBtn" onclick="toggleTheme()" title="Toggle theme" style="width:38px;height:38px;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-sm);color:var(--text-2);font-size:16px;cursor:pointer">🌙</button>
+    <button onclick="openCmdK()" title="Command palette (Ctrl+K)" style="width:38px;height:38px;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-sm);color:var(--text-2);font-size:14px;cursor:pointer">⌘K</button>
   </div>
 
   <!-- Tasks (primary ClickUp-style task manager) -->
-  <div class="panel panel--compact" data-tab="tasks">
+  <div class="panel" data-tab="tasks" style="padding:14px">
     <div class="shdr">
-      <div class="sdot sdot--pink" aria-hidden="true"></div>
+      <div class="sdot" style="background:#e056a0"></div>
       <span class="slbl">Task Manager</span>
       <span class="scnt" id="taskCountBadge">0 active</span>
     </div>
@@ -103,11 +103,11 @@
         <input class="task-input" id="taskInput" placeholder="Add a task… or paste multiple lines to import"
           oninput="maybeShowEnhanceBtn()"
           onkeydown="if(event.key==='Enter'){if(window._smartAddPreview){applySmartAddAndSubmit()}else{addTask()}}">
-        <button type="button" class="task-enhance-btn u-hidden" id="taskEnhanceBtn" onclick="smartAddEnhance()" title="Suggest metadata from your task history (embeddings)" data-icon="sparkles" aria-label="Smart-add suggestions"></button>
+        <button class="task-enhance-btn" id="taskEnhanceBtn" onclick="smartAddEnhance()" style="display:none" title="Suggest metadata from your task history (embeddings)" data-icon="sparkles" aria-label="Smart-add suggestions"></button>
       </div>
       <button class="task-add" onclick="if(window._smartAddPreview){applySmartAddAndSubmit()}else{addTask()}">+ Add</button>
     </div>
-    <div id="smartAddPreview" class="smart-add-preview"></div>
+    <div id="smartAddPreview" class="smart-add-preview" style="display:none"></div>
     <div class="qa-hint">QUICK ADD: <code>today</code> / <code>tomorrow</code> / weekdays · natural dates (e.g. next Friday, in 3 days) · <code>@urgent</code> <code>@high</code> <code>@low</code> · <code>#tag</code> · <code>!star</code> · <code>~daily</code> <code>~weekly</code></div>
 
     <div class="task-search-bar">
@@ -142,17 +142,17 @@
       <button class="filters-toggle" id="filtersToggle" onclick="toggleFiltersPanel()" title="Filters & sort">
         <span class="ft-icon">⚙</span>
         <span class="ft-label">Filters</span>
-        <span class="ft-count" id="filtersActiveCount">0</span>
+        <span class="ft-count" id="filtersActiveCount" style="display:none">0</span>
       </button>
     </div>
 
     <!-- Collapsible filter panel (hidden by default on mobile) -->
-    <div class="task-toolbar" id="filtersPanel">
+    <div class="task-toolbar" id="filtersPanel" style="display:none">
       <!-- View selector (mobile-only, when controlbar view-toggle is hidden) -->
-      <div class="view-toggle mobile-view-toggle">
-        <button type="button" id="viewListMobile" class="active" onclick="setTaskView('list');updateMobileViewToggle()"><span class="mv-ic" data-icon="list"></span> List</button>
-        <button type="button" id="viewBoardMobile" onclick="setTaskView('board');updateMobileViewToggle()"><span class="mv-ic" data-icon="grid"></span> Board</button>
-        <button type="button" id="viewCalMobile" onclick="setTaskView('calendar');updateMobileViewToggle()"><span class="mv-ic" data-icon="calendar"></span> Cal</button>
+      <div class="view-toggle mobile-view-toggle" style="width:100%">
+        <button id="viewListMobile" class="active" onclick="setTaskView('list');updateMobileViewToggle()" style="flex:1"><span class="mv-ic" data-icon="list"></span> List</button>
+        <button id="viewBoardMobile" onclick="setTaskView('board');updateMobileViewToggle()" style="flex:1"><span class="mv-ic" data-icon="grid"></span> Board</button>
+        <button id="viewCalMobile" onclick="setTaskView('calendar');updateMobileViewToggle()" style="flex:1"><span class="mv-ic" data-icon="calendar"></span> Cal</button>
       </div>
       <div class="task-toolbar-row">
         <select class="task-tb-sel" id="filterStatus" onchange="updateTaskFilters()">
@@ -175,11 +175,15 @@
       <div class="task-toolbar-row">
         <select class="task-tb-sel" id="filterCategory" onchange="updateTaskFilters()">
           <option value="all">Any category</option>
+          <option value="health">Health</option>
+          <option value="finance">Finance</option>
+          <option value="work">Work</option>
+          <option value="relationships">Relationships</option>
+          <option value="learning">Learning</option>
+          <option value="home">Home</option>
+          <option value="personal">Personal</option>
+          <option value="other">Other</option>
         </select>
-      </div>
-      <div class="task-toolbar-row task-toolbar-extras">
-        <label class="tb-check"><input type="checkbox" id="filterShowDone" onchange="updateTaskFilters()"> Show completed</label>
-        <label class="tb-check"><input type="checkbox" id="cardDensityDetailed" onchange="setCardDensityFromUi()"> Detailed cards</label>
       </div>
       <div class="task-toolbar-row">
         <select class="task-tb-sel" id="taskSortSel" onchange="updateTaskFilters()">
@@ -206,7 +210,7 @@
     <div class="lists-bar" id="listsBar"></div>
 
     <!-- Today banner: hidden when empty, compact when shown -->
-    <div class="today-banner today-banner-compact" id="todayBanner">
+    <div class="today-banner today-banner-compact" id="todayBanner" style="display:none">
       <div class="tb-item"><div class="tb-num overdue" id="tbOverdue">0</div><div class="tb-lbl">Overdue</div></div>
       <div class="tb-divider"></div>
       <div class="tb-item"><div class="tb-num today" id="tbToday">0</div><div class="tb-lbl">Today</div></div>
@@ -217,7 +221,7 @@
     </div>
 
     <!-- Archived notice (only shown in archive view) -->
-    <div class="archived-notice" id="archivedNotice">
+    <div class="archived-notice" id="archivedNotice" style="display:none">
       <span class="archived-notice-inner"><span class="archived-notice-ic" data-icon="archive"></span>Viewing archived tasks — click the restore button (<span class="archived-notice-restore" data-icon="rotateCcw"></span>) to bring them back</span>
       <button onclick="if(confirm('Permanently delete ALL archived tasks? This cannot be undone.'))emptyArchive()">Empty Archive</button>
     </div>
@@ -226,16 +230,16 @@
     <div class="task-list" id="taskList"><div class="task-empty" id="taskEmpty">No tasks yet — add one above to get started</div></div>
 
     <!-- Board view (kanban) -->
-    <div class="board-view u-hidden" id="boardView"></div>
+    <div class="board-view" id="boardView" style="display:none"></div>
 
     <!-- Calendar view -->
-    <div id="calendarView" class="u-hidden"></div>
+    <div id="calendarView" style="display:none"></div>
   </div>
 
   <!-- Pomodoro Focus Timer -->
-  <div class="panel panel--roomy" data-tab="focus">
+  <div class="panel" data-tab="focus" style="padding:20px">
     <div class="shdr">
-      <div class="sdot sdot--accent" aria-hidden="true"></div>
+      <div class="sdot" style="background:var(--accent)"></div>
       <span class="slbl">Focus Timer</span>
       <span class="scnt" id="pomoCycleLabel">Pomodoro</span>
     </div>
@@ -244,12 +248,12 @@
       <button class="tab" onclick="switchPhase('short')">Short Break</button>
       <button class="tab" onclick="switchPhase('long')">Long Break</button>
     </div>
-    <div class="card ring-card ring-card--work" id="mainCard">
+    <div class="card" id="mainCard" style="background:var(--work-bg);border:1px solid var(--work-border);margin-top:12px">
       <div class="ring-wrap">
         <svg class="ring-svg" viewBox="0 0 200 200"><circle class="ring-bg" cx="100" cy="100" r="88"/><circle class="ring-fg" id="ringFg" cx="100" cy="100" r="88" stroke="var(--work)" stroke-dasharray="553" stroke-dashoffset="0"/></svg>
         <div class="ring-center">
-          <div class="ring-time" id="display">25:00</div>
-          <div class="ring-label" id="phaseLabel">Focus</div>
+          <div class="ring-time" id="display" style="color:var(--work)">25:00</div>
+          <div class="ring-label" id="phaseLabel" style="color:var(--work)">Focus</div>
         </div>
       </div>
       <div class="pips" id="pips"></div>
@@ -261,13 +265,13 @@
   <!-- Quick Timers -->
   <div class="panel" data-tab="focus">
     <div class="shdr">
-      <div class="sdot sdot--info" aria-hidden="true"></div>
+      <div class="sdot" style="background:#48b5e0"></div>
       <span class="slbl">Quick Timers</span>
       <span class="scnt" id="qtCount">0 timers</span>
     </div>
     <div class="qt-form">
-      <div class="qt-form__field"><label class="fl">Label</label><input class="fi fi-w" id="qtLabel" placeholder="e.g. Tea steep" onkeydown="if(event.key==='Enter')addQuickTimer()"></div>
-      <div class="qt-form__nums"><div><label class="fl">Min</label><input type="number" class="fi fi-n" id="qtMin" value="5" min="0" max="999"></div><div><label class="fl">Sec</label><input type="number" class="fi fi-n" id="qtSec" value="0" min="0" max="59"></div></div>
+      <div style="flex:1 1 120px"><label class="fl">Label</label><input class="fi fi-w" id="qtLabel" placeholder="e.g. Tea steep" onkeydown="if(event.key==='Enter')addQuickTimer()"></div>
+      <div style="display:flex;gap:6px"><div><label class="fl">Min</label><input type="number" class="fi fi-n" id="qtMin" value="5" min="0" max="999"></div><div><label class="fl">Sec</label><input type="number" class="fi fi-n" id="qtSec" value="0" min="0" max="59"></div></div>
       <div><label class="fl">Sound</label><select class="fi fi-s" id="qtSound"><option value="bell">Bell</option><option value="ping">Ping</option><option value="buzz">Buzz</option><option value="chord">Chord</option><option value="alarm">Alarm</option></select></div>
       <button class="iadd" onclick="addQuickTimer()">+ ADD</button>
     </div>
@@ -285,124 +289,103 @@
     <div class="qt-list" id="qtList"><div class="iempty" id="qtEmpty">No quick timers — add one or tap a preset</div></div>
   </div>
 
-  <!-- Stopwatch -->
-  <div class="panel" data-tab="focus">
-    <div class="shdr"><div class="sdot sdot--purple" aria-hidden="true"></div><span class="slbl">Stopwatch</span></div>
-    <div class="stopwatch-stack">
-      <div id="swDisplay" class="sw-display">00:00:00</div>
-      <div class="stopwatch-actions">
-        <button type="button" class="btn btn-primary btn--compact-sm" id="swStartBtn" onclick="swToggle()">Start</button>
-        <button type="button" class="btn btn-ghost btn--compact-sm" onclick="swLap()">Lap</button>
-        <button type="button" class="btn-danger btn--compact-sm" onclick="swReset()">Reset</button>
-      </div>
-      <div id="swLaps" class="sw-laps"></div>
-    </div>
-  </div>
-
-  <!-- Repeating chimes -->
-  <div class="panel" data-tab="focus">
-    <div class="shdr"><div class="sdot sdot--info" aria-hidden="true"></div><span class="slbl">Repeating Chimes</span><span class="scnt" id="intCount">0 set</span></div>
-    <div class="iform">
-      <div class="qt-form__field"><label class="fl">Label</label><input class="fi fi-w" id="intLabel" placeholder="e.g. Posture check"></div>
-      <div class="iform__nums"><div><label class="fl">Min</label><input type="number" class="fi fi-n" id="intMin" value="5" min="0" max="999"></div><div><label class="fl">Sec</label><input type="number" class="fi fi-n" id="intSec" value="0" min="0" max="59"></div></div>
-      <div><label class="fl">Sound</label><select class="fi fi-s" id="intChime"><option value="bell">Bell</option><option value="ping">Ping</option><option value="buzz">Buzz</option><option value="chord">Chord</option><option value="alarm">Alarm</option></select></div>
-      <div class="iform__actions"><button type="button" class="iprev" onclick="playChime(gid('intChime').value)" title="Preview sound" data-icon="play" aria-label="Preview chime sound"></button><button type="button" class="iadd" onclick="addInterval()">+ ADD</button></div>
-    </div>
-    <div class="ilist" id="intList"><div class="iempty" id="intEmpty">No chimes set</div></div>
-  </div>
-
   <!-- Task understanding (on-device embeddings) -->
   <div class="panel intel-tools-panel" data-tab="tools">
     <div id="intelPanel" class="intel-panel-root"></div>
   </div>
 
+  <!-- Stopwatch -->
+  <div class="panel" data-tab="tools">
+    <div class="shdr"><div class="sdot" style="background:#9b59b6"></div><span class="slbl">Stopwatch</span></div>
+    <div style="text-align:center">
+      <div id="swDisplay" style="font-size:42px;font-weight:800;color:#e2e8f0;letter-spacing:3px;font-variant-numeric:tabular-nums;margin-bottom:12px">00:00:00</div>
+      <div style="display:flex;gap:10px;justify-content:center">
+        <button class="btn btn-primary" id="swStartBtn" onclick="swToggle()" style="padding:8px 20px;font-size:10px">Start</button>
+        <button class="btn btn-ghost" onclick="swLap()" style="padding:8px 20px;font-size:10px">Lap</button>
+        <button class="btn-danger" onclick="swReset()" style="padding:8px 16px">Reset</button>
+      </div>
+      <div id="swLaps" style="margin-top:10px;display:flex;flex-direction:column;gap:3px;max-height:120px;overflow-y:auto"></div>
+    </div>
+  </div>
+
   <!-- Log -->
   <div class="panel" data-tab="data">
-    <div class="shdr"><div class="sdot sdot--long" aria-hidden="true"></div><span class="slbl">Time Log</span><button type="button" class="small-btn" onclick="clearLog()">Clear</button></div>
+    <div class="shdr"><div class="sdot" style="background:var(--long)"></div><span class="slbl">Time Log</span><button class="small-btn" onclick="clearLog()">Clear</button></div>
     <div class="log-list" id="logList"><div class="log-empty" id="logEmpty">Completed sessions appear here</div></div>
   </div>
 
   <!-- Settings -->
   <div class="panel" data-tab="settings">
-    <div class="stitle" onclick="toggleSettings()"><div class="sdot sdot--info" aria-hidden="true"></div><span class="slbl">Settings</span><span class="sarrow" id="settingsArrow">▼</span></div>
-    <div class="sbody" id="settingsBody">
-      <details class="set-section" open>
-        <summary class="set-section-sum">General</summary>
-        <div class="set-section-body">
-          <div class="srow"><span class="sr-lbl">Focus Duration</span><input type="number" class="sinput" id="cfgWork" value="25" min="1" max="120" onchange="updateConfig()"><span class="sunit">min</span></div>
-          <div class="srow"><span class="sr-lbl">Short Break</span><input type="number" class="sinput" id="cfgShort" value="5" min="1" max="30" onchange="updateConfig()"><span class="sunit">min</span></div>
-          <div class="srow"><span class="sr-lbl">Long Break</span><input type="number" class="sinput" id="cfgLong" value="15" min="1" max="60" onchange="updateConfig()"><span class="sunit">min</span></div>
-          <div class="srow"><span class="sr-lbl">Sessions / Cycle</span><input type="number" class="sinput" id="cfgCycle" value="4" min="2" max="10" onchange="updateConfig()"></div>
-          <div class="srow"><span class="sr-lbl">Auto-start Breaks</span><div class="toggle on" id="togBreak" onclick="toggleOpt('togBreak')"><div class="tknob"></div></div></div>
-          <div class="srow"><span class="sr-lbl">Auto-start Focus</span><div class="toggle" id="togWork" onclick="toggleOpt('togWork')"><div class="tknob"></div></div></div>
-          <div class="srow"><span class="sr-lbl">Sound Alerts</span><div class="toggle on" id="togSound" onclick="toggleOpt('togSound')"><div class="tknob"></div></div></div>
-          <div class="srow"><span class="sr-lbl">Desktop Notifications</span><div class="toggle on" id="togNotif" onclick="toggleOpt('togNotif')"><div class="tknob"></div></div></div>
-          <div class="srow"><span class="sr-lbl">Link Task to Session</span><div class="toggle on" id="togLink" onclick="toggleOpt('togLink')"><div class="tknob"></div></div></div>
-          <div class="srow srow--stack">
-            <div class="srow--stack-hdr">
-              <span class="sr-lbl">Background Audio</span>
-              <span id="bgAudioStatus" class="bg-audio-status">● Active</span>
-            </div>
-            <span class="set-section-note">
-              Chimes play while this tab is in the background via Web Audio scheduling + Media Session API. Sounds <strong>stop if the browser is fully closed</strong> — install as a PWA for reliable background operation.
-            </span>
-          </div>
-        </div>
-      </details>
+    <div class="stitle" onclick="toggleSettings()"><div class="sdot" style="background:#3d8bcc"></div><span class="slbl">Settings</span><span class="sarrow" id="settingsArrow">▼</span></div>
+    <div class="sbody" id="settingsBody" style="max-height:0">
+      <div class="srow"><span class="sr-lbl">Focus Duration</span><input type="number" class="sinput" id="cfgWork" value="25" min="1" max="120" onchange="updateConfig()"><span class="sunit">min</span></div>
+      <div class="srow"><span class="sr-lbl">Short Break</span><input type="number" class="sinput" id="cfgShort" value="5" min="1" max="30" onchange="updateConfig()"><span class="sunit">min</span></div>
+      <div class="srow"><span class="sr-lbl">Long Break</span><input type="number" class="sinput" id="cfgLong" value="15" min="1" max="60" onchange="updateConfig()"><span class="sunit">min</span></div>
+      <div class="srow"><span class="sr-lbl">Sessions / Cycle</span><input type="number" class="sinput" id="cfgCycle" value="4" min="2" max="10" onchange="updateConfig()"></div>
+      <div class="srow"><span class="sr-lbl">Auto-start Breaks</span><div class="toggle on" id="togBreak" onclick="toggleOpt('togBreak')"><div class="tknob"></div></div></div>
+      <div class="srow"><span class="sr-lbl">Auto-start Focus</span><div class="toggle" id="togWork" onclick="toggleOpt('togWork')"><div class="tknob"></div></div></div>
+      <div class="srow"><span class="sr-lbl">Sound Alerts</span><div class="toggle on" id="togSound" onclick="toggleOpt('togSound')"><div class="tknob"></div></div></div>
+      <div class="srow"><span class="sr-lbl">Desktop Notifications</span><div class="toggle on" id="togNotif" onclick="toggleOpt('togNotif')"><div class="tknob"></div></div></div>
+      <div class="srow"><span class="sr-lbl">Link Task to Session</span><div class="toggle on" id="togLink" onclick="toggleOpt('togLink')"><div class="tknob"></div></div></div>
 
-      <details class="set-section">
-        <summary class="set-section-sum">Classifications</summary>
-        <div class="set-section-body">
-          <p class="set-section-lead">Life categories and contexts used on tasks. Hidden items stay on existing tasks but won’t appear in pickers.</p>
-          <div id="classificationSettingsRoot"></div>
+      <!-- Background audio info -->
+      <div class="srow" style="flex-direction:column;align-items:flex-start;gap:6px;padding:12px 0 14px;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:8px;width:100%;justify-content:space-between">
+          <span class="sr-lbl">Background Audio</span>
+          <span id="bgAudioStatus" style="font-size:11px;font-weight:600;color:var(--success)">● Active</span>
         </div>
-      </details>
+        <span style="font-size:11px;color:var(--text-3);line-height:1.5;max-width:100%">
+          Chimes play while this tab is in the background via Web Audio scheduling + Media Session API. Sounds <strong>stop if the browser is fully closed</strong> — install as a PWA for reliable background operation.
+        </span>
+      </div>
 
-      <details class="set-section">
-        <summary class="set-section-sum">Task understanding (AI)</summary>
-        <div class="set-section-body">
-          <div class="srow srow--between">
-            <span class="sr-lbl sr-lbl--md">On-device embeddings &amp; tools</span>
-            <button type="button" class="btn-ghost btn-sm btn-shrink-0" onclick="showTab('tools')">Open Tools</button>
-          </div>
-        </div>
-      </details>
+      <!-- Task understanding lives under Tools -->
+      <div class="srow" style="padding:14px 0 0;border-top:1px solid var(--border);margin-top:6px;justify-content:space-between;gap:10px">
+        <span class="sr-lbl" style="font-size:13px">Task understanding</span>
+        <button type="button" class="btn-ghost btn-sm" onclick="showTab('tools')" style="flex-shrink:0">Open in Tools →</button>
+      </div>
 
-      <details class="set-section">
-        <summary class="set-section-sum">Device sync</summary>
-        <div class="set-section-body">
-          <div id="syncPanel" class="sync-panel-host"></div>
-        </div>
-      </details>
+      <!-- P2P Sync -->
+      <div class="srow" style="flex-direction:column;align-items:flex-start;gap:10px;padding:14px 0 0;border-top:1px solid var(--border);margin-top:6px">
+        <span class="sr-lbl" style="font-size:12px;letter-spacing:.06em">Device Sync (Beta)</span>
+        <div id="syncPanel" style="width:100%"></div>
+      </div>
 
-      <details class="set-section">
-        <summary class="set-section-sum">Calendar feeds</summary>
-        <div class="set-section-body">
-          <div id="calFeedsPanel" class="calfeeds-panel-host"></div>
-        </div>
-      </details>
+      <!-- Calendar Feeds (iCal import) -->
+      <div class="srow" style="flex-direction:column;align-items:flex-start;gap:10px;padding:14px 0 0;border-top:1px solid var(--border);margin-top:6px">
+        <span class="sr-lbl" style="font-size:12px;letter-spacing:.06em">Calendar Feeds</span>
+        <div id="calFeedsPanel" style="width:100%"></div>
+      </div>
+      <div class="srow" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+        <span class="sr-lbl">Install as App</span>
+        <button id="installBtn" onclick="installPWA()" style="display:none;padding:8px 14px;background:var(--accent);color:#0a1320;border:none;border-radius:var(--r-sm);font-size:12px;font-weight:600;font-family:inherit;cursor:pointer">＋ Install</button>
+        <span id="pwaStatus" style="font-size:11px;color:var(--text-3);letter-spacing:0;text-align:right;max-width:200px"></span>
+      </div>
 
-      <details class="set-section">
-        <summary class="set-section-sum">Install &amp; system</summary>
-        <div class="set-section-body">
-          <div class="srow">
-            <span class="sr-lbl">Install as App</span>
-            <button type="button" id="installBtn" class="install-pwa-btn u-hidden" onclick="installPWA()">＋ Install</button>
-            <span id="pwaStatus" class="pwa-status-line"></span>
-          </div>
-          <div class="srow srow--system">
-            <span class="sr-lbl sr-lbl--caps">System</span>
-            <div id="systemInfo" class="system-info-block">Loading…</div>
-            <button type="button" class="btn-system-refresh" onclick="checkStorageQuota().then(renderSystemInfo)">Refresh</button>
-          </div>
-        </div>
-      </details>
+      <!-- System Info — version, storage, quota -->
+      <div class="srow" style="flex-direction:column;align-items:stretch;gap:8px;padding:14px 0 10px;border-top:1px solid var(--border);margin-top:10px">
+        <span class="sr-lbl" style="font-size:12px;letter-spacing:.06em">System</span>
+        <div id="systemInfo" style="font-size:11px;color:var(--text-3);line-height:1.6;font-variant-numeric:tabular-nums">Loading…</div>
+        <button onclick="checkStorageQuota().then(renderSystemInfo)" style="align-self:flex-start;background:none;border:1px solid var(--border);color:var(--text-3);padding:4px 10px;border-radius:4px;font-size:10px;font-family:inherit;cursor:pointer">Refresh</button>
+      </div>
     </div>
+  </div>
+
+  <!-- Intervals -->
+  <div class="panel" data-tab="tools">
+    <div class="shdr"><div class="sdot" style="background:#3d8bcc"></div><span class="slbl">Repeating Chimes</span><span class="scnt" id="intCount">0 set</span></div>
+    <div class="iform">
+      <div style="flex:1 1 100px"><label class="fl">Label</label><input class="fi fi-w" id="intLabel" placeholder="e.g. Posture check"></div>
+      <div style="display:flex;gap:6px;align-items:flex-end"><div><label class="fl">Min</label><input type="number" class="fi fi-n" id="intMin" value="5" min="0" max="999"></div><div><label class="fl">Sec</label><input type="number" class="fi fi-n" id="intSec" value="0" min="0" max="59"></div></div>
+      <div><label class="fl">Sound</label><select class="fi fi-s" id="intChime"><option value="bell">Bell</option><option value="ping">Ping</option><option value="buzz">Buzz</option><option value="chord">Chord</option><option value="alarm">Alarm</option></select></div>
+      <div style="display:flex;gap:5px"><button class="iprev" onclick="playChime(gid('intChime').value)">🔊</button><button class="iadd" onclick="addInterval()">+ ADD</button></div>
+    </div>
+    <div class="ilist" id="intList"><div class="iempty" id="intEmpty">No chimes set</div></div>
   </div>
 
   <!-- Stats & Export -->
   <div class="panel" data-tab="data">
-    <div class="shdr"><div class="sdot sdot--long" aria-hidden="true"></div><span class="slbl">Today's Stats</span><button type="button" class="small-btn" onclick="resetStats()">Reset Day</button></div>
+    <div class="shdr"><div class="sdot" style="background:var(--long)"></div><span class="slbl">Today's Stats</span><button class="small-btn" onclick="resetStats()">Reset Day</button></div>
     <div class="stat-grid">
       <div class="stat-box"><div class="stat-val wc" id="statPomos">0</div><div class="stat-lbl">Sessions</div></div>
       <div class="stat-box"><div class="stat-val tc" id="statFocus">0m</div><div class="stat-lbl">Focus Time</div></div>
@@ -427,10 +410,10 @@
       <p class="export-section-desc">Unified task data — same fields in both CSV and JSON. CSV opens in Excel/Sheets, JSON preserves full fidelity (checklist, notes). Import auto-detects the format and merges by task id.</p>
       <div class="export-row">
         <button class="export-btn export-csv" onclick="exportTasksCSV()">⬇ Tasks (.csv)</button>
-        <button type="button" class="export-btn export-btn--info" onclick="exportTasksJSON()">⬇ Tasks (.json)</button>
-        <label class="export-btn export-btn--success export-btn--import">
+        <button class="export-btn" style="background:rgba(61,139,204,.1);border-color:rgba(61,139,204,.3);color:#3d8bcc" onclick="exportTasksJSON()">⬇ Tasks (.json)</button>
+        <label class="export-btn" style="cursor:pointer;background:rgba(46,204,113,.08);border-color:rgba(46,204,113,.25);color:#2ecc71">
           ⬆ Import tasks
-          <input type="file" accept=".json,.csv" onchange="importTasks(this.files[0]); this.value=''">
+          <input type="file" accept=".json,.csv" style="display:none" onchange="importTasks(this.files[0]); this.value=''">
         </label>
       </div>
     </div>
@@ -440,10 +423,10 @@
       <div class="export-section-head">Full backup</div>
       <p class="export-section-desc">Complete app snapshot including tasks, lists, settings, daily stats, and archive. Use this to move everything to another device or recover from data loss.</p>
       <div class="export-row">
-        <button type="button" class="export-btn export-btn--success" onclick="exportData()">⬇ Full backup (.json)</button>
-        <label class="export-btn export-btn--info export-btn--import">
+        <button class="export-btn" style="background:rgba(46,204,113,.12);border-color:rgba(46,204,113,.3);color:#2ecc71" onclick="exportData()">⬇ Full backup (.json)</button>
+        <label class="export-btn" style="cursor:pointer;background:rgba(61,139,204,.1);border-color:rgba(61,139,204,.3);color:#3d8bcc">
           ⬆ Restore backup
-          <input type="file" accept=".json" onchange="importData(this.files[0]); this.value=''">
+          <input type="file" accept=".json" style="display:none" onchange="importData(this.files[0]); this.value=''">
         </label>
       </div>
     </div>
@@ -451,9 +434,9 @@
 
   <!-- Past Days Archive -->
   <div class="panel" data-tab="data">
-    <div class="shdr"><div class="sdot sdot--purple" aria-hidden="true"></div><span class="slbl">Past Days</span><span class="scnt" id="archiveCount">0 days</span></div>
-    <div id="archiveList" class="archive-list-scroll"><div class="iempty" id="archiveEmpty">History will appear here after each day</div></div>
-    <div class="archive-actions">
+    <div class="shdr"><div class="sdot" style="background:#8e44ad"></div><span class="slbl">Past Days</span><span class="scnt" id="archiveCount">0 days</span></div>
+    <div id="archiveList" style="max-height:400px;overflow-y:auto"><div class="iempty" id="archiveEmpty">History will appear here after each day</div></div>
+    <div style="display:flex;gap:8px;margin-top:8px">
       <button class="export-btn export-csv" onclick="exportAllCSV()">Export All History (.csv)</button>
       <button class="clear-hist-btn" onclick="clearArchive()">Clear History</button>
     </div>
@@ -472,11 +455,11 @@
     <div class="mt-time" id="mtTime">25:00</div>
   </div>
   <button class="mt-btn mt-play" id="mtToggle" onclick="event.stopPropagation();miniTimerToggle()">▶</button>
-  <div class="mt-open u-hidden" id="mtTaskHint">⇢ open</div>
+  <div class="mt-open" id="mtTaskHint" style="display:none">⇢ open</div>
 </div>
 
 <!-- What next? overlay -->
-<div id="whatNextOverlay" class="what-next-overlay" onclick="if(event.target===this)closeWhatNext()">
+<div id="whatNextOverlay" class="what-next-overlay" style="display:none" onclick="if(event.target===this)closeWhatNext()">
   <div class="what-next-panel" onclick="event.stopPropagation()">
     <div class="what-next-hdr">
       <span>What next?</span>
@@ -535,8 +518,8 @@
   <div class="modal">
     <div class="modal-head">
       <button class="task-checkbox" id="mdCheckbox" onclick="toggleTaskDone()"></button>
-      <input class="mfield-in mfield-in--title" id="mdName" placeholder="Task name">
-      <button type="button" class="modal-close" onclick="closeTaskDetail()" aria-label="Close task details">✕</button>
+      <input class="mfield-in" id="mdName" style="flex:1;font-size:14px;font-weight:700" placeholder="Task name">
+      <button class="modal-close" onclick="closeTaskDetail()">✕</button>
     </div>
     <div class="modal-body">
       <div class="modal-stat" id="mdStats"></div>
@@ -552,26 +535,64 @@
         </div>
       </div>
 
+      <div class="mfield">
+        <div class="mfield-lbl">Type</div>
+        <div class="mfield-chips" id="mdTypeChips"></div>
+      </div>
+
+      <div class="mfield">
+        <div class="mfield-lbl">Life Category</div>
+        <div class="mfield-chips" id="mdCategoryChips"></div>
+        <div id="mdValuesNote" style="font-size:11px;color:var(--text-3);margin-top:4px;font-style:italic"></div>
+      </div>
+
+      <div class="mfield-row">
+        <div class="mfield">
+          <div class="mfield-lbl">Effort</div>
+          <div class="mfield-chips" id="mdEffortChips"></div>
+        </div>
+        <div class="mfield">
+          <div class="mfield-lbl">Energy</div>
+          <div class="mfield-chips" id="mdEnergyChips"></div>
+        </div>
+      </div>
+
+      <div class="mfield">
+        <div class="mfield-lbl">Context</div>
+        <div class="mfield-chips" id="mdContextChips"></div>
+      </div>
+
+      <div class="mfield-row">
+        <div class="mfield">
+          <div class="mfield-lbl">List</div>
+          <select class="mfield-in" id="mdList"></select>
+        </div>
+        <div class="mfield">
+          <div class="mfield-lbl">Start Date</div>
+          <input type="date" class="mfield-in" id="mdStartDate">
+        </div>
+      </div>
+
       <div class="mfield-row">
         <div class="mfield">
           <div class="mfield-lbl">Due Date</div>
           <input type="date" class="mfield-in" id="mdDue">
           <div class="quick-dates">
-            <button type="button" class="qd-btn" onclick="setQuickDate(0)">Today</button>
-            <button type="button" class="qd-btn" onclick="setQuickDate(1)">Tomorrow</button>
-            <button type="button" class="qd-btn" onclick="setQuickDate(7)">+1 Week</button>
-            <button type="button" class="qd-btn" onclick="setQuickDate('clear')">Clear</button>
+            <button class="qd-btn" onclick="setQuickDate(0)">Today</button>
+            <button class="qd-btn" onclick="setQuickDate(1)">Tomorrow</button>
+            <button class="qd-btn" onclick="setQuickDate(7)">+1 Week</button>
+            <button class="qd-btn" onclick="setQuickDate('clear')">Clear</button>
           </div>
         </div>
         <div class="mfield">
           <div class="mfield-lbl">Remind me at</div>
           <input type="datetime-local" class="mfield-in" id="mdRemindAt">
           <div class="quick-dates">
-            <button type="button" class="qd-btn" onclick="setQuickReminder(0,9)">9am</button>
-            <button type="button" class="qd-btn" onclick="setQuickReminder(0,17)">5pm</button>
-            <button type="button" class="qd-btn" onclick="setQuickReminder(1,9)">Tmrw 9am</button>
-            <button type="button" class="qd-btn" onclick="setQuickReminder('due',9)">Due 9am</button>
-            <button type="button" class="qd-btn" onclick="setQuickReminder('clear')">Clear</button>
+            <button class="qd-btn" onclick="setQuickReminder(0,9)">9am</button>
+            <button class="qd-btn" onclick="setQuickReminder(0,17)">5pm</button>
+            <button class="qd-btn" onclick="setQuickReminder(1,9)">Tmrw 9am</button>
+            <button class="qd-btn" onclick="setQuickReminder('due',9)">Due 9am</button>
+            <button class="qd-btn" onclick="setQuickReminder('clear')">Clear</button>
           </div>
         </div>
       </div>
@@ -581,109 +602,60 @@
         <div class="recur-options" id="mdRecur"></div>
       </div>
 
+      <div class="mfield-row">
+        <div class="mfield">
+          <div class="mfield-lbl">Time Estimate (min)</div>
+          <input type="number" class="mfield-in" id="mdEstimate" placeholder="0" min="0">
+        </div>
+        <div class="mfield">
+          <div class="mfield-lbl">Time Tracked</div>
+          <div class="mfield-in" id="mdTracked" style="background:#0a1320;cursor:default">—</div>
+        </div>
+      </div>
+
+      <div class="mfield">
+        <div class="mfield-lbl">Reference URL</div>
+        <input type="url" class="mfield-in" id="mdUrl" placeholder="https://…">
+      </div>
+
+      <div class="mfield">
+        <div class="mfield-lbl">Tags</div>
+        <div class="tags-editor" id="mdTagsEditor"></div>
+      </div>
+
+      <div class="mfield">
+        <div class="mfield-lbl">Waiting on (blocked by)</div>
+        <div id="mdBlockedBy"></div>
+      </div>
+
+      <div class="mfield md-similar-wrap">
+        <button type="button" class="similar-acc-trigger" id="mdSimilarTrigger" onclick="toggleSimilarAccordion()">
+          <span>Similar tasks</span><span class="similar-acc-chevron">▼</span>
+        </button>
+        <div class="similar-acc-panel" id="mdSimilarAccordion">
+          <div id="mdSimilarTasks" class="md-similar-tasks"></div>
+        </div>
+      </div>
+
+      <div class="mfield">
+        <div class="mfield-lbl">Checklist</div>
+        <div id="mdChecklist"></div>
+      </div>
+
       <div class="mfield">
         <div class="mfield-lbl">Description</div>
         <textarea class="mfield-textarea" id="mdDesc" placeholder="Context, acceptance criteria, links…"></textarea>
       </div>
 
-      <details class="md-section" open>
-        <summary class="md-section-sum">Tags &amp; organization</summary>
-        <div class="md-section-body">
-          <div class="mfield-row">
-            <div class="mfield">
-              <div class="mfield-lbl">List</div>
-              <select class="mfield-in" id="mdList"></select>
-            </div>
-            <div class="mfield">
-              <div class="mfield-lbl">Start Date</div>
-              <input type="date" class="mfield-in" id="mdStartDate">
-            </div>
-          </div>
-          <div class="mfield">
-            <div class="mfield-lbl">Tags</div>
-            <div class="tags-editor" id="mdTagsEditor"></div>
-          </div>
-          <div class="mfield">
-            <div class="mfield-lbl">Waiting on (blocked by)</div>
-            <div id="mdBlockedBy"></div>
-          </div>
-        </div>
-      </details>
+      <div class="mfield">
+        <div class="mfield-lbl">Timestamped Notes</div>
+        <div id="mdNotes"></div>
+      </div>
 
-      <details class="md-section">
-        <summary class="md-section-sum">Tracking &amp; completion</summary>
-        <div class="md-section-body">
-          <div class="mfield-row">
-            <div class="mfield">
-              <div class="mfield-lbl">Time Estimate (min)</div>
-              <input type="number" class="mfield-in" id="mdEstimate" placeholder="0" min="0">
-            </div>
-            <div class="mfield">
-              <div class="mfield-lbl">Time Tracked</div>
-              <div class="mfield-in mfield-in--readonly" id="mdTracked">—</div>
-            </div>
-          </div>
-          <div class="mfield" id="mdCompletionNoteWrap">
-            <div class="mfield-lbl">Completion note</div>
-            <textarea class="mfield-textarea" id="mdCompletionNote" rows="2" placeholder="What actually happened…"></textarea>
-          </div>
-          <div class="mfield">
-            <div class="mfield-lbl">Completion history (repeating tasks)</div>
-            <div id="mdHabitHistory" class="md-habit-history"></div>
-          </div>
-        </div>
-      </details>
-
-      <details class="md-section">
-        <summary class="md-section-sum">Classification</summary>
-        <div class="md-section-body">
-          <div class="mfield">
-            <div class="mfield-lbl">Life Category</div>
-            <div class="mfield-chips" id="mdCategoryChips"></div>
-            <div id="mdValuesNote" class="md-values-note"></div>
-          </div>
-          <div class="mfield-row">
-            <div class="mfield">
-              <div class="mfield-lbl">Effort</div>
-              <div class="mfield-chips" id="mdEffortChips"></div>
-            </div>
-            <div class="mfield">
-              <div class="mfield-lbl">Energy</div>
-              <div class="mfield-chips" id="mdEnergyChips"></div>
-            </div>
-          </div>
-          <div class="mfield">
-            <div class="mfield-lbl">Context</div>
-            <div class="mfield-chips" id="mdContextChips"></div>
-          </div>
-        </div>
-      </details>
-
-      <details class="md-section">
-        <summary class="md-section-sum">Links &amp; notes</summary>
-        <div class="md-section-body">
-          <div class="mfield">
-            <div class="mfield-lbl">Reference URL</div>
-            <input type="url" class="mfield-in" id="mdUrl" placeholder="https://…">
-          </div>
-          <div class="mfield md-similar-wrap">
-            <button type="button" class="similar-acc-trigger" id="mdSimilarTrigger" onclick="toggleSimilarAccordion()">
-              <span>Similar tasks</span><span class="similar-acc-chevron">▼</span>
-            </button>
-            <div class="similar-acc-panel" id="mdSimilarAccordion">
-              <div id="mdSimilarTasks" class="md-similar-tasks"></div>
-            </div>
-          </div>
-          <div class="mfield">
-            <div class="mfield-lbl">Checklist</div>
-            <div id="mdChecklist"></div>
-          </div>
-          <div class="mfield">
-            <div class="mfield-lbl">Timestamped Notes</div>
-            <div id="mdNotes"></div>
-          </div>
-        </div>
-      </details>
+      <div class="mfield" id="mdCompletionNoteWrap">
+        <div class="mfield-lbl">Completion note</div>
+        <textarea class="mfield-textarea" id="mdCompletionNote" rows="2" placeholder="What actually happened…"></textarea>
+      </div>
 
     </div>
     <div class="modal-foot">

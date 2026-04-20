@@ -404,8 +404,8 @@ function renderCalFeedsPanel(){
           ? new Date(f.lastSync).toLocaleString(undefined, {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})
           : 'Never';
         const status = f.error
-          ? `<span class="calfeed-status calfeed-status--err">✕ ${esc(f.error)}</span>`
-          : `<span class="calfeed-status calfeed-status--ok">✓ ${evCount} events · ${lastSync}</span>`;
+          ? `<span style="color:#e74c3c;font-size:10px">✕ ${esc(f.error)}</span>`
+          : `<span style="color:#2ecc71;font-size:10px">✓ ${evCount} events · ${lastSync}</span>`;
         return `
           <div class="calfeed-row" data-id="${f.id}">
             <span class="calfeed-dot" style="background:${f.color}"></span>

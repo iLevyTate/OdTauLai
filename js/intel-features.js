@@ -25,6 +25,7 @@ window.CAT_ICON = CAT_ICON;
 window.SCHWARTZ = SCHWARTZ;
 window.VALUE_KEYS = VALUE_KEYS;
 
+const LIFE_CATS_LOCAL = LIFE_CATS;
 const PRIO_ORDER = { urgent: 0, high: 1, normal: 2, low: 3, none: 4 };
 
 function _taskText(t){
@@ -96,10 +97,10 @@ async function predictMetadata(taskName, k){
   const eff = vote('effort');
   const ctx = vote('context');
   const en = vote('energyLevel');
-  if(cat && typeof cat === 'string') merged.category = cat;
+  if(cat && LIFE_CATS_LOCAL.includes(cat)) merged.category = cat;
   if(pr && ['urgent','high','normal','low'].includes(pr)) merged.priority = pr;
   if(eff && ['xs','s','m','l','xl'].includes(eff)) merged.effort = eff;
-  if(ctx && typeof ctx === 'string') merged.context = ctx;
+  if(ctx && ['work','home','phone','computer','errands'].includes(ctx)) merged.context = ctx;
   if(en && ['high','low'].includes(en)) merged.energyLevel = en;
 
   const tagCounts = new Map();
@@ -414,8 +415,8 @@ async function proposeHarmonizeUpdates(opts){
       }
     }
 
-    if(meta.category && typeof meta.category === 'string' && meta.category.trim() && meta.category !== (t.category || null)){
-      args.category = meta.category.trim();
+    if(meta.category && LIFE_CATS_LOCAL.includes(meta.category) && meta.category !== (t.category || null)){
+      args.category = meta.category;
       changes++;
     }
     if(meta.priority && ['urgent','high','normal','low'].includes(meta.priority) && meta.priority !== (t.priority || 'none')){
@@ -426,8 +427,8 @@ async function proposeHarmonizeUpdates(opts){
       args.effort = meta.effort;
       changes++;
     }
-    if(meta.context && typeof meta.context === 'string' && meta.context.trim() && meta.context !== (t.context || null)){
-      args.context = meta.context.trim();
+    if(meta.context && ['work','home','phone','computer','errands'].includes(meta.context) && meta.context !== (t.context || null)){
+      args.context = meta.context;
       changes++;
     }
     if(meta.energyLevel && ['high','low'].includes(meta.energyLevel) && meta.energyLevel !== (t.energyLevel || null)){
@@ -492,77 +493,3 @@ window.isTaskBlocked = isTaskBlocked;
 window.autoOrganizeIntoLists = autoOrganizeIntoLists;
 window.invalidateListVectorCache = invalidateListVectorCache;
 window.proposeHarmonizeUpdates = proposeHarmonizeUpdates;
-
-// ── Custom categories / contexts (seeded defaults, user-editable in Settings) ──
-const DEFAULT_CATEGORY_ROWS = LIFE_CATS.map(id => ({
-  id,
-  label: ({health:'Health',finance:'Finance',work:'Work',relationships:'Relationships',learning:'Learning',home:'Home',personal:'Personal',other:'Other'})[id] || id,
-  icon: CAT_ICON[id] || 'pin',
-  hidden: false,
-}));
-const DEFAULT_CONTEXT_ROWS = [
-  {id:'work', label:'Work', icon:'briefcase', hidden:false},
-  {id:'home', label:'Home', icon:'home', hidden:false},
-  {id:'phone', label:'Phone', icon:'phone', hidden:false},
-  {id:'computer', label:'Computer', icon:'monitor', hidden:false},
-  {id:'errands', label:'Errands', icon:'car', hidden:false},
-];
-function ensureClassificationCfg(c){
-  if(!c || typeof c !== 'object') return;
-  if(!Array.isArray(c.categories) || c.categories.length === 0)
-    c.categories = DEFAULT_CATEGORY_ROWS.map(x => ({...x}));
-  if(!Array.isArray(c.contexts) || c.contexts.length === 0)
-    c.contexts = DEFAULT_CONTEXT_ROWS.map(x => ({...x}));
-  (c.categories || []).forEach(row => {
-    if(!row || typeof row !== 'object') return;
-    if(!row.icon) row.icon = CAT_ICON[row.id] || 'pin';
-    row.hidden = row.hidden === true;
-  });
-  (c.contexts || []).forEach(row => {
-    if(!row || typeof row !== 'object') return;
-    if(!row.icon){
-      const d = DEFAULT_CONTEXT_ROWS.find(z => z.id === row.id);
-      row.icon = d ? d.icon : 'monitor';
-    }
-    row.hidden = row.hidden === true;
-  });
-}
-function getCategoryDef(id){
-  if(id == null || id === '') return {id:'', label:'', icon:'pin'};
-  const sid = String(id);
-  if(typeof cfg !== 'undefined' && cfg){
-    ensureClassificationCfg(cfg);
-    const row = (cfg.categories || []).find(x => x && x.id === sid);
-    if(row)
-      return { id: row.id, label: row.label || sid, icon: row.icon || CAT_ICON[sid] || 'pin' };
-  }
-  return { id: sid, label: sid, icon: CAT_ICON[sid] || 'pin' };
-}
-function getContextDef(id){
-  if(id == null || id === '') return {id:'', label:'', icon:'monitor'};
-  const sid = String(id);
-  const fb = DEFAULT_CONTEXT_ROWS.find(z => z.id === sid);
-  if(typeof cfg !== 'undefined' && cfg){
-    ensureClassificationCfg(cfg);
-    const row = (cfg.contexts || []).find(x => x && x.id === sid);
-    if(row)
-      return { id: row.id, label: row.label || sid, icon: row.icon || (fb && fb.icon) || 'monitor' };
-  }
-  return { id: sid, label: sid, icon: (fb && fb.icon) || 'monitor' };
-}
-function getActiveCategories(){
-  if(typeof cfg === 'undefined' || !cfg) return DEFAULT_CATEGORY_ROWS.filter(x => !x.hidden);
-  ensureClassificationCfg(cfg);
-  return (cfg.categories || []).filter(x => x && !x.hidden);
-}
-function getActiveContexts(){
-  if(typeof cfg === 'undefined' || !cfg) return DEFAULT_CONTEXT_ROWS.filter(x => !x.hidden);
-  ensureClassificationCfg(cfg);
-  return (cfg.contexts || []).filter(x => x && !x.hidden);
-}
-window.resolveCategoryIconKey = function(id){ return getCategoryDef(id).icon; };
-window.ensureClassificationCfg = ensureClassificationCfg;
-window.getCategoryDef = getCategoryDef;
-window.getContextDef = getContextDef;
-window.getActiveCategories = getActiveCategories;
-window.getActiveContexts = getActiveContexts;

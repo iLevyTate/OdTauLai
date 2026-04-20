@@ -2,7 +2,7 @@
 // Internal keys keep stupind_* prefix so existing installs retain data after rebrand to ODTAULAI.
 const STORE_KEY     = 'stupind_state';
 const ARCHIVE_KEY   = 'stupind_archive';
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 5;
 
 // Main nav tabs — single source for persisted activeTab + ?tab= deep links (see app.js)
 const VALID_MAIN_TABS = ['tasks','focus','tools','data','settings'];
@@ -80,19 +80,13 @@ function _repairTask(t){
     type:         _enum(t.type, ['task','bug','idea','errand','waiting'], 'task'),
     effort:       _enum(t.effort, ['xs','s','m','l','xl'], null) ?? null,
     energyLevel:  _enum(t.energyLevel, ['high','low'], null) ?? null,
-    context:      (t.context != null && String(t.context).trim()) ? _str(t.context, '').trim() : null,
-    // v5 values alignment — v6: category/context allow custom ids
-    category:     (t.category != null && String(t.category).trim()) ? _str(t.category, '').trim() : null,
+    context:      _enum(t.context, ['work','home','phone','computer','errands'], null) ?? null,
+    // v5 values alignment
+    category:     _enum(t.category, ['health','finance','work','relationships','learning','home','personal','other'], null) ?? null,
     valuesAlignment: _arr(t.valuesAlignment).filter(x=>typeof x==='string'),
     valuesNote:   t.valuesNote ? _str(t.valuesNote) : null,
     // List membership
     listId:       t.listId!=null ? _int(t.listId) : null,
-    // v6 habit / recurring completion log
-    completions:  _arr(t.completions).map(c => ({
-                    date: _str(c && c.date, ''),
-                    sec:  _int(c && c.sec, 0),
-                    note: c && c.note ? _str(c.note, '') : null,
-                  })).filter(c => c.date),
     // Sync metadata — CRITICAL: must be preserved across reloads so that
     // last-write-wins merging in sync.js compares correct timestamps instead
     // of treating every task as "just modified" after each page refresh.
@@ -138,11 +132,6 @@ function migrateState(s){
       }));
     }catch(e){ console.warn('[migration v5]',e); }
   }
-  if(v < 6){
-    try{
-      if(Array.isArray(s.tasks)) s.tasks = s.tasks.map(t=>({completions:[],..._obj(t)}));
-    }catch(e){ console.warn('[migration v6]',e); }
-  }
 
   // ── Field-level repair pass — runs on EVERY load regardless of version ──────
   // This is the safety net: even if a migration was skipped or data was
@@ -184,7 +173,7 @@ function saveState(reason){
       // Cheap comparator — any field difference = changed
       const fieldsToCompare = ['name','status','priority','dueDate','startDate','description','tags',
         'starred','archived','completedAt','effort','energyLevel','context','category',
-        'valuesAlignment','parentId','listId','url','estimateMin','recur','remindAt','type','blockedBy','completions'];
+        'valuesAlignment','parentId','listId','url','estimateMin','recur','remindAt','type','blockedBy'];
       let changed = false;
       for (const f of fieldsToCompare){
         const a = JSON.stringify(t[f]);
@@ -218,7 +207,6 @@ function saveState(reason){
     activeTab,
     lists, listIdCtr, activeListId,
     taskView, taskSortBy, smartView, taskGroupBy, theme, collapsedSections,
-    taskFilters:{showDone:!!taskFilters.showDone},
   };
   const serialized = JSON.stringify(state);
   try{
@@ -270,7 +258,6 @@ function _applyState(s){
     // Config — repair individual values defensively
     if(s.cfg && typeof s.cfg==='object'){
       cfg = s.cfg;
-      if(typeof ensureClassificationCfg === 'function') ensureClassificationCfg(cfg);
       const cw=gid('cfgWork'); if(cw) cw.value = _int(cfg.work,25);
       const cs=gid('cfgShort');if(cs) cs.value = _int(cfg.short,5);
       const cl=gid('cfgLong'); if(cl) cl.value = _int(cfg.long,15);
@@ -317,7 +304,7 @@ function _applyState(s){
     let groupIn = s.taskGroupBy;
     if(groupIn === 'dueDate') groupIn = 'due';
     const validSorts = ['smart','manual','priority','due','name','created','time'];
-    const validSmart = ['all','today','week','overdue','unscheduled','starred','impact','completed','archived'];
+    const validSmart = ['all','today','week','overdue','unscheduled','starred','completed','archived'];
     const validGroup = ['none','priority','status','due','list'];
     if(s.taskView   && validViews.includes(s.taskView))  taskView   = s.taskView;
     if(sortIn && validSorts.includes(sortIn)) taskSortBy = sortIn;
@@ -325,8 +312,6 @@ function _applyState(s){
     if(groupIn && validGroup.includes(groupIn)) taskGroupBy = groupIn;
     if(s.theme      && ['dark','light'].includes(s.theme)) theme = s.theme;
     if(s.collapsedSections && typeof s.collapsedSections==='object') collapsedSections = s.collapsedSections;
-    if(typeof s.taskFilters === 'object' && s.taskFilters && typeof s.taskFilters.showDone === 'boolean')
-      taskFilters.showDone = s.taskFilters.showDone;
 
     // Numerics
     if(Array.isArray(s.timeLog))     timeLog       = s.timeLog;
@@ -573,7 +558,6 @@ function exportTasksJSON(){
         completionNote: row.completionNote, valuesNote: row.valuesNote,
         recur: row.recur, reminderFired: row.reminderFired,
         lastModified: row.lastModified,
-        completions: Array.isArray(t.completions) ? t.completions : [],
       };
     }),
   };
@@ -672,7 +656,6 @@ function _csvRowToTask(obj, existingTask){
   // checklist and notes — preserve if passed as arrays (JSON imports); CSV has counts only
   if(Array.isArray(obj.checklist)) T.checklist = obj.checklist;
   if(Array.isArray(obj.notes))     T.notes     = obj.notes;
-  if(Array.isArray(obj.completions)) T.completions = obj.completions;
   return T;
 }
 
