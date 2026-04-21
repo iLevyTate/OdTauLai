@@ -2,7 +2,10 @@
   /* Kill the default mobile tap overlay (a black rectangle that ignores
      border-radius) so press feedback follows each component's own shape. */
   html{-webkit-tap-highlight-color:transparent}
-  body{min-height:100vh;display:flex;flex-direction:column;align-items:center;padding:24px 16px 60px;background:var(--bg-0);color:var(--text-1);font-family:var(--font-sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
+  /* M5: 100vh on mobile Safari reports the *maximum* visible area including the
+     address bar, which pushes content behind the toolbar. Prefer 100dvh (dynamic
+     viewport) and fall back to 100vh for browsers that don't support dvh. */
+  body{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;align-items:center;padding:24px 16px 60px;background:var(--bg-0);color:var(--text-1);font-family:var(--font-sans);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
   button{cursor:pointer;font-family:inherit;border:none;-webkit-tap-highlight-color:transparent}button:hover{filter:brightness(1.12)}
   /* Keyboard-focus outline tracks the element's rounded corners instead of
      rendering a sharp rectangle on rounded controls. */
