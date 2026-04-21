@@ -364,6 +364,39 @@ setTimeout(() => {
   });
 }, 1000);
 
+// Deferred LLM auto-load — only when the user has enabled it AND the weights
+// are already cached in the browser HTTP cache. We never auto-download.
+setTimeout(() => {
+  if(typeof getGenCfg !== 'function' || typeof genLoad !== 'function') return;
+  if(typeof isGenDownloaded !== 'function') return;
+  const cfg = getGenCfg();
+  if(!cfg.enabled || !isGenDownloaded(cfg.modelId)) return;
+  if(typeof isGenReady === 'function' && isGenReady()) return;
+
+  let lastPct = -1;
+  const bar = document.getElementById('genProgressBar');
+  const pct = document.getElementById('genProgressPct');
+  const txt = document.getElementById('genProgressTxt');
+  const onProgress = (typeof _makeProgressAggregator === 'function')
+    ? _makeProgressAggregator((v) => {
+        if(v === lastPct) return;
+        lastPct = v;
+        if(bar) bar.style.width = v + '%';
+        if(pct) pct.textContent = v + '%';
+        if(txt) txt.textContent = 'restoring from cache…';
+      })
+    : () => {};
+
+  genLoad(cfg.modelId, cfg.dtype, onProgress).then(() => {
+    if(typeof renderGenSettings === 'function') renderGenSettings();
+  }).catch((e) => {
+    // Cached entry may have been evicted by the browser — leave a hint but
+    // don't surface a toast. renderGenSettings will show the state on next open.
+    console.warn('[gen] auto-load from cache failed:', e && e.message);
+    if(typeof renderGenSettings === 'function') renderGenSettings();
+  });
+}, 2500);
+
 (function syncCmdKGlyph(){
   const b=document.getElementById('cmdKBtn');
   if(!b) return;

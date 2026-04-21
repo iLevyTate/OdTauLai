@@ -36,8 +36,29 @@ function _loadGenCfg(){
   if(!cfg.modelId) cfg.modelId = GEN_MODEL_PRESETS[0].id;
   if(!cfg.dtype)  cfg.dtype  = GEN_MODEL_PRESETS[0].dtype;
   if(typeof cfg.timeoutSec !== 'number') cfg.timeoutSec = _defaultTimeoutSec();
-  if(typeof cfg.downloaded !== 'boolean') cfg.downloaded = false;
+  // Per-model download record. Back-compat: legacy `downloaded:true` means the
+  // currently-selected model was the last one fetched, so seed that id.
+  if(!Array.isArray(cfg.downloadedIds)){
+    cfg.downloadedIds = (cfg.downloaded === true && cfg.modelId) ? [cfg.modelId] : [];
+  }
+  // Keep the legacy boolean in sync for any external readers.
+  cfg.downloaded = cfg.downloadedIds.includes(cfg.modelId);
   return cfg;
+}
+
+/** True if weights for `modelId` have been fetched at least once on this device. */
+function isGenDownloaded(modelId){
+  const cfg = _loadGenCfg();
+  return !!modelId && cfg.downloadedIds.includes(modelId);
+}
+
+/** Record a successful download for `modelId`. */
+function markGenDownloaded(modelId){
+  if(!modelId) return;
+  const cfg = _loadGenCfg();
+  if(!cfg.downloadedIds.includes(modelId)) cfg.downloadedIds.push(modelId);
+  cfg.downloaded = cfg.downloadedIds.includes(cfg.modelId);
+  _saveGenCfg(cfg);
 }
 
 function _saveGenCfg(cfg){
@@ -75,17 +96,26 @@ function pushAskHistory(text){
 }
 
 /**
- * Load the text-generation pipeline. Does nothing if already loaded.
+ * Load the text-generation pipeline. Does nothing if already loaded for this modelId.
+ * If a different model is in-flight, rejects fast with GEN_SWITCH_IN_PROGRESS so the
+ * caller doesn't silently receive the wrong pipeline (H3).
  * @param {string} modelId
  * @param {string} dtype
  * @param {(progress: { progress?:number, status?:string, file?:string }) => void} [onProgress]
  */
 async function genLoad(modelId, dtype, onProgress){
+  if(!modelId) throw new Error('GEN_NO_MODEL');
   if(_genReady && _genModelId === modelId) return;
-  if(_genLoadPromise) return _genLoadPromise;
+  if(_genLoadPromise){
+    if(_genModelId === modelId) return _genLoadPromise;
+    throw new Error('GEN_SWITCH_IN_PROGRESS');
+  }
 
   _genLoading = true;
   _genModelId = modelId;
+  _genReady = false;
+  _genPipe = null;
+  _genDevice = null;
 
   const cb = typeof onProgress === 'function' ? onProgress : () => {};
 
@@ -96,41 +126,37 @@ async function genLoad(modelId, dtype, onProgress){
       pipeline = mod.pipeline;
       env = mod.env;
     }catch(e){
-      _genLoading = false;
-      _genLoadPromise = null;
       throw e;
     }
     env.allowLocalModels = false;
     env.useBrowserCache = true;
 
     try{
-      try{
-        _genPipe = await pipeline('text-generation', modelId, {
-          device: 'webgpu',
-          dtype: dtype || 'q4f16',
-          progress_callback: cb,
-        });
-        _genDevice = 'webgpu';
-      }catch(e){
-        console.warn('[gen] WebGPU pipeline failed, falling back to WASM', e);
-        _genPipe = await pipeline('text-generation', modelId, {
-          device: 'wasm',
-          dtype: dtype || 'q4',
-          progress_callback: cb,
-        });
-        _genDevice = 'wasm';
-      }
-      _genReady = true;
+      _genPipe = await pipeline('text-generation', modelId, {
+        device: 'webgpu',
+        dtype: dtype || 'q4f16',
+        progress_callback: cb,
+      });
+      _genDevice = 'webgpu';
     }catch(e){
-      _genPipe = null;
-      _genReady = false;
-      _genDevice = null;
-      _genLoading = false;
-      _genLoadPromise = null;
-      throw e;
+      console.warn('[gen] WebGPU pipeline failed, falling back to WASM', e);
+      _genPipe = await pipeline('text-generation', modelId, {
+        device: 'wasm',
+        dtype: dtype || 'q4',
+        progress_callback: cb,
+      });
+      _genDevice = 'wasm';
     }
+    _genReady = true;
+  })().catch(err => {
+    _genPipe = null;
+    _genReady = false;
+    _genDevice = null;
+    throw err;
+  }).finally(() => {
     _genLoading = false;
-  })();
+    _genLoadPromise = null;
+  });
 
   return _genLoadPromise;
 }
@@ -153,53 +179,58 @@ async function genGenerate(opts){
   const onToken     = typeof opts.onToken === 'function' ? opts.onToken : null;
 
   // Chain the caller's AbortSignal with our own for genAbort().
-  _genAbortCtl = new AbortController();
-  const ctl = _genAbortCtl;
+  const ctl = new AbortController();
+  _genAbortCtl = ctl;
   if(opts.signal){
     if(opts.signal.aborted){ ctl.abort(); }
     else opts.signal.addEventListener('abort', () => ctl.abort(), { once: true });
   }
 
-  const tokenizer = _genPipe.tokenizer;
-  let inputs;
-  if(Array.isArray(opts.messages) && typeof tokenizer.apply_chat_template === 'function'){
-    inputs = tokenizer.apply_chat_template(opts.messages, { tokenize: false, add_generation_prompt: true });
-  } else if(typeof opts.prompt === 'string'){
-    inputs = opts.prompt;
-  } else {
-    throw new Error('GEN_NO_INPUT');
-  }
-
-  let streamer = null;
   try{
-    const mod = await import(GEN_TRANSFORMERS_CDN);
-    if(mod && mod.TextStreamer && onToken){
-      streamer = new mod.TextStreamer(tokenizer, {
-        skip_prompt: true,
-        skip_special_tokens: true,
-        callback_function: (t) => { try{ onToken(t); }catch(e){} },
-      });
+    const tokenizer = _genPipe.tokenizer;
+    let inputs;
+    if(Array.isArray(opts.messages) && typeof tokenizer.apply_chat_template === 'function'){
+      inputs = tokenizer.apply_chat_template(opts.messages, { tokenize: false, add_generation_prompt: true });
+    } else if(typeof opts.prompt === 'string'){
+      inputs = opts.prompt;
+    } else {
+      throw new Error('GEN_NO_INPUT');
     }
-  }catch(e){
-    // streaming is optional — fall through with full-string output
+
+    let streamer = null;
+    try{
+      const mod = await import(GEN_TRANSFORMERS_CDN);
+      if(mod && mod.TextStreamer && onToken){
+        streamer = new mod.TextStreamer(tokenizer, {
+          skip_prompt: true,
+          skip_special_tokens: true,
+          callback_function: (t) => { try{ onToken(t); }catch(e){} },
+        });
+      }
+    }catch(e){
+      // streaming is optional — fall through with full-string output
+    }
+
+    const out = await _genPipe(inputs, {
+      max_new_tokens: maxTokens,
+      do_sample: temperature > 0,
+      temperature: temperature,
+      return_full_text: false,
+      streamer,
+    });
+
+    if(ctl.signal.aborted) throw new Error('GEN_ABORTED');
+
+    if(Array.isArray(out) && out.length){
+      const first = out[0];
+      if(first && typeof first.generated_text === 'string') return first.generated_text;
+    }
+    return '';
+  }finally{
+    // H4: always clear the controller (even on throw) so the next call's
+    // genAbort() never aborts a stale one.
+    if(_genAbortCtl === ctl) _genAbortCtl = null;
   }
-
-  const out = await _genPipe(inputs, {
-    max_new_tokens: maxTokens,
-    do_sample: temperature > 0,
-    temperature: temperature,
-    return_full_text: false,
-    streamer,
-  });
-
-  if(ctl.signal.aborted) throw new Error('GEN_ABORTED');
-  _genAbortCtl = null;
-
-  if(Array.isArray(out) && out.length){
-    const first = out[0];
-    if(first && typeof first.generated_text === 'string') return first.generated_text;
-  }
-  return '';
 }
 
 if(typeof window !== 'undefined'){
@@ -212,6 +243,8 @@ if(typeof window !== 'undefined'){
   window.genAbort = genAbort;
   window.isGenReady = isGenReady;
   window.isGenLoading = isGenLoading;
+  window.isGenDownloaded = isGenDownloaded;
+  window.markGenDownloaded = markGenDownloaded;
   window.getGenDevice = getGenDevice;
   window.getGenModel = getGenModel;
   window.getAskHistory = getAskHistory;

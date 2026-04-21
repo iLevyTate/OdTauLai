@@ -1216,7 +1216,7 @@ function _renderSmartAddChips(s){
   const effortTips = { xs:'Extra small — ~15 min', s:'Small — ~1 hr', m:'Medium — ~half day', l:'Large — ~full day', xl:'Extra large — multi-day' };
   const ctxTips = { work:'At your desk/workplace', home:'At home', phone:'Requires a phone call', computer:'Requires a computer', errands:'Out and about' };
   const chips = [];
-  if(s.priority) chips.push(`<span class="sa-chip sa-priority sa-p-${s.priority}" data-tip="Priority — tap to remove" onclick="smartAddRemove('priority')">priority: ${s.priority} ×</span>`);
+  if(s.priority) chips.push(`<span class="sa-chip sa-priority sa-p-${esc(s.priority)}" data-tip="Priority — tap to remove" onclick="smartAddRemove('priority')">priority: ${esc(s.priority)} ×</span>`);
   const ic = (n, size) => (window.icon && window.icon(n, {size: size||13})) || '';
   if(s.category){
     const cdef = (typeof getCategoryDef === 'function') ? getCategoryDef(s.category) : null;
@@ -1224,10 +1224,10 @@ function _renderSmartAddChips(s){
     const catIc = (cdef && cdef.icon) || CAT_ICON[s.category] || 'pin';
     chips.push(`<span class="sa-chip" data-tip="Category — tap to remove" onclick="smartAddRemove('category')"><span class="sa-chip-ic">${ic(catIc)}</span> ${esc(catLbl)} ×</span>`);
   }
-  if(s.effort) chips.push(`<span class="sa-chip" data-tip="${effortTips[s.effort] || 'Effort'} — tap to remove" onclick="smartAddRemove('effort')">effort: ${s.effort.toUpperCase()} ×</span>`);
-  if(s.context) chips.push(`<span class="sa-chip" data-tip="${ctxTips[s.context] || 'Context'} — tap to remove" onclick="smartAddRemove('context')">${s.context} ×</span>`);
-  if(s.energyLevel) chips.push(`<span class="sa-chip" data-tip="Energy — tap to remove" onclick="smartAddRemove('energyLevel')"><span class="sa-chip-ic">${ic(s.energyLevel === 'high' ? 'flame' : 'leaf')}</span> ${s.energyLevel} ×</span>`);
-  if(s.dueDate) chips.push(`<span class="sa-chip" data-tip="Due date — tap to remove" onclick="smartAddRemove('dueDate')"><span class="sa-chip-ic">${ic('calendar')}</span> ${s.dueDate} ×</span>`);
+  if(s.effort) chips.push(`<span class="sa-chip" data-tip="${escAttr(effortTips[s.effort] || 'Effort')} — tap to remove" onclick="smartAddRemove('effort')">effort: ${esc(String(s.effort).toUpperCase())} ×</span>`);
+  if(s.context) chips.push(`<span class="sa-chip" data-tip="${escAttr(ctxTips[s.context] || 'Context')} — tap to remove" onclick="smartAddRemove('context')">${esc(s.context)} ×</span>`);
+  if(s.energyLevel) chips.push(`<span class="sa-chip" data-tip="Energy — tap to remove" onclick="smartAddRemove('energyLevel')"><span class="sa-chip-ic">${ic(s.energyLevel === 'high' ? 'flame' : 'leaf')}</span> ${esc(s.energyLevel)} ×</span>`);
+  if(s.dueDate) chips.push(`<span class="sa-chip" data-tip="Due date — tap to remove" onclick="smartAddRemove('dueDate')"><span class="sa-chip-ic">${ic('calendar')}</span> ${esc(s.dueDate)} ×</span>`);
   if(s.tags && s.tags.length) s.tags.forEach(tag => chips.push(`<span class="sa-chip" data-tip="Tag — tap to remove" data-sa-tag="${encodeURIComponent(tag)}">#${esc(tag)} ×</span>`));
   prev.innerHTML = `
     <span class="smart-add-hint">Suggestions — tap to remove, Enter to add:</span>
@@ -1367,23 +1367,42 @@ window.acceptProposedOps = acceptProposedOps;
 // All LLM state lives in js/gen.js and js/ask.js. These functions just
 // render the Settings subsection and wire the Download button.
 
+// Last failed load, shown inline until the user retries or changes model.
+// Keyed by modelId so switching presets clears stale error messages.
+let _genLastError = null;
+
 function renderGenSettings(){
   const host = document.getElementById('genAISettings');
   if(!host) return;
-  const cfg = (typeof getGenCfg === 'function') ? getGenCfg() : { enabled:false, modelId:'', dtype:'q4', timeoutSec:30, downloaded:false };
+  const cfg = (typeof getGenCfg === 'function') ? getGenCfg() : { enabled:false, modelId:'', dtype:'q4', timeoutSec:30, downloadedIds:[] };
   const presets = (typeof getGenPresets === 'function') ? getGenPresets() : [];
   const ready = typeof isGenReady === 'function' && isGenReady();
   const loading = typeof isGenLoading === 'function' && isGenLoading();
   const dev = typeof getGenDevice === 'function' ? getGenDevice() : null;
   const ramHint = typeof window._mobileRamHint === 'function' ? window._mobileRamHint() : null;
+  const cached = typeof isGenDownloaded === 'function' ? isGenDownloaded(cfg.modelId) : !!cfg.downloaded;
+  const liveModel = typeof getGenModel === 'function' ? getGenModel() : null;
+  const readyThisModel = ready && liveModel === cfg.modelId;
 
   const preset = presets.find(p => p.id === cfg.modelId) || presets[0];
   const sizeMb = preset ? preset.sizeMb : 230;
 
-  const statusText = ready ? `Ready · ${dev || 'CPU'} · ${preset ? preset.label : cfg.modelId}`
-    : loading ? 'Loading…'
-    : cfg.downloaded ? 'Cached (click Load to use)'
-    : 'Not downloaded';
+  let statusText;
+  if(!cfg.enabled) statusText = 'Disabled — toggle on to download & use.';
+  else if(readyThisModel) statusText = `Ready · ${dev || 'CPU'} · ${preset ? preset.label : cfg.modelId}`;
+  else if(loading) statusText = 'Loading weights…';
+  else if(cached) statusText = 'Cached in this browser — click Load to use.';
+  else statusText = `Not downloaded (~${sizeMb} MB one-time fetch).`;
+
+  let actionLabel;
+  if(!cfg.enabled) actionLabel = 'Enable above first';
+  else if(loading) actionLabel = 'Loading…';
+  else if(readyThisModel) actionLabel = 'Reload model';
+  else if(cached) actionLabel = 'Load model';
+  else actionLabel = `Download model (~${sizeMb} MB)`;
+  const actionDisabled = !cfg.enabled || loading;
+
+  const errForThisModel = _genLastError && _genLastError.modelId === cfg.modelId ? _genLastError.message : '';
 
   host.innerHTML = `
     <div class="gen-settings">
@@ -1397,7 +1416,11 @@ function renderGenSettings(){
       <div class="gen-settings-row">
         <label for="genModelSelect" class="gen-settings-lbl">Model</label>
         <select id="genModelSelect" onchange="selectGenModel(this.value)" ${cfg.enabled ? '' : 'disabled'}>
-          ${presets.map(p => `<option value="${esc(p.id)}" ${p.id === cfg.modelId ? 'selected' : ''}>${esc(p.label)} · ${p.sizeMb} MB</option>`).join('')}
+          ${presets.map(p => {
+            const pCached = typeof isGenDownloaded === 'function' && isGenDownloaded(p.id);
+            const tag = pCached ? ' ✓ cached' : '';
+            return `<option value="${esc(p.id)}" ${p.id === cfg.modelId ? 'selected' : ''}>${esc(p.label)} · ${p.sizeMb} MB${esc(tag)}</option>`;
+          }).join('')}
         </select>
       </div>
       ${preset ? `<div class="gen-settings-note">${esc(preset.note)}</div>` : ''}
@@ -1408,15 +1431,16 @@ function renderGenSettings(){
         <input type="number" id="genTimeout" class="sinput" min="5" max="120" value="${cfg.timeoutSec}" onchange="setGenTimeout(this.value)" ${cfg.enabled ? '' : 'disabled'}>
       </div>
       <div class="gen-settings-status" id="genSettingsStatus">${esc(statusText)}</div>
-      <div id="genProgressWrap" class="intel-progress-wrap" style="display:none">
+      <div id="genProgressWrap" class="intel-progress-wrap" style="display:${loading ? '' : 'none'}">
         <div class="intel-progress-track"><div class="intel-progress-bar" id="genProgressBar" style="width:0%"></div></div>
         <div class="intel-progress-info"><span id="genProgressPct">0%</span> <span id="genProgressTxt"></span></div>
       </div>
+      ${errForThisModel ? `<div class="gen-settings-warn" id="genSettingsError" role="alert">${esc(errForThisModel)}</div>` : ''}
       <div class="gen-settings-actions">
-        <button type="button" class="btn-primary btn-sm" id="genDownloadBtn" onclick="genDownloadClick()" ${cfg.enabled ? '' : 'disabled'}>
-          ${ready ? 'Reload model' : (cfg.downloaded ? 'Load model' : `Download model (~${sizeMb} MB)`)}
+        <button type="button" class="btn-primary btn-sm" id="genDownloadBtn" onclick="genDownloadClick()" ${actionDisabled ? 'disabled' : ''}>
+          ${esc(actionLabel)}
         </button>
-        ${ready ? '<button type="button" class="btn-ghost btn-sm" onclick="genAbort()">Abort generation</button>' : ''}
+        ${readyThisModel ? '<button type="button" class="btn-ghost btn-sm" onclick="genAbort()">Abort generation</button>' : ''}
       </div>
       <p class="gen-settings-hint">
         Clearing the LLM cache requires the browser’s own "clear site data" — the model lives in the browser HTTP cache, not IndexedDB.
@@ -1429,6 +1453,10 @@ function toggleGenEnabled(){
   const cfg = getGenCfg();
   cfg.enabled = !cfg.enabled;
   saveGenCfg(cfg);
+  if(!cfg.enabled){
+    _genLastError = null;
+    if(typeof genAbort === 'function'){ try{ genAbort(); }catch(e){} }
+  }
   renderGenSettings();
 }
 
@@ -1437,10 +1465,13 @@ function selectGenModel(id){
   const presets = getGenPresets();
   const p = presets.find(x => x.id === id);
   if(!p) return;
+  if(cfg.modelId === p.id) return;
   cfg.modelId = p.id;
   cfg.dtype = p.dtype;
-  cfg.downloaded = false;
+  // Do NOT clear the per-model download record — `isGenDownloaded(id)` is the
+  // source of truth. Legacy `cfg.downloaded` is re-derived by _loadGenCfg().
   saveGenCfg(cfg);
+  _genLastError = null; // errors were about the previous model
   renderGenSettings();
 }
 
@@ -1456,31 +1487,63 @@ async function genDownloadClick(){
   if(typeof genLoad !== 'function') return;
   const cfg = getGenCfg();
   if(!cfg.enabled){ cfg.enabled = true; saveGenCfg(cfg); }
+  _genLastError = null;
+
+  const targetModelId = cfg.modelId;
   const btn = document.getElementById('genDownloadBtn');
   const wrap = document.getElementById('genProgressWrap');
   const bar = document.getElementById('genProgressBar');
   const pct = document.getElementById('genProgressPct');
   const txt = document.getElementById('genProgressTxt');
+  const statusEl = document.getElementById('genSettingsStatus');
+
   if(wrap) wrap.style.display = '';
+  if(bar) bar.style.width = '0%';
+  if(pct) pct.textContent = '0%';
+  if(txt) txt.textContent = 'preparing…';
   if(btn) btn.disabled = true;
+  if(statusEl) statusEl.textContent = 'Downloading…';
   syncHeaderAIChip('loading', 'Loading LLM…');
+
+  const onProgress = _makeProgressAggregator((v, ev) => {
+    if(bar) bar.style.width = v + '%';
+    if(pct) pct.textContent = v + '%';
+    const status = ev && ev.status ? String(ev.status) : '';
+    const file = ev && ev.file ? ' · ' + String(ev.file).split('/').pop() : '';
+    if(txt) txt.textContent = (status + file).slice(0, 80);
+    if(statusEl) statusEl.textContent = `Downloading · ${v}%`;
+  });
+
   try{
-    await genLoad(cfg.modelId, cfg.dtype, (p) => {
-      const percent = typeof p.progress === 'number' ? Math.round(p.progress) : null;
-      if(bar && percent != null) bar.style.width = percent + '%';
-      if(pct && percent != null) pct.textContent = percent + '%';
-      if(txt) txt.textContent = (p.file || p.status || '').slice(0, 60);
-    });
-    cfg.downloaded = true;
-    saveGenCfg(cfg);
+    await genLoad(targetModelId, cfg.dtype, onProgress);
+    if(typeof markGenDownloaded === 'function') markGenDownloaded(targetModelId);
     syncHeaderAIChip('ready', 'LLM ready');
   }catch(e){
+    const msg = (e && e.message) ? e.message : 'Load failed';
+    _genLastError = { modelId: targetModelId, message: msg };
     syncHeaderAIChip('error', 'LLM load failed');
-    if(txt) txt.textContent = (e && e.message ? e.message : 'error').slice(0, 80);
   }finally{
-    if(btn) btn.disabled = false;
     renderGenSettings();
   }
+}
+
+/** Called from the Ask palette "Open Settings" fallback so the user lands
+ *  directly on the LLM section (G6). */
+function openGenSettingsFromAsk(){
+  try{
+    if(typeof showTab === 'function') showTab('settings');
+    if(typeof closeCmdK === 'function') closeCmdK();
+    const host = document.getElementById('genAISettings');
+    if(!host) return;
+    // Expand the Integrations accordion if it's collapsed.
+    const details = host.closest('details');
+    if(details && !details.open) details.open = true;
+    requestAnimationFrame(() => {
+      host.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const btn = document.getElementById('genDownloadBtn');
+      if(btn && !btn.disabled) btn.focus();
+    });
+  }catch(e){ /* best-effort */ }
 }
 
 window.renderGenSettings = renderGenSettings;
@@ -1488,6 +1551,7 @@ window.toggleGenEnabled = toggleGenEnabled;
 window.selectGenModel = selectGenModel;
 window.setGenTimeout = setGenTimeout;
 window.genDownloadClick = genDownloadClick;
+window.openGenSettingsFromAsk = openGenSettingsFromAsk;
 
 document.addEventListener('click', function _smartAddTagDelegate(e){
   const prev = document.getElementById('smartAddPreview');
