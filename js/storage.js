@@ -189,6 +189,9 @@ let _prevTaskSnapshot = null; // used to detect which tasks changed since last s
 /** @param {'auto'|'unload'|'user'} [reason] — only 'user' shows the save pill (throttled) */
 function saveState(reason){
   if(!reason) reason = 'auto';
+  // H5: any user-attributed save means the in-memory state is live and must
+  // not be overwritten by the async IDB recovery path in loadState().
+  if(reason === 'user') window._stateDirty = true;
   if(typeof taskSortBy==='string'&&taskSortBy==='order') taskSortBy='manual';
   // Stamp lastModified on tasks that actually changed since the previous save.
   // This gives sync a reliable "newer wins" comparator without touching every
@@ -405,21 +408,51 @@ function loadState(){
     }
   }catch(e){ console.warn('[storage] localStorage load failed:',e); }
 
-  // Async IDB fallback — if localStorage was empty or corrupt
+  // Async IDB fallback — if localStorage was empty or corrupt.
+  // H5: the promise below resolves *after* the app has already initialized with
+  // defaults, which means the user may have typed a task or tweaked settings
+  // in the meantime. We must NEVER blindly replace live state. Only restore
+  // when every user-writeable store is still at its pristine default.
   _idbGet(STORE_KEY).then(raw=>{
     if(!raw) return;
     try{
+      if(!_isStatePristine()){
+        // User is mid-session. Surface recovery as an opt-in toast rather than
+        // clobbering their work. If showExportToast is missing (very early boot
+        // or stripped build) we still log a visible warning.
+        const msg = 'Backup found in IndexedDB but local data has diverged — kept current data.';
+        if(typeof showExportToast === 'function') showExportToast(msg);
+        console.warn('[storage]', msg);
+        return;
+      }
       const s = JSON.parse(raw);
       if(_applyState(s)){
         renderAll(); renderLog(); renderGoalList();
         renderIntList(); renderQuickTimers();
         applyTheme(); setTaskView(taskView); setSmartView(smartView);
         console.info('[storage] Recovered from IDB backup');
+        if(typeof showExportToast === 'function') showExportToast('Restored from backup');
       }
     }catch(e){ console.warn('[storage] IDB fallback failed:',e); }
   });
 
   return false;
+}
+
+/** True when the in-memory state is still the post-boot defaults — i.e. the
+ *  user has not typed, edited, or saved anything since this session started.
+ *  Combines an explicit dirty flag (set by any `saveState('user')`) with a
+ *  belt-and-suspenders check against the user-writeable stores. */
+function _isStatePristine(){
+  try{
+    if(window._stateDirty) return false;
+    if(Array.isArray(tasks)      && tasks.length)      return false;
+    if(Array.isArray(goals)      && goals.length)      return false;
+    if(Array.isArray(timeLog)    && timeLog.length)    return false;
+    if(Array.isArray(intentions) && intentions.length) return false;
+    if(Array.isArray(quickTimers)&& quickTimers.length)return false;
+    return true;
+  }catch(e){ return false; }
 }
 
 // ── Data export / import (manual backup) ─────────────────────────────────────
