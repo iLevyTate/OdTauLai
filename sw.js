@@ -1,5 +1,5 @@
-// ODTAULAI Service Worker v23 — ambient intelligence (Transformers.js / HF CDN pass-through)
-const CACHE_NAME = 'odtaulai-v25';
+// ODTAULAI Service Worker — keep CACHE_NAME aligned with js/version.js swCache
+const CACHE_NAME = 'odtaulai-v26';
 
 const ASSETS = [
   './',
@@ -7,6 +7,7 @@ const ASSETS = [
   './manifest.json',
   './favicon.ico',
   './css/main.css',
+  './js/version.js',
   './js/pwa.js',
   './js/icons.js',
   './js/utils.js',
@@ -34,7 +35,9 @@ const ASSETS = [
 self.addEventListener('install', e => {
   e.waitUntil(
     caches.open(CACHE_NAME)
-      .then(c => c.addAll(ASSETS).catch(() => {}))
+      .then(c => c.addAll(ASSETS).catch(err => {
+        console.warn('[sw] precache incomplete', err && err.message ? err.message : err);
+      }))
   );
 });
 
