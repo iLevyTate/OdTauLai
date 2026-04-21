@@ -1,0 +1,8 @@
+{
+  "name": "odtaulai",
+  "private": true,
+  "description": "Static PWA — npm scripts are for CI and local checks only (no install step).",
+  "scripts": {
+    "test": "node scripts/run-tests.mjs"
+  }
+}

@@ -1,0 +1,20 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Syntax check all JS
+        run: node --check js/ai.js js/app.js js/audio.js js/calfeeds.js js/embed-store.js js/icons.js js/intel-features.js js/intel.js js/nlparse.js js/pwa.js js/storage.js js/sync.js js/tasks.js js/timer.js js/ui.js js/utils.js js/version.js scripts/run-tests.mjs sw.js
+      - name: Tests
+        run: node scripts/run-tests.mjs
