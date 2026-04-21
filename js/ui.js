@@ -112,15 +112,135 @@ function calToday(){calMonth=null;renderTaskList()}
 
 // ========== COMMAND PALETTE (Cmd+K) ==========
 let cmdkActiveIdx=0,cmdkFilteredItems=[];
+let cmdkMode='find'; // 'find' | 'ask'
+let _cmdkAskCtl=null;
+let _cmdkAskHistoryIdx=-1;
+let _cmdkAskBusy=false;
+let _cmdkLastReply=null;
 function openCmdK(){
   const ov=gid('cmdkOverlay');if(!ov)return;
   ov.classList.add('open');
+  cmdkMode='find';_cmdkAskHistoryIdx=-1;_cmdkLastReply=null;_cmdkAskBusy=false;
+  _applyCmdkMode();
   gid('cmdkInput').value='';cmdkActiveIdx=0;renderCmdK();
   setTimeout(()=>gid('cmdkInput').focus(),30);
 }
-function closeCmdK(){gid('cmdkOverlay').classList.remove('open')}
+function closeCmdK(){
+  if(_cmdkAskCtl){try{_cmdkAskCtl.abort()}catch(_){}_cmdkAskCtl=null}
+  gid('cmdkOverlay').classList.remove('open');
+}
+function cmdkSetAskMode(on){
+  cmdkMode=on?'ask':'find';
+  _applyCmdkMode();
+  renderCmdK();
+}
+function cmdkToggleAsk(){cmdkSetAskMode(cmdkMode!=='ask')}
+function _applyCmdkMode(){
+  const panel=gid('cmdkOverlay')?.querySelector('.cmdk-panel');
+  const input=gid('cmdkInput');
+  const tog=gid('cmdkAskToggle');
+  const reply=gid('cmdkAskReply');
+  const results=gid('cmdkResults');
+  if(panel)panel.classList.toggle('cmdk-panel--ask',cmdkMode==='ask');
+  if(input){
+    input.placeholder=cmdkMode==='ask'
+      ?'Ask about or edit your tasks in plain English…'
+      :'Search tasks, actions, views… (? for Ask)';
+  }
+  if(tog){
+    tog.classList.toggle('cmdk-ask-toggle--active',cmdkMode==='ask');
+    tog.setAttribute('aria-pressed',cmdkMode==='ask'?'true':'false');
+  }
+  if(reply){
+    if(cmdkMode==='ask'){reply.hidden=false;if(!reply.innerHTML)reply.innerHTML='<div class="cmdk-ask-hint">Press Enter to run on-device. <strong>No auto-apply</strong> — you’ll preview every proposed change.</div>'}
+    else{reply.hidden=true;reply.innerHTML=''}
+  }
+  if(results)results.style.display=cmdkMode==='ask'?'none':'';
+}
+function _renderAskStatus(state,msg){
+  const reply=gid('cmdkAskReply');if(!reply)return;
+  if(state==='streaming'){
+    reply.innerHTML='<div class="cmdk-ask-streaming"><span class="cmdk-ask-label">Thinking on-device…</span><button type="button" class="cmdk-ask-stop" onclick="cmdkAskStop()">Stop</button><pre class="cmdk-ask-stream" id="cmdkAskStream"></pre></div>';
+  }else if(state==='error'){
+    reply.innerHTML='<div class="cmdk-ask-error">'+esc(msg||'Error')+'</div>';
+  }else if(state==='empty'){
+    reply.innerHTML='<div class="cmdk-ask-empty">'+esc(msg||'No changes proposed.')+'</div>';
+  }else if(state==='done'){
+    reply.innerHTML='<div class="cmdk-ask-done">'+esc(msg||'Proposed.')+'</div>';
+  }else if(state==='need-model'){
+    reply.innerHTML='<div class="cmdk-ask-error">Local LLM isn’t ready yet. <button type="button" class="btn-ghost btn-sm" onclick="showTab(\'settings\');closeCmdK()">Open Settings</button> to enable and download it.</div>';
+  }
+}
+async function cmdkAskSubmit(){
+  if(_cmdkAskBusy)return;
+  const input=gid('cmdkInput');if(!input)return;
+  const q=input.value.trim();
+  if(!q)return;
+  if(typeof isGenReady!=='function'||!isGenReady()){_renderAskStatus('need-model');return}
+  if(typeof askRun!=='function'){_renderAskStatus('error','Ask pipeline unavailable');return}
+  _cmdkAskBusy=true;
+  _cmdkAskCtl=new AbortController();
+  _renderAskStatus('streaming');
+  const streamEl=gid('cmdkAskStream');
+  try{
+    const res=await askRun(q,{
+      signal:_cmdkAskCtl.signal,
+      onToken:(t)=>{if(streamEl){streamEl.textContent+=t;streamEl.scrollTop=streamEl.scrollHeight}},
+    });
+    _cmdkLastReply=res;
+    if(!res.ok){
+      const reason=res.reason||'Unknown error';
+      if(reason==='ABORTED'||reason==='TIMEOUT'){_renderAskStatus('error',reason==='TIMEOUT'?'Timed out — try a shorter request or a smaller model.':'Stopped.');}
+      else if(reason==='GEN_NOT_READY'){_renderAskStatus('need-model');}
+      else if(reason.startsWith('PARSE_FAILED')){_renderAskStatus('error','Couldn’t parse a valid plan. Try rephrasing.');}
+      else{_renderAskStatus('error',reason);}
+      return;
+    }
+    if(!res.ops.length){
+      _renderAskStatus('empty','No actionable changes — nothing will be applied.');
+      return;
+    }
+    if(typeof acceptProposedOps==='function'){
+      acceptProposedOps(res.ops,{source:'ask',destructiveLevel:res.destructiveLevel});
+    }
+    const n=res.ops.length;
+    const extra=res.rejected&&res.rejected.length?` (${res.rejected.length} rejected)`:'';
+    _renderAskStatus('done',`Proposed ${n} change${n!==1?'s':''}${extra}. Opened Tools — review before applying.`);
+    setTimeout(closeCmdK,650);
+  }catch(e){
+    _renderAskStatus('error',(e&&e.message)||'Error');
+  }finally{
+    _cmdkAskBusy=false;
+    _cmdkAskCtl=null;
+  }
+}
+function cmdkAskStop(){
+  if(_cmdkAskCtl){try{_cmdkAskCtl.abort()}catch(_){}}
+  if(typeof genAbort==='function')genAbort();
+}
 function renderCmdK(){
-  const q=gid('cmdkInput').value.toLowerCase().trim();
+  const rawInput=gid('cmdkInput');
+  let rawVal=rawInput?rawInput.value:'';
+  // Prefix "? " toggles Ask mode and strips the prefix from the query.
+  if(cmdkMode!=='ask'&&(rawVal.startsWith('?')||rawVal.startsWith('？'))){
+    const rest=rawVal.replace(/^[?？]\s*/,'');
+    if(rawInput)rawInput.value=rest;
+    rawVal=rest;
+    cmdkSetAskMode(true);
+    return;
+  }
+  if(cmdkMode==='ask'){
+    const results=gid('cmdkResults');
+    if(results)results.style.display='none';
+    const foot=gid('cmdkFoot');
+    if(foot){
+      const mod=/(Mac|iPhone|iPod|iPad)/i.test(navigator.platform||'')?'⌘':'Ctrl';
+      const genReady=typeof isGenReady==='function'&&isGenReady();
+      foot.textContent=mod+'/Ctrl+K · Enter = ask · Esc · '+(genReady?'Model ready':'Model not loaded');
+    }
+    return;
+  }
+  const q=rawVal.toLowerCase().trim();
   const results=gid('cmdkResults');
   const ic=(n)=>(typeof window.icon==='function'?window.icon(n):'');
   // Build items: actions + tasks + views
@@ -142,6 +262,7 @@ function renderCmdK(){
     {type:'action',label:'Toggle theme',icon:ic('moon'),run:()=>toggleTheme()},
     {type:'action',label:'Start focus timer',icon:ic('play'),run:()=>{showTab('focus');if(!running)startTimer()}},
     {type:'action',label:'Add new list',icon:ic('plus'),run:()=>{showTab('tasks');addList()}},
+    {type:'action',label:'Ask Intelligence (natural language)',icon:ic('spark'),kbd:'?',run:()=>{openCmdK();setTimeout(()=>cmdkSetAskMode(true),40)}},
     {type:'action',label:'Harmonize all fields (embeddings)',icon:ic('harmonize'),run:()=>{showTab('tools');if(typeof intelHarmonizeFields==='function')intelHarmonizeFields()}},
     {type:'action',label:'Find duplicate tasks',icon:ic('copy'),run:()=>{showTab('tools');if(typeof intelFindDuplicatesUI==='function')intelFindDuplicatesUI()}},
     {type:'action',label:'Toggle semantic search',icon:ic('search'),run:()=>{showTab('tasks');if(typeof isIntelReady !== 'function' || !isIntelReady()){if(typeof syncHeaderAIChip === 'function') syncHeaderAIChip('error', 'Load model first — open Tools');showTab('tools');return}const cb=gid('taskSearchSemantic');if(cb){cb.checked=!cb.checked;if(typeof toggleTaskSearchSemantic==='function')toggleTaskSearchSemantic()}}},
@@ -179,6 +300,34 @@ function cmdkRun(idx){
 }
 function cmdkKeydown(e){
   if(e.key==='Escape'){closeCmdK();return}
+  if(cmdkMode==='ask'){
+    if(e.key==='Enter'){e.preventDefault();cmdkAskSubmit();return}
+    if(e.key==='ArrowUp'){
+      if(typeof getAskHistory!=='function')return;
+      const hist=getAskHistory();
+      if(!hist.length)return;
+      e.preventDefault();
+      _cmdkAskHistoryIdx=Math.min(_cmdkAskHistoryIdx+1,hist.length-1);
+      const item=hist[_cmdkAskHistoryIdx];
+      if(item){const inp=gid('cmdkInput');if(inp){inp.value=item.text}}
+      return;
+    }
+    if(e.key==='ArrowDown'){
+      if(_cmdkAskHistoryIdx<=0){_cmdkAskHistoryIdx=-1;const inp=gid('cmdkInput');if(inp)inp.value='';e.preventDefault();return}
+      const hist=typeof getAskHistory==='function'?getAskHistory():[];
+      _cmdkAskHistoryIdx=Math.max(_cmdkAskHistoryIdx-1,0);
+      const item=hist[_cmdkAskHistoryIdx];
+      if(item){const inp=gid('cmdkInput');if(inp)inp.value=item.text}
+      e.preventDefault();
+      return;
+    }
+    // Backspace on empty exits Ask mode
+    if(e.key==='Backspace'){
+      const inp=gid('cmdkInput');
+      if(inp&&inp.value===''){e.preventDefault();cmdkSetAskMode(false);return}
+    }
+    return;
+  }
   if(e.key==='ArrowDown'){e.preventDefault();cmdkActiveIdx=Math.min(cmdkActiveIdx+1,cmdkFilteredItems.length-1);renderCmdK()}
   else if(e.key==='ArrowUp'){e.preventDefault();cmdkActiveIdx=Math.max(cmdkActiveIdx-1,0);renderCmdK()}
   else if(e.key==='Enter'){e.preventDefault();cmdkRun(cmdkActiveIdx)}

@@ -58,7 +58,18 @@ What you actually get from it:
 - **Similar tasks** — top neighbors surface in the task detail drawer.
 - **Align values only** — narrow button for Schwartz‑only alignment if you don't want other fields touched.
 
-Strictly **not** a chat LLM: no free‑form generation, no "assistant" loop, no calls to OpenAI / Anthropic / anyone. The "understanding" is geometric.
+The "understanding" is geometric by default. An **optional** tiny on‑device LLM (see *Ask* below) is strictly opt‑in, local‑only, and gated behind an explicit Settings toggle plus an explicit download click — no cloud LLM, no calls to OpenAI / Anthropic / anyone.
+
+### Ask — optional on‑device LLM (off by default)
+
+Turn on **Settings → Integrations → Generative AI (beta)** and click *Download model* to enable a natural‑language interface:
+
+- Open the command palette (`Cmd/Ctrl + K`), prefix your input with `?`, or click the **Ask** toggle.
+- Type a plain‑English request: *"make everything tagged #work due tomorrow urgent"*, *"archive all done errands from last week"*, *"create a task 'call mom' tomorrow evening"*.
+- The model (default **`Xenova/SmolLM2‑360M‑Instruct`**, ~230 MB q4, Apache‑2.0) runs locally via Transformers.js — **WebGPU** when available, **WASM** everywhere else. iOS Safari works; expect slower first‑token latency on WASM.
+- Output is a **JSON batch of the same task operations the UI already executes** (create, update, mark done, archive, move, tag, etc.). Nothing auto‑applies — every proposed change lands in the existing preview pane with per‑field checkboxes, destructive‑action ACK, and the 10‑deep undo stack.
+
+Three model presets (Tiny 135M / Balanced 360M / Bigger 0.5B) let you pick the speed / quality trade‑off for your device. Clear the LLM via your browser's "clear site data" — weights live in the browser HTTP cache, not IndexedDB. Same privacy posture as the embedding model: no task text ever leaves the device.
 
 ### Impact scoring (Pareto 80/20)
 
@@ -227,6 +238,9 @@ ODTAULAI/
 │   ├── intel.js              intelligence bootstrap + status
 │   ├── intel-features.js     harmonize, auto-organize, duplicates
 │   ├── embed-store.js        IndexedDB vector cache
+│   ├── gen.js                optional local LLM loader (opt-in, off by default)
+│   ├── ask.js                NL → op batch orchestrator (retrieval + prompt)
+│   ├── tool-schema.js        JSON-schema + validator for LLM tool calls
 │   ├── calfeeds.js           iCal / ICS parser + renderer
 │   ├── sync.js               WebRTC P2P (PeerJS)
 │   ├── pwa.js                service-worker registration + update flow
@@ -318,7 +332,7 @@ Yes — the beta P2P sync uses WebRTC. Your data goes peer‑to‑peer; only the
 Host `@huggingface/transformers`, the model files, `chrono-node`, and `peerjs` yourself; update the CDN URLs in `js/ai.js`, `js/nlparse.js`, and `js/sync.js`.
 
 **Can I remove the AI entirely?**
-Yes — it's strictly opt‑in. If you never visit the Tools tab or toggle semantic search, nothing downloads. Delete `js/ai.js`, `js/intel.js`, `js/intel-features.js`, `js/embed-store.js` and remove their `<script>` tags to strip it from the bundle.
+Yes — it's strictly opt‑in. If you never visit the Tools tab or toggle semantic search, the embedding model never downloads. If you never enable *Generative AI* in Settings, no LLM downloads either. To strip the code entirely, delete `js/ai.js`, `js/intel.js`, `js/intel-features.js`, `js/embed-store.js`, `js/gen.js`, `js/ask.js`, `js/tool-schema.js` and remove their `<script>` tags.
 
 **Why vanilla JS?**
 Frameworks rot. `git clone`, open in any browser, and in 10 years this will still work. No npm install, no lockfile drift, no "recompile the universe to change a button."
@@ -327,7 +341,8 @@ Frameworks rot. `git clone`, open in any browser, and in 10 years this will stil
 
 ## Not in scope (deliberately)
 
-- Generative chat / LLM writing assistants.
+- **Cloud** LLMs — inference always happens on the device you’re using.
+- Free‑form chat loops, persistent conversation memory, or "assistant" personalities. The optional Ask feature is one‑shot: query → proposed ops → you review & apply.
 - Cloud accounts, user profiles, team features.
 - Analytics. Telemetry. A/B tests. "Engagement."
 - Push notifications to your phone while the app is fully closed (browsers don't allow this without a cloud backend — by design).

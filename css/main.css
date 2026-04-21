@@ -2312,3 +2312,79 @@ body:has(.offline-indicator:not([style*="display:none"])){ padding-top:30px; }
 @media (prefers-reduced-motion: reduce){
   *,*::before,*::after{animation-duration:0.01ms!important;animation-iteration-count:1!important;transition-duration:0.01ms!important}
 }
+
+/* ══════════════════════════════════════════════════════════════════════════ */
+/* ASK MODE — command-palette natural-language input                          */
+/* ══════════════════════════════════════════════════════════════════════════ */
+.cmdk-input-row{display:flex;align-items:center;gap:0;border-bottom:1px solid var(--border)}
+.cmdk-input-row .cmdk-input{border-bottom:none;flex:1}
+.cmdk-ask-toggle{
+  margin-right:10px;padding:6px 12px;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
+  background:var(--bg-2);color:var(--text-3);border:1px solid var(--border);border-radius:999px;cursor:pointer;font-family:inherit;flex-shrink:0;
+}
+.cmdk-ask-toggle:hover{background:var(--bg-3);color:var(--text-2)}
+.cmdk-ask-toggle--active{background:var(--accent-bg);color:var(--accent);border-color:var(--accent)}
+.cmdk-panel--ask .cmdk-input{color:var(--accent)}
+.cmdk-ask-reply{
+  padding:14px 16px;max-height:40vh;overflow-y:auto;-webkit-overflow-scrolling:touch;
+  background:var(--bg-2);border-bottom:1px solid var(--border);font-size:13px;color:var(--text-1);
+}
+.cmdk-ask-hint{font-size:12px;color:var(--text-3);line-height:1.5}
+.cmdk-ask-hint strong{color:var(--text-2)}
+.cmdk-ask-streaming{display:flex;flex-direction:column;gap:8px}
+.cmdk-ask-label{font-size:11px;color:var(--text-3);letter-spacing:.04em;text-transform:uppercase;font-weight:600}
+.cmdk-ask-stream{
+  font-family:var(--font-mono);font-size:12px;line-height:1.45;color:var(--text-2);
+  background:var(--bg-1);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin:0;
+  max-height:30vh;overflow-y:auto;white-space:pre-wrap;word-break:break-word;
+}
+.cmdk-ask-stop{
+  align-self:flex-start;padding:4px 10px;font-size:11px;font-weight:600;font-family:inherit;
+  background:transparent;color:var(--danger);border:1px solid var(--danger);border-radius:4px;cursor:pointer;
+}
+.cmdk-ask-stop:hover{background:rgba(231,76,60,.08)}
+.cmdk-ask-error{color:var(--danger);font-size:13px;line-height:1.5}
+.cmdk-ask-error button{margin-left:8px;vertical-align:middle}
+.cmdk-ask-empty{color:var(--text-3);font-size:13px;font-style:italic}
+.cmdk-ask-done{color:var(--success,#2ecc71);font-size:13px;font-weight:500}
+
+/* Source badge + bulk-destructive warning inside the pending-ops preview */
+.pending-source-badge{
+  display:inline-block;margin-left:8px;padding:2px 8px;font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
+  background:var(--accent-bg);color:var(--accent);border-radius:999px;vertical-align:middle;
+}
+.pending-mass-warn{
+  margin:0 0 10px;padding:10px 12px;font-size:12px;line-height:1.5;color:var(--text-1);
+  background:rgba(241,196,15,.08);border:1px solid rgba(241,196,15,.35);border-radius:8px;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════ */
+/* GENERATIVE AI — Settings subsection                                        */
+/* ══════════════════════════════════════════════════════════════════════════ */
+.gen-settings{display:flex;flex-direction:column;gap:10px;width:100%}
+.gen-settings-lead{font-size:11px;color:var(--text-3);line-height:1.55;margin:2px 0 0}
+.gen-settings-lead strong{color:var(--text-2)}
+.gen-settings-lead em{font-style:italic;color:var(--text-2)}
+.gen-settings-lead code,.gen-settings-lead kbd{font-family:var(--font-mono);font-size:10.5px;background:var(--bg-2);border:1px solid var(--border);padding:1px 5px;border-radius:3px;color:var(--text-2)}
+.gen-settings-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.gen-settings-lbl{font-size:12px;color:var(--text-2);min-width:80px}
+.gen-settings select,.gen-settings input[type=number]{
+  flex:1;min-width:140px;padding:6px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:5px;
+  color:var(--text-1);font-family:inherit;font-size:12px;
+}
+.gen-settings select:disabled,.gen-settings input:disabled{opacity:.5;cursor:not-allowed}
+.gen-settings-note{font-size:11px;color:var(--text-3);line-height:1.4}
+.gen-settings-warn{font-size:11px;color:var(--warning,#e67e22);line-height:1.4;padding:6px 10px;background:rgba(230,126,34,.08);border:1px solid rgba(230,126,34,.3);border-radius:5px}
+.gen-settings-status{font-size:11px;color:var(--text-3);font-variant-numeric:tabular-nums}
+.gen-settings-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:2px}
+.gen-settings-hint{font-size:11px;color:var(--text-4);line-height:1.5;margin:6px 0 0}
+
+@media (max-width:640px){
+  .cmdk-ask-reply{max-height:35vh}
+  .cmdk-ask-stream{max-height:22vh}
+  .cmdk-ask-toggle{margin-right:8px;padding:5px 10px;font-size:10.5px}
+  .gen-settings-row{flex-direction:column;align-items:flex-start}
+  .gen-settings-lbl{min-width:0}
+  .gen-settings select,.gen-settings input[type=number]{width:100%}
+}
+

@@ -286,6 +286,7 @@ setInterval(()=>{
 if(typeof renderSyncPanel==='function') renderSyncPanel();
 
 if(typeof renderAIPanel==='function') renderAIPanel();
+if(typeof renderGenSettings==='function') renderGenSettings();
 
 // Init calendar feeds panel + auto-refresh on boot
 if(typeof renderCalFeedsPanel==='function') renderCalFeedsPanel();

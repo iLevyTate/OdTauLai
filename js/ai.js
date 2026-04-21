@@ -7,6 +7,8 @@ const INTEL_CFG_KEY = 'stupind_intel_cfg';
 
 let _cfg = null;
 let _pendingOps = [];
+let _pendingDestructive = 'none'; // 'none' | 'warn' | 'hard' — set by acceptProposedOps()
+let _pendingSource = null;        // tag for UI ('ask', 'harmonize', …)
 let _undoStack = [];
 let _intelBusy = false;
 
@@ -547,11 +549,18 @@ function _renderPendingOps(){
     </div>`;
   }
 
+  const sourceBadge = _pendingSource ? `<span class="pending-source-badge" title="Proposed via ${esc(_pendingSource)}">via ${esc(_pendingSource)}</span>` : '';
+  const massWarn = (_pendingDestructive === 'hard' && !dangerIdx.length) ? `
+    <div class="pending-mass-warn" role="note">
+      <strong>Heads up:</strong> this batch contains multiple destructive actions (archive / move across lists). Review carefully before applying — you can undo, but it affects many tasks at once.
+    </div>` : '';
+
   wrap.innerHTML = `
     <div class="pending-hdr">
-      <span class="pending-title">Proposed changes (${_pendingOps.length})</span>
+      <span class="pending-title">Proposed changes (${_pendingOps.length})${sourceBadge}</span>
       <button type="button" class="pending-toggle-all" onclick="intelToggleAllPending()">Toggle all</button>
     </div>
+    ${massWarn}
     <div class="pending-list">${normalParts.join('')}</div>
     ${dangerHtml}
     <div class="pending-actions">
@@ -570,8 +579,36 @@ function intelToggleAllPending(){
 
 function intelRejectPending(){
   _pendingOps = [];
+  _pendingDestructive = 'none';
+  _pendingSource = null;
   _renderPendingOps();
   _setIntelStatus('ready', 'Ready');
+}
+
+/**
+ * Hook used by js/ask.js (and future callers) to seed the existing preview
+ * pipeline with externally-proposed ops. Respects the same checkbox/undo
+ * machinery as harmonize/auto-organize. Never auto-applies.
+ *
+ * @param {Array<{name:string,args:object}>} ops
+ * @param {{ source?:string, destructiveLevel?:'none'|'warn'|'hard' }} [meta]
+ */
+function acceptProposedOps(ops, meta){
+  const list = Array.isArray(ops) ? ops.slice(0, 50) : [];
+  _pendingOps = list;
+  _pendingDestructive = (meta && meta.destructiveLevel) || 'none';
+  _pendingSource = (meta && meta.source) || null;
+  _renderPendingOps();
+  if(list.length && typeof showTab === 'function') showTab('tools');
+  if(list.length){
+    setTimeout(() => {
+      const wrap = document.getElementById('intelPendingOps');
+      if(wrap && typeof wrap.scrollIntoView === 'function') wrap.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 80);
+    _setIntelStatus('idle', `Review ${list.length} proposed change${list.length !== 1 ? 's' : ''}`);
+  } else {
+    _setIntelStatus('ready', 'No changes proposed');
+  }
 }
 
 function intelApplyPending(){
@@ -580,6 +617,12 @@ function intelApplyPending(){
   if(hasDelete && (!dangerAck || !dangerAck.checked)){
     _setIntelStatus('error', 'Confirm permanent delete below');
     return;
+  }
+  if(_pendingDestructive === 'hard' && !hasDelete){
+    const msg = 'Proposed changes include bulk destructive actions (archive/move to list). Apply anyway?';
+    if(typeof window !== 'undefined' && typeof window.confirm === 'function'){
+      if(!window.confirm(msg)){ _setIntelStatus('ready', 'Cancelled'); return; }
+    }
   }
 
   const selOps = [];
@@ -654,6 +697,8 @@ function intelApplyPending(){
   }
 
   _pendingOps = [];
+  _pendingDestructive = 'none';
+  _pendingSource = null;
   _renderPendingOps();
   _setIntelStatus('ready', failures.length ? `Applied ${applied}, ${failures.length} failed` : `Applied ${applied}`);
 }
@@ -1316,6 +1361,133 @@ window.intelToggleAllPending = intelToggleAllPending;
 window.syncHeaderAIChip = syncHeaderAIChip;
 window.syncSemanticSearchUi = syncSemanticSearchUi;
 window.headerAIClick = headerAIClick;
+window.acceptProposedOps = acceptProposedOps;
+
+// ========== GENERATIVE AI (Ask) — Settings UI ==========
+// All LLM state lives in js/gen.js and js/ask.js. These functions just
+// render the Settings subsection and wire the Download button.
+
+function renderGenSettings(){
+  const host = document.getElementById('genAISettings');
+  if(!host) return;
+  const cfg = (typeof getGenCfg === 'function') ? getGenCfg() : { enabled:false, modelId:'', dtype:'q4', timeoutSec:30, downloaded:false };
+  const presets = (typeof getGenPresets === 'function') ? getGenPresets() : [];
+  const ready = typeof isGenReady === 'function' && isGenReady();
+  const loading = typeof isGenLoading === 'function' && isGenLoading();
+  const dev = typeof getGenDevice === 'function' ? getGenDevice() : null;
+  const ramHint = typeof window._mobileRamHint === 'function' ? window._mobileRamHint() : null;
+
+  const preset = presets.find(p => p.id === cfg.modelId) || presets[0];
+  const sizeMb = preset ? preset.sizeMb : 230;
+
+  const statusText = ready ? `Ready · ${dev || 'CPU'} · ${preset ? preset.label : cfg.modelId}`
+    : loading ? 'Loading…'
+    : cfg.downloaded ? 'Cached (click Load to use)'
+    : 'Not downloaded';
+
+  host.innerHTML = `
+    <div class="gen-settings">
+      <div class="srow" style="justify-content:space-between;gap:10px">
+        <span class="sr-lbl" style="font-size:13px">Enable generative Ask (beta)</span>
+        <div class="toggle ${cfg.enabled ? 'on' : ''}" id="genEnableToggle" onclick="toggleGenEnabled()" role="switch" aria-checked="${cfg.enabled}"><div class="tknob"></div></div>
+      </div>
+      <p class="gen-settings-lead">
+        Adds an <strong>Ask</strong> mode to the command palette (<kbd>Ctrl/⌘ + K</kbd>, then prefix <code>?</code>). A tiny instruct-tuned model runs <em>on this device</em>; nothing you type leaves the browser. Proposed changes always preview before anything is applied.
+      </p>
+      <div class="gen-settings-row">
+        <label for="genModelSelect" class="gen-settings-lbl">Model</label>
+        <select id="genModelSelect" onchange="selectGenModel(this.value)" ${cfg.enabled ? '' : 'disabled'}>
+          ${presets.map(p => `<option value="${esc(p.id)}" ${p.id === cfg.modelId ? 'selected' : ''}>${esc(p.label)} · ${p.sizeMb} MB</option>`).join('')}
+        </select>
+      </div>
+      ${preset ? `<div class="gen-settings-note">${esc(preset.note)}</div>` : ''}
+      ${ramHint === 'low' ? `<div class="gen-settings-warn">Your device reports low RAM. Consider the 135M preset.</div>` : ''}
+      ${ramHint === 'ios-unknown' && (preset && preset.sizeMb > 150) ? `<div class="gen-settings-warn">On iOS the WASM fallback uses extra RAM. If the tab reloads during generation, switch to the 135M preset.</div>` : ''}
+      <div class="gen-settings-row">
+        <label for="genTimeout" class="gen-settings-lbl">Timeout (sec)</label>
+        <input type="number" id="genTimeout" class="sinput" min="5" max="120" value="${cfg.timeoutSec}" onchange="setGenTimeout(this.value)" ${cfg.enabled ? '' : 'disabled'}>
+      </div>
+      <div class="gen-settings-status" id="genSettingsStatus">${esc(statusText)}</div>
+      <div id="genProgressWrap" class="intel-progress-wrap" style="display:none">
+        <div class="intel-progress-track"><div class="intel-progress-bar" id="genProgressBar" style="width:0%"></div></div>
+        <div class="intel-progress-info"><span id="genProgressPct">0%</span> <span id="genProgressTxt"></span></div>
+      </div>
+      <div class="gen-settings-actions">
+        <button type="button" class="btn-primary btn-sm" id="genDownloadBtn" onclick="genDownloadClick()" ${cfg.enabled ? '' : 'disabled'}>
+          ${ready ? 'Reload model' : (cfg.downloaded ? 'Load model' : `Download model (~${sizeMb} MB)`)}
+        </button>
+        ${ready ? '<button type="button" class="btn-ghost btn-sm" onclick="genAbort()">Abort generation</button>' : ''}
+      </div>
+      <p class="gen-settings-hint">
+        Clearing the LLM cache requires the browser’s own "clear site data" — the model lives in the browser HTTP cache, not IndexedDB.
+      </p>
+    </div>`;
+}
+
+function toggleGenEnabled(){
+  if(typeof getGenCfg !== 'function') return;
+  const cfg = getGenCfg();
+  cfg.enabled = !cfg.enabled;
+  saveGenCfg(cfg);
+  renderGenSettings();
+}
+
+function selectGenModel(id){
+  const cfg = getGenCfg();
+  const presets = getGenPresets();
+  const p = presets.find(x => x.id === id);
+  if(!p) return;
+  cfg.modelId = p.id;
+  cfg.dtype = p.dtype;
+  cfg.downloaded = false;
+  saveGenCfg(cfg);
+  renderGenSettings();
+}
+
+function setGenTimeout(v){
+  const cfg = getGenCfg();
+  const n = parseInt(v, 10);
+  if(!Number.isFinite(n) || n < 5 || n > 120) return;
+  cfg.timeoutSec = n;
+  saveGenCfg(cfg);
+}
+
+async function genDownloadClick(){
+  if(typeof genLoad !== 'function') return;
+  const cfg = getGenCfg();
+  if(!cfg.enabled){ cfg.enabled = true; saveGenCfg(cfg); }
+  const btn = document.getElementById('genDownloadBtn');
+  const wrap = document.getElementById('genProgressWrap');
+  const bar = document.getElementById('genProgressBar');
+  const pct = document.getElementById('genProgressPct');
+  const txt = document.getElementById('genProgressTxt');
+  if(wrap) wrap.style.display = '';
+  if(btn) btn.disabled = true;
+  syncHeaderAIChip('loading', 'Loading LLM…');
+  try{
+    await genLoad(cfg.modelId, cfg.dtype, (p) => {
+      const percent = typeof p.progress === 'number' ? Math.round(p.progress) : null;
+      if(bar && percent != null) bar.style.width = percent + '%';
+      if(pct && percent != null) pct.textContent = percent + '%';
+      if(txt) txt.textContent = (p.file || p.status || '').slice(0, 60);
+    });
+    cfg.downloaded = true;
+    saveGenCfg(cfg);
+    syncHeaderAIChip('ready', 'LLM ready');
+  }catch(e){
+    syncHeaderAIChip('error', 'LLM load failed');
+    if(txt) txt.textContent = (e && e.message ? e.message : 'error').slice(0, 80);
+  }finally{
+    if(btn) btn.disabled = false;
+    renderGenSettings();
+  }
+}
+
+window.renderGenSettings = renderGenSettings;
+window.toggleGenEnabled = toggleGenEnabled;
+window.selectGenModel = selectGenModel;
+window.setGenTimeout = setGenTimeout;
+window.genDownloadClick = genDownloadClick;
 
 document.addEventListener('click', function _smartAddTagDelegate(e){
   const prev = document.getElementById('smartAddPreview');

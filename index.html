@@ -393,6 +393,10 @@
             <button type="button" class="btn-ghost btn-sm" onclick="showTab('tools')" style="flex-shrink:0">Open in Tools</button>
           </div>
           <div class="srow" style="flex-direction:column;align-items:flex-start;gap:10px;padding:14px 0 0;border-top:1px solid var(--border);margin-top:10px">
+            <span class="sr-lbl" style="font-size:12px;letter-spacing:.06em">Generative AI (Beta)</span>
+            <div id="genAISettings" style="width:100%"></div>
+          </div>
+          <div class="srow" style="flex-direction:column;align-items:flex-start;gap:10px;padding:14px 0 0;border-top:1px solid var(--border);margin-top:10px">
             <span class="sr-lbl" style="font-size:12px;letter-spacing:.06em">Device Sync (Beta)</span>
             <div id="syncPanel" style="width:100%"></div>
           </div>
@@ -527,7 +531,11 @@
 <!-- Command Palette (Cmd+K) -->
 <div class="cmdk-overlay" id="cmdkOverlay" onclick="if(event.target===this)closeCmdK()">
   <div class="cmdk-panel">
-    <input class="cmdk-input" id="cmdkInput" placeholder="Search tasks, actions, views..." oninput="renderCmdK()" onkeydown="cmdkKeydown(event)">
+    <div class="cmdk-input-row">
+      <input class="cmdk-input" id="cmdkInput" placeholder="Search tasks, actions, views… (? for Ask)" oninput="renderCmdK()" onkeydown="cmdkKeydown(event)">
+      <button type="button" id="cmdkAskToggle" class="cmdk-ask-toggle" onclick="cmdkToggleAsk()" title="Toggle Ask mode (prefix with ?)" aria-pressed="false">Ask</button>
+    </div>
+    <div class="cmdk-ask-reply" id="cmdkAskReply" hidden></div>
     <div class="cmdk-results" id="cmdkResults"></div>
     <div class="cmdk-foot" id="cmdkFoot"></div>
   </div>
@@ -729,6 +737,9 @@
 <script src="js/embed-store.js"></script>
 <script src="js/nlparse.js"></script>
 <script src="js/intel-features.js"></script>
+<script src="js/tool-schema.js"></script>
+<script src="js/gen.js"></script>
+<script src="js/ask.js"></script>
 <script src="js/ui.js"></script>
 <script src="js/ai.js"></script>
 <script src="js/sync.js"></script>
