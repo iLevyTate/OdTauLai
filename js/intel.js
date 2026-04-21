@@ -10,6 +10,7 @@ let _extractor = null;
 let _intelReady = false;
 let _intelLoading = false;
 let _intelDevice = null;
+let _intelLoadPromise = null;
 
 function getIntelDevice(){ return _intelDevice; }
 function isIntelReady(){ return _intelReady; }
@@ -18,42 +19,59 @@ function isIntelReady(){ return _intelReady; }
  * @param {(progress: { progress?: number, status?: string }) => void} [onProgress]
  */
 async function intelLoad(onProgress){
-  if(_intelReady || _intelLoading) return;
+  if (_intelReady) return;
+  if (_intelLoadPromise) return _intelLoadPromise;
+
   _intelLoading = true;
-  let pipeline;
-  let env;
+  _intelLoadPromise = (async () => {
+    let pipeline;
+    let env;
+    try{
+      const mod = await import(TRANSFORMERS_CDN);
+      pipeline = mod.pipeline;
+      env = mod.env;
+    }catch(e){
+      console.warn('[intel] transformers import failed', e);
+      throw e;
+    }
+    env.allowLocalModels = false;
+    env.useBrowserCache = true;
+
+    const cb = typeof onProgress === 'function' ? onProgress : () => {};
+
+    try{
+      try{
+        _extractor = await pipeline('feature-extraction', EMBED_MODEL, {
+          device: 'webgpu',
+          dtype: 'fp16',
+          progress_callback: cb,
+        });
+        _intelDevice = 'webgpu';
+      }catch(e){
+        console.warn('[intel] WebGPU pipeline failed, falling back to WASM', e);
+        _extractor = await pipeline('feature-extraction', EMBED_MODEL, {
+          device: 'wasm',
+          progress_callback: cb,
+        });
+        _intelDevice = 'wasm';
+      }
+      _intelReady = true;
+    }catch(e){
+      _extractor = null;
+      _intelReady = false;
+      _intelDevice = null;
+      throw e;
+    }
+  })();
+
   try{
-    const mod = await import(TRANSFORMERS_CDN);
-    pipeline = mod.pipeline;
-    env = mod.env;
+    await _intelLoadPromise;
   }catch(e){
-    console.warn('[intel] transformers import failed', e);
-    _intelLoading = false;
     throw e;
+  }finally{
+    _intelLoading = false;
+    _intelLoadPromise = null;
   }
-  env.allowLocalModels = false;
-  env.useBrowserCache = true;
-
-  const cb = typeof onProgress === 'function' ? onProgress : () => {};
-
-  try{
-    _extractor = await pipeline('feature-extraction', EMBED_MODEL, {
-      device: 'webgpu',
-      dtype: 'fp16',
-      progress_callback: cb,
-    });
-    _intelDevice = 'webgpu';
-  }catch(e){
-    console.warn('[intel] WebGPU pipeline failed, falling back to WASM', e);
-    _extractor = await pipeline('feature-extraction', EMBED_MODEL, {
-      device: 'wasm',
-      progress_callback: cb,
-    });
-    _intelDevice = 'wasm';
-  }
-
-  _intelReady = true;
-  _intelLoading = false;
 }
 
 /**

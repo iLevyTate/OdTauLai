@@ -206,7 +206,8 @@ function saveState(reason){
       const fieldsToCompare = ['name','status','priority','dueDate','startDate','description','tags',
         'starred','archived','completedAt','effort','energyLevel','context','category',
         'valuesAlignment','parentId','listId','url','estimateMin','recur','remindAt','type','blockedBy',
-        'completions','habitLastRecordedTotalSec'];
+        'completions','habitLastRecordedTotalSec',
+        'totalSec','sessions','checklist','notes'];
       let changed = false;
       for (const f of fieldsToCompare){
         const a = JSON.stringify(t[f]);
@@ -245,6 +246,7 @@ function saveState(reason){
   try{
     localStorage.setItem(STORE_KEY, serialized);
     window._saveError = null;
+    window._lastSaveAt = Date.now();
   }catch(e){
     // QuotaExceededError — warn user. Most common cause: archive grew huge.
     window._saveError = e.name || 'save-failed';
@@ -281,11 +283,20 @@ function _applyState(s){
     s = migrateState(s);
     if(!_validateState(s)) return false;
 
-    // Day rollover
+    // Day rollover — archive yesterday's daily counters, but preserve
+    // long-lived user data (tasks, lists, goals, cfg, etc.) across days.
+    // Only the per-day metrics reset; archiveDay dedupes by date so it's
+    // safe if this runs again on reload.
     if(s.date !== todayKey()){
       archiveDay(s);
-      localStorage.removeItem(STORE_KEY);
-      return false;
+      s.date          = todayKey();
+      s.totalPomos    = 0;
+      s.totalBreaks   = 0;
+      s.totalFocusSec = 0;
+      s.pomosInCycle  = 0;
+      s.sessionHistory = [];
+      s.timeLog       = [];
+      // Fall through and apply the rest of the state normally.
     }
 
     // Config — repair individual values defensively
@@ -418,8 +429,10 @@ function exportData(){
   const blob = new Blob([JSON.stringify({export:raw,archive,exportedAt:new Date().toISOString()},null,2)],{type:'application/json'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'odtaulai-full-backup-'+todayKey()+'.json';
+  const fname = 'odtaulai-full-backup-'+todayKey()+'.json';
+  a.download = fname;
   a.click(); URL.revokeObjectURL(a.href);
+  if(typeof showExportToast === 'function') showExportToast('Exported full backup — '+fname);
 }
 
 function importData(file){
@@ -520,7 +533,9 @@ function _taskToExportRow(t){
 // CSV helpers
 function _csvEscape(v){
   if(v == null) return '';
-  const s = String(v);
+  let s = String(v);
+  // Neutralize spreadsheet formula injection (=, +, -, @, tab at cell start)
+  if(/^[=+\-@\t\r]/.test(s)) s = "'" + s;
   // Escape if contains comma, quote, newline, or leading/trailing whitespace
   if(/[",\n\r]/.test(s) || s !== s.trim()){
     return '"' + s.replace(/"/g, '""') + '"';
@@ -564,6 +579,7 @@ function exportTasksCSV(){
   a.download = 'odtaulai-tasks-'+todayKey()+'.csv';
   a.click();
   URL.revokeObjectURL(a.href);
+  if(typeof showExportToast === 'function') showExportToast('Exported CSV — odtaulai-tasks-'+todayKey()+'.csv');
 }
 
 // ── Export tasks as JSON (full fidelity) ──────────────────────────────────
@@ -602,9 +618,11 @@ function exportTasksJSON(){
   const blob = new Blob([JSON.stringify(payload, null, 2)], {type: 'application/json'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'odtaulai-tasks-'+todayKey()+'.json';
+  const jname = 'odtaulai-tasks-'+todayKey()+'.json';
+  a.download = jname;
   a.click();
   URL.revokeObjectURL(a.href);
+  if(typeof showExportToast === 'function') showExportToast('Exported JSON — '+jname);
 }
 
 // ── CSV parser (handles quoted fields with embedded commas/newlines/quotes) ─
@@ -870,7 +888,16 @@ function archiveDay(state){
     });
     while(archives.length>90) archives.shift();
     localStorage.setItem(ARCHIVE_KEY, JSON.stringify(archives));
-  }catch(e){}
+  }catch(e){ console.warn('[storage] archiveDay failed', e); }
+}
+
+let _autoSaveDebounce = null;
+function queueAutoSave(){
+  clearTimeout(_autoSaveDebounce);
+  _autoSaveDebounce = setTimeout(() => {
+    _autoSaveDebounce = null;
+    saveState('auto');
+  }, 450);
 }
 
 let _saveIndLast = 0;
@@ -885,6 +912,6 @@ function showSaveIndicator(){
 }
 
 // Auto-save every 10s, on tab hide, and on unload (no save pill)
-setInterval(() => saveState('auto'), 10000);
-document.addEventListener('visibilitychange', ()=>{ if(document.hidden) saveState('auto'); });
+setInterval(() => queueAutoSave(), 10000);
+document.addEventListener('visibilitychange', ()=>{ if(document.hidden) queueAutoSave(); });
 window.addEventListener('beforeunload', () => saveState('unload'));

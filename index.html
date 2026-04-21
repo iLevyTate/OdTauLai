@@ -8,12 +8,28 @@
 <!-- PWA meta -->
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0a1320">
-<meta name="description" content="ODTAULAI — understands task meaning and context on your device (embedding model, not chat). Pomodoro + tasks, semantic search, smart metadata, duplicates, values alignment, auto-organize lists. ~33 MB, offline. No account, no tracking.">
+<meta name="description" content="Pomodoro deep-work timer and ClickUp-style task manager that uses on-device local embeddings to intelligently route your tasks, track your time, and ensure value alignment, all without your data ever leaving your machine.">
+<!-- Link preview (Open Graph / Twitter) — og:image must be absolute; change base if Pages URL or domain differs -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="ODTAULAI">
+<meta property="og:title" content="ODTAULAI · Personal Task Manager">
+<meta property="og:description" content="Pomodoro deep-work timer and ClickUp-style task manager that uses on-device local embeddings to intelligently route your tasks, track your time, and ensure value alignment, all without your data ever leaving your machine.">
+<meta property="og:url" content="https://ilevytate.github.io/ODTAULAI/">
+<meta property="og:image" content="https://ilevytate.github.io/ODTAULAI/icons/icon-512.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="512">
+<meta property="og:image:height" content="512">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="ODTAULAI · Personal Task Manager">
+<meta name="twitter:description" content="Pomodoro deep-work timer and ClickUp-style task manager that uses on-device local embeddings to intelligently route your tasks, track your time, and ensure value alignment, all without your data ever leaving your machine.">
+<meta name="twitter:image" content="https://ilevytate.github.io/ODTAULAI/icons/icon-512.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="ODTAULAI">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="application-name" content="ODTAULAI">
+<!-- CSP: pragmatic defaults — block drive-by nasties but don’t fight real usage (calendars over HTTP on localhost/LAN, any HTTPS feed/proxy, CDNs, WASM embeddings, PeerJS). Mixed http content is still blocked by the browser when the app is served over HTTPS. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' http: https: https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://cdn-lfs.huggingface.co https://hf.co https://*.hf.co https://unpkg.com https://api.peerjs.com https://*.peerjs.com wss://*.peerjs.com wss://0.peerjs.com wss://1.peerjs.com wss://peerjs.com;">
 
 <!-- Icons -->
 <link rel="manifest" href="manifest.json" id="pwa-manifest">
@@ -85,8 +101,8 @@
       <span class="ai-chip-label" aria-hidden="true">AI</span>
       <span id="aiChipLive" class="ai-chip-sr" aria-live="polite"></span>
     </button>
-    <button id="themeToggleBtn" onclick="toggleTheme()" title="Toggle theme" style="width:38px;height:38px;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-sm);color:var(--text-2);font-size:16px;cursor:pointer">🌙</button>
-    <button onclick="openCmdK()" title="Command palette (Ctrl+K)" style="width:38px;height:38px;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-sm);color:var(--text-2);font-size:14px;cursor:pointer">⌘K</button>
+    <button type="button" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle theme" style="width:38px;height:38px;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-sm);color:var(--text-2);font-size:16px;cursor:pointer">🌙</button>
+    <button type="button" id="cmdKBtn" onclick="openCmdK()" title="Command palette (Ctrl+K or ⌘K)" style="width:38px;height:38px;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-sm);color:var(--text-2);font-size:14px;cursor:pointer">⌘K</button>
   </div>
 
   <!-- Tasks (primary ClickUp-style task manager) -->
@@ -112,7 +128,9 @@
 
     <div class="task-search-bar">
       <div class="task-search-row">
-        <input type="text" class="task-search" id="taskSearch" placeholder="🔍 Search tasks…" oninput="updateTaskFilters()">
+        <input type="text" class="task-search" id="taskSearch" placeholder="🔍 Search tasks…" oninput="updateTaskFilters()" autocomplete="off">
+        <button type="button" class="task-search-clear" id="taskSearchClear" onclick="clearTaskSearch()" style="display:none" aria-label="Clear search">×</button>
+        <span class="task-search-mode-pill" id="taskSearchSemanticPill" style="display:none">Semantic</span>
         <label class="task-search-semantic" title="Rank by meaning (requires model loaded)">
           <input type="checkbox" id="taskSearchSemantic" onchange="toggleTaskSearchSemantic()"> Semantic
         </label>
@@ -145,7 +163,8 @@
       <label class="task-tb-check" title="Include completed tasks in the All view">
         <input type="checkbox" id="showCompletedAll" onchange="onShowCompletedToggle()"> Show completed
       </label>
-      <button class="filters-toggle" id="filtersToggle" onclick="toggleFiltersPanel()" title="Filters & sort">
+      <span class="filters-summary" id="filtersSummary" aria-live="polite"></span>
+      <button type="button" class="filters-toggle" id="filtersToggle" onclick="toggleFiltersPanel()" title="Filters & sort">
         <span class="ft-icon">⚙</span>
         <span class="ft-label">Filters</span>
         <span class="ft-count" id="filtersActiveCount" style="display:none">0</span>
@@ -216,6 +235,12 @@
       <div class="tb-item"><div class="tb-num" id="tbWeek">0</div><div class="tb-lbl">Week</div></div>
       <div class="tb-divider"></div>
       <div class="tb-item"><div class="tb-num done" id="tbDoneToday">0</div><div class="tb-lbl">Done</div></div>
+      <button type="button" class="tb-snooze" onclick="snoozeTodayBanner()" title="Hide this banner until tomorrow">Snooze</button>
+    </div>
+
+    <div id="swipeTipBanner" class="swipe-tip-banner" style="display:none" role="status">
+      <span class="swipe-tip-msg">Tip: swipe right on a task to mark done · swipe left to archive</span>
+      <button type="button" class="swipe-tip-dismiss" onclick="dismissSwipeTip()">Got it</button>
     </div>
 
     <!-- Archived notice (only shown in archive view) -->
@@ -504,6 +529,7 @@
   <div class="cmdk-panel">
     <input class="cmdk-input" id="cmdkInput" placeholder="Search tasks, actions, views..." oninput="renderCmdK()" onkeydown="cmdkKeydown(event)">
     <div class="cmdk-results" id="cmdkResults"></div>
+    <div class="cmdk-foot" id="cmdkFoot"></div>
   </div>
 </div>
 
@@ -527,12 +553,13 @@
 </div>
 
 <!-- Task Detail Modal -->
-<div class="modal-overlay" id="taskModal" onclick="if(event.target===this)closeTaskDetail()">
+<div class="modal-overlay" id="taskModal" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle" onclick="if(event.target===this)closeTaskDetail()">
   <div class="modal">
+    <h2 class="sr-only" id="taskModalTitle">Task details</h2>
     <div class="modal-head">
-      <button class="task-checkbox" id="mdCheckbox" onclick="toggleTaskDone()"></button>
-      <input class="mfield-in" id="mdName" style="flex:1;font-size:14px;font-weight:700" placeholder="Task name">
-      <button class="modal-close" onclick="closeTaskDetail()">✕</button>
+      <button type="button" class="task-checkbox" id="mdCheckbox" onclick="toggleTaskDone()"></button>
+      <input class="mfield-in" id="mdName" style="flex:1;font-size:14px;font-weight:700" placeholder="Task name" aria-label="Task name">
+      <button type="button" class="modal-close" onclick="closeTaskDetail()" aria-label="Close task">✕</button>
     </div>
     <div class="modal-body">
       <div class="modal-stat" id="mdStats"></div>
@@ -691,6 +718,7 @@
 </div>
 
 <!-- App modules — load order matters (globals first, init last) -->
+<script src="js/version.js"></script>
 <script src="js/icons.js"></script>
 <script src="js/utils.js"></script>
 <script src="js/storage.js"></script>

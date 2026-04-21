@@ -130,7 +130,7 @@ function executeIntelOp(op){
       snap = { type: 'updated', id: t.id, before: { ...t } };
       const allow = ['name','priority','status','dueDate','startDate','effort','energyLevel','context','category','description','url','estimateMin','starred','type','valuesAlignment','valuesNote','tags'];
       allow.forEach(f => { if(a[f] !== undefined) t[f] = a[f]; });
-      if(t.status === 'done' && !t.completedAt) t.completedAt = timeNow();
+      if(t.status === 'done' && !t.completedAt) t.completedAt = stampCompletion();
       if(t.status !== 'done') t.completedAt = null;
       break;
     }
@@ -141,7 +141,7 @@ function executeIntelOp(op){
       if(t.recur && typeof completeHabitCycle === 'function'){
         completeHabitCycle(t);
       } else {
-        t.status = 'done'; t.completedAt = timeNow();
+        t.status = 'done'; t.completedAt = stampCompletion();
       }
       break;
     }
@@ -1183,7 +1183,7 @@ function _renderSmartAddChips(s){
   if(s.context) chips.push(`<span class="sa-chip" data-tip="${ctxTips[s.context] || 'Context'} — tap to remove" onclick="smartAddRemove('context')">${s.context} ×</span>`);
   if(s.energyLevel) chips.push(`<span class="sa-chip" data-tip="Energy — tap to remove" onclick="smartAddRemove('energyLevel')"><span class="sa-chip-ic">${ic(s.energyLevel === 'high' ? 'flame' : 'leaf')}</span> ${s.energyLevel} ×</span>`);
   if(s.dueDate) chips.push(`<span class="sa-chip" data-tip="Due date — tap to remove" onclick="smartAddRemove('dueDate')"><span class="sa-chip-ic">${ic('calendar')}</span> ${s.dueDate} ×</span>`);
-  if(s.tags && s.tags.length) s.tags.forEach(tag => chips.push(`<span class="sa-chip" data-tip="Tag — tap to remove" onclick="smartAddRemoveTag('${esc(tag)}')">#${esc(tag)} ×</span>`));
+  if(s.tags && s.tags.length) s.tags.forEach(tag => chips.push(`<span class="sa-chip" data-tip="Tag — tap to remove" data-sa-tag="${encodeURIComponent(tag)}">#${esc(tag)} ×</span>`));
   prev.innerHTML = `
     <span class="smart-add-hint">Suggestions — tap to remove, Enter to add:</span>
     <div class="sa-chips">${chips.join('')}</div>`;
@@ -1316,3 +1316,16 @@ window.intelToggleAllPending = intelToggleAllPending;
 window.syncHeaderAIChip = syncHeaderAIChip;
 window.syncSemanticSearchUi = syncSemanticSearchUi;
 window.headerAIClick = headerAIClick;
+
+document.addEventListener('click', function _smartAddTagDelegate(e){
+  const prev = document.getElementById('smartAddPreview');
+  if(!prev || !prev.contains(e.target)) return;
+  const chip = e.target.closest('[data-sa-tag]');
+  if(!chip) return;
+  e.preventDefault();
+  const enc = chip.getAttribute('data-sa-tag');
+  if(enc == null) return;
+  try{
+    smartAddRemoveTag(decodeURIComponent(enc));
+  }catch(_){}
+});

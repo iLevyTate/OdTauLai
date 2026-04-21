@@ -20,8 +20,21 @@ let _syncStatus  = 'off';  // 'off' | 'waiting' | 'connected' | 'error'
 let _myRoomCode  = null;
 let _lastSyncAt  = null;
 let _connectTimeoutId = null;
+let _pendingInboundConn = null;
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
+
+function _clampSyncTs(ts){
+  let n = typeof ts === 'number' ? ts : NaN;
+  if(!Number.isFinite(n) && ts != null){
+    const p = Date.parse(String(ts));
+    n = Number.isFinite(p) ? p : NaN;
+  }
+  if(!Number.isFinite(n)) return 0;
+  const now = Date.now();
+  if(n > now + 300000) return now;
+  return n;
+}
 
 function _genCode() {
   let code = '';
@@ -145,8 +158,8 @@ function _mergeState(remote) {
     if (!lt) {
       localMap.set(rt.id, rt);
     } else {
-      const lLM = lt.lastModified || lt.completedAt || 0;
-      const rLM = rt.lastModified || rt.completedAt || 0;
+      const lLM = _clampSyncTs(lt.lastModified || lt.completedAt || 0);
+      const rLM = _clampSyncTs(rt.lastModified || rt.completedAt || 0);
       // Only overwrite if remote is strictly newer (tie goes to local)
       if (rLM > lLM) localMap.set(rt.id, rt);
     }
@@ -176,6 +189,42 @@ function _mergeState(remote) {
 }
 
 // ── Connection handling ──────────────────────────────────────────────────────
+
+function syncHideIncomingBanner(){
+  const b = document.getElementById('syncIncomingBar');
+  if(b) b.remove();
+}
+
+function syncShowIncomingBanner(peerLabel){
+  syncHideIncomingBanner();
+  const bar = document.createElement('div');
+  bar.id = 'syncIncomingBar';
+  bar.className = 'sync-incoming-bar';
+  const safePeer = (typeof esc === 'function') ? esc(String(peerLabel || 'unknown')) : String(peerLabel || 'unknown');
+  bar.innerHTML = '<div class="sync-incoming-inner"><strong>Incoming sync</strong> from <code>'+safePeer+'</code> — accept only if this is your device.</div>'
+    +'<div class="sync-incoming-actions">'
+    +'<button type="button" class="btn-primary btn-sm" id="syncAcceptInbound">Accept</button>'
+    +'<button type="button" class="btn-ghost btn-sm" id="syncRejectInbound">Reject</button></div>';
+  document.body.appendChild(bar);
+  document.getElementById('syncAcceptInbound').onclick = () => syncAcceptInbound();
+  document.getElementById('syncRejectInbound').onclick = () => syncRejectInbound();
+}
+
+function syncAcceptInbound(){
+  const conn = _pendingInboundConn;
+  if(!conn) return;
+  _pendingInboundConn = null;
+  syncHideIncomingBanner();
+  if(_conn){ try{ _conn.close(); }catch(e){} _conn = null; }
+  _wireConn(conn);
+}
+
+function syncRejectInbound(){
+  const conn = _pendingInboundConn;
+  _pendingInboundConn = null;
+  syncHideIncomingBanner();
+  if(conn){ try{ conn.close(); }catch(e){} }
+}
 
 function _wireConn(conn) {
   _conn = conn;
@@ -280,8 +329,23 @@ async function syncInit() {
   });
 
   _peer.on('connection', (conn) => {
-    // Incoming connection from peer
-    _wireConn(conn);
+    if(!_syncEnabled){ try{ conn.close(); }catch(e){} return; }
+    if(_conn && _conn.open){ try{ conn.close(); }catch(e){} return; }
+    if(_pendingInboundConn){ try{ conn.close(); }catch(e){} return; }
+    _pendingInboundConn = conn;
+    conn.on('close', () => {
+      if(_pendingInboundConn === conn){
+        _pendingInboundConn = null;
+        syncHideIncomingBanner();
+      }
+    });
+    conn.on('error', () => {
+      if(_pendingInboundConn === conn){
+        _pendingInboundConn = null;
+        syncHideIncomingBanner();
+      }
+    });
+    syncShowIncomingBanner(_idToCode(conn.peer));
   });
 
   _peer.on('error', (err) => {

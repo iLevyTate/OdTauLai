@@ -216,7 +216,13 @@ function expandEventToDateRange(event, windowDays = 180){
 
   const interval = parseInt(params.INTERVAL || '1', 10);
   const until = params.UNTIL ? parseICSDate(params.UNTIL, false) : null;
-  const count = params.COUNT ? parseInt(params.COUNT, 10) : null;
+  const countSpecified = params.COUNT !== undefined && String(params.COUNT).length > 0;
+  const countParsed = countSpecified ? parseInt(params.COUNT, 10) : null;
+  if(countSpecified && (!Number.isFinite(countParsed) || countParsed <= 0)){
+    return [];
+  }
+  const count = countParsed;
+  const countActive = countSpecified && Number.isFinite(count) && count > 0;
   // BYDAY — e.g. "MO,WE,FR" — for weekly events that fire on multiple days per week
   const BY_DAY_MAP = { SU:0, MO:1, TU:2, WE:3, TH:4, FR:5, SA:6 };
   const byDays = params.BYDAY
@@ -245,9 +251,9 @@ function expandEventToDateRange(event, windowDays = 180){
                     String(occ.getDate()).padStart(2,'0');
         if(until && iso > until.iso) continue;
         results.push({ ...event, dateISO: iso });
-        if(count && results.length >= count) break;
+        if(countActive && results.length >= count) break;
       }
-      if(count && results.length >= count) break;
+      if(countActive && results.length >= count) break;
       current.setDate(current.getDate() + 7 * interval);
     } else {
       // Standard path — one occurrence per interval
@@ -257,7 +263,7 @@ function expandEventToDateRange(event, windowDays = 180){
                     String(current.getDate()).padStart(2,'0');
         if(until && iso > until.iso) break;
         results.push({ ...event, dateISO: iso });
-        if(count && results.length >= count) break;
+        if(countActive && results.length >= count) break;
       }
       if(freq === 'DAILY')        current.setDate(current.getDate() + interval);
       else if(freq === 'WEEKLY')  current.setDate(current.getDate() + 7 * interval);
@@ -275,6 +281,18 @@ function expandEventToDateRange(event, windowDays = 180){
   });
 }
 
+const CAL_FETCH_MAX_BYTES = 2_000_000;
+const CAL_FETCH_TIMEOUT_MS = 25000;
+
+function _calFetchUrlOk(urlStr){
+  let u;
+  try{ u = new URL(urlStr, window.location.href); }
+  catch(e){ return false; }
+  if(u.protocol !== 'http:' && u.protocol !== 'https:') return false;
+  if(location.protocol === 'https:' && u.protocol === 'http:') return false;
+  return true;
+}
+
 // ── Fetch: try direct, fall back to proxy if configured ────────────────────
 async function fetchICSContent(feed){
   if(feed.content){ return feed.content; }      // paste mode — already have it
@@ -289,9 +307,20 @@ async function fetchICSContent(feed){
       : proxy + (proxy.includes('?') ? '&' : '?') + 'url=' + encodeURIComponent(feed.url);
   }
 
-  const res = await fetch(fetchUrl, { cache: 'no-cache' });
+  if(!_calFetchUrlOk(fetchUrl)) throw new Error('Calendar URL must be http(s)');
+
+  const ac = new AbortController();
+  const to = setTimeout(() => ac.abort(), CAL_FETCH_TIMEOUT_MS);
+  let res;
+  try{
+    res = await fetch(fetchUrl, { cache: 'no-cache', signal: ac.signal });
+  }finally{
+    clearTimeout(to);
+  }
   if(!res.ok) throw new Error(`HTTP ${res.status}`);
-  return await res.text();
+  const text = await res.text();
+  if(text.length > CAL_FETCH_MAX_BYTES) throw new Error('Calendar response too large');
+  return text;
 }
 
 // ── Sync a single feed: fetch + parse + store ──────────────────────────────
@@ -408,7 +437,7 @@ function renderCalFeedsPanel(){
           : `<span style="color:#2ecc71;font-size:10px">✓ ${evCount} events · ${lastSync}</span>`;
         return `
           <div class="calfeed-row" data-id="${f.id}">
-            <span class="calfeed-dot" style="background:${f.color}"></span>
+            <span class="calfeed-dot" style="background:${typeof sanitizeListColor==='function'?sanitizeListColor(f.color):'#888'}"></span>
             <div class="calfeed-info">
               <div class="calfeed-label">${esc(f.label)}</div>
               ${status}
