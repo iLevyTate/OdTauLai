@@ -76,7 +76,7 @@ A derived impact score ranks every active task from signals you already have —
 - **Stopwatch** with laps.
 - **Repeating chimes** (e.g. posture check every 15 min).
 - **Background‑safe audio** — timers still chime when the tab is minimized: audio events are pre‑scheduled on the Web Audio clock (immune to `setInterval` throttling), a silent 20 Hz oscillator keeps the tab alive, **Media Session API** puts controls in the OS, **Wake Lock** on mobile.
-- **Picture‑in‑picture mini timer** that follows you across tabs.
+- **Floating mini timer** overlay that stays visible when you switch away from the Timer tab.
 
 ### ClickUp‑style tasks
 
@@ -200,7 +200,7 @@ ODTAULAI **does**:
 - fetch calendar feeds you subscribe to (those servers see you),
 - open a WebRTC connection to a device you explicitly pair with (PeerJS signalling server sees the handshake, not the payload).
 
-You can verify all of the above by searching the source for `fetch(`, `XMLHttpRequest`, or `new WebSocket(` — there are no other network calls.
+To audit outbound traffic yourself, search the source for `fetch(`, dynamic `import(`, `XMLHttpRequest`, and `new WebSocket(` — the embedding stack also loads workers/modules from CDNs, and PeerJS uses WebSockets internally for signalling when sync is enabled.
 
 ---
 
@@ -215,6 +215,7 @@ ODTAULAI/
 ├── sw.js                     service worker (shell precache)
 ├── css/main.css              themed design system with CSS variables
 ├── js/
+│   ├── version.js            release id (keep in sync with sw.js cache name)
 │   ├── utils.js              helpers, date, DOM
 │   ├── storage.js            localStorage + IndexedDB persistence
 │   ├── nlparse.js            natural-language quick-add (chrono-node)
@@ -337,6 +338,8 @@ If you need any of the above, this isn't the right app. That's the point.
 
 ## Contributing
 
+**Git hygiene confession:** For large stretches of this repo’s life I treated `main` like the only lane on the highway — straight commits, no scenic detours through feature branches. That is *not* how the textbooks say to do it; it is how you ship when your branching strategy is “hope and `git push`.” If you contribute here, feel free to be the responsible one and use PRs — I’ll wave from the shoulder lane.
+
 Pull requests welcome. Keep it:
 
 - vanilla (no framework, no build step),
@@ -344,7 +347,7 @@ Pull requests welcome. Keep it:
 - small (every feature earns its kilobytes),
 - accessible (keyboard and screen reader).
 
-Run `node --check js/*.js` before committing. There's no test framework — verification is manual: 360 / 390 / 640 / 960 widths, both themes, `file://` and HTTPS, first‑load embedding progress visible, PWA install still works.
+Before committing, run `node --check` on the same file list as [.github/workflows/ci.yml](.github/workflows/ci.yml) (or copy the one‑liner from that workflow), then **`npm test`** (runs [`scripts/run-tests.mjs`](scripts/run-tests.mjs) so tests behave the same on Windows, macOS, and CI). Full verification is still manual: 360 / 390 / 640 / 960 widths, both themes, `file://` and HTTPS, first‑load embedding progress visible, PWA install still works.
 
 ---
 
