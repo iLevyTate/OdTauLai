@@ -6,25 +6,49 @@ flowchart LR
     index[index.html]
     css[css/main.css]
     sw[sw.js]
+    manifest[manifest.json]
   end
-  subgraph modules [Vanilla JS globals]
+  subgraph core [Core modules]
     version[js/version.js]
     utils[js/utils.js]
+    icons[js/icons.js]
+    timer[js/timer.js<br/>state]
     storage[js/storage.js]
     tasks[js/tasks.js]
     ui[js/ui.js]
-    intel[js/intel.js]
-    sync[js/sync.js]
-    cal[js/calfeeds.js]
+    audio[js/audio.js]
+    nlparse[js/nlparse.js]
     app[js/app.js]
+    pwa[js/pwa.js]
   end
-  index --> version
-  index --> utils
-  index --> storage
+  subgraph intelligence [On-device AI]
+    intel[js/intel.js<br/>embeddings]
+    embedstore[js/embed-store.js]
+    intelFeat[js/intel-features.js]
+    gen[js/gen.js<br/>LLM]
+    ask[js/ask.js]
+    toolschema[js/tool-schema.js]
+    ai[js/ai.js<br/>UI glue]
+  end
+  subgraph integrations [Integrations]
+    sync[js/sync.js<br/>P2P]
+    cal[js/calfeeds.js]
+  end
+  index --> version --> utils --> icons --> timer --> storage --> nlparse --> audio --> tasks --> ui
+  index --> intel --> embedstore --> intelFeat
+  index --> gen --> ask --> toolschema --> ai
+  index --> sync
+  index --> cal
+  index --> pwa
   index --> app
-  storage --> tasks
-  ui --> tasks
-  intel --> storage
+  app --> intel
+  app --> gen
+  ai --> gen
+  ai --> intel
+  ui --> ask
+  ask --> intel
+  ask --> gen
+  intelFeat --> tasks
   sync --> storage
   cal --> storage
 ```

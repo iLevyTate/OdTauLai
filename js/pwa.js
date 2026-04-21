@@ -7,7 +7,7 @@
     <circle cx="256" cy="256" r="160" stroke="#1a2d44" stroke-width="18"/>
     <path d="M 256 96 A 160 160 0 1 1 96 256" stroke="#3d8bcc" stroke-width="22" stroke-linecap="round"/>
     <circle cx="256" cy="96" r="14" fill="#48b5e0"/>
-    <text x="256" y="292" text-anchor="middle" font-family="monospace" font-weight="800" font-size="90" fill="#e2e8f0">26</text>
+    <text x="256" y="292" text-anchor="middle" font-family="monospace" font-weight="800" font-size="90" fill="#e2e8f0">28</text>
   </svg>`;
   const iconUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(iconSvg);
 
@@ -18,7 +18,7 @@
     const manifest = {
       name: 'ODTAULAI — On device task app using local ambient intelligence',
       short_name: 'ODTAULAI',
-      description: 'Pomodoro + tasks with on-device semantic understanding of task meaning and context (embedding model; no generative chat).',
+      description: 'Pomodoro + tasks with on-device semantic understanding of task meaning and context. Optional opt-in generative Ask mode runs fully on-device — no data leaves the browser.',
       start_url: location.pathname.split('/').slice(0,-1).join('/') + '/' + (location.pathname.split('/').pop() || ''),
       scope: location.pathname.split('/').slice(0,-1).join('/') + '/',
       display: 'standalone',
@@ -48,7 +48,7 @@
       console.warn('External sw.js failed, falling back to inline SW:', err);
       // Fallback: inline SW via blob URL
       const swCode = `
-        const CACHE = 'odtaulai-v27-inline';
+        const CACHE = 'odtaulai-v28-inline';
         self.addEventListener('install', e => self.skipWaiting());
         self.addEventListener('activate', e => e.waitUntil(clients.claim()));
         self.addEventListener('fetch', e => {
