@@ -552,7 +552,8 @@ function renderTaskItem(t,depth){
     const cdef=(typeof getCategoryDef==='function')?getCategoryDef(t.category):null;
     const catLbl=cdef?cdef.label:t.category;
     const catSvg=(typeof window.categoryIcon==='function')?window.categoryIcon(t.category):'';
-    signalChips+='<span class="task-sig sig-cat" title="'+escAttr(t.valuesNote||catLbl)+'"><span class="sig-cat-ic">'+catSvg+'</span>'+esc(catLbl)+'</span>';
+    const catColor=cdef&&cdef.color?cdef.color:'var(--cat-general)';
+    signalChips+='<span class="task-sig sig-cat" style="--cat-color:'+escAttr(catColor)+'" title="'+escAttr(t.valuesNote||catLbl)+'"><span class="sig-cat-ic">'+catSvg+'</span>'+esc(catLbl)+'</span>';
   }
   if(!dense && t.valuesAlignment&&t.valuesAlignment.length){
     signalChips+='<span class="task-sig sig-values" title="Serves: '+escAttr(t.valuesAlignment.join(', '))+'">◈</span>';
@@ -746,16 +747,6 @@ function openTaskDetail(id){
     b.onclick=function(){t.energyLevel=t.energyLevel===key?null:key;[...enChips.children].forEach(c=>c.classList.remove('active'));if(t.energyLevel)b.classList.add('active')};
     enChips.appendChild(b)
   });
-  // Context chips (from Settings → Classifications)
-  const cxChips=gid('mdContextChips');cxChips.innerHTML='';
-  const ctxList=(typeof getActiveContexts==='function')?getActiveContexts():[];
-  ctxList.forEach(row=>{
-    const key=row.id,lbl=row.label||row.id;
-    const b=document.createElement('button');b.className='mfield-chip-btn'+((t.context||null)===key?' active':'');
-    b.textContent=lbl;
-    b.onclick=function(){t.context=t.context===key?null:key;[...cxChips.children].forEach(c=>c.classList.remove('active'));if(t.context)b.classList.add('active')};
-    cxChips.appendChild(b)
-  });
   // Recurrence
   const rc=gid('mdRecur');if(rc){rc.innerHTML='';
     [['none','No repeat'],['daily','Daily'],['weekdays','Weekdays'],['weekly','Weekly'],['monthly','Monthly']].forEach(([key,lbl])=>{
@@ -774,6 +765,11 @@ function openTaskDetail(id){
     const key=row.id,lbl=row.label||row.id;
     const b=document.createElement('button');b.className='mfield-chip-btn'+((t.category||null)===key?' active':'');
     b.textContent=lbl;
+    const cdef=(typeof getCategoryDef==='function')?getCategoryDef(key):null;
+    if(cdef&&cdef.color){
+      b.style.borderColor='color-mix(in srgb, '+cdef.color+' 40%, var(--border))';
+      b.style.color=cdef.color;
+    }
     b.onclick=function(){t.category=t.category===key?null:key;[...catChips.children].forEach(c=>c.classList.remove('active'));if(t.category)b.classList.add('active')};
     catChips.appendChild(b)
   });
@@ -785,6 +781,17 @@ function openTaskDetail(id){
   // Blocked by
   renderBlockedBy(id);
   refreshMdSimilarTasks(id);
+  // Show the Break-down accordion only when a generative model is loaded.
+  // Content is lazy-rendered on toggle to avoid spending tokens unless asked.
+  const bdWrap = gid('mdBreakdownWrap');
+  if(bdWrap){
+    const llmOn = typeof isGenReady === 'function' && isGenReady();
+    bdWrap.style.display = llmOn ? '' : 'none';
+    const bdAcc = gid('mdBreakdownAccordion');
+    if(bdAcc) bdAcc.classList.remove('open');
+    const bdBody = gid('mdBreakdownBody');
+    if(bdBody){ bdBody.innerHTML = ''; delete bdBody.dataset.loaded; }
+  }
   renderMdHabitLog(t);
   gid('taskModal').classList.add('open');
   _taskModalPrevFocus=document.activeElement;
@@ -1108,6 +1115,18 @@ function showTab(tab){
 window.toggleSimilarAccordion = function(){
   const acc = gid('mdSimilarAccordion');
   if(acc) acc.classList.toggle('open');
+};
+
+window.toggleBreakdownAccordion = function(){
+  const acc = gid('mdBreakdownAccordion');
+  if(!acc) return;
+  const opening = !acc.classList.contains('open');
+  acc.classList.toggle('open');
+  // Lazy-load suggestions the first time the user opens the accordion.
+  const body = gid('mdBreakdownBody');
+  if(opening && body && !body.dataset.loaded){
+    if(typeof runMdBreakdown === 'function') runMdBreakdown();
+  }
 };
 
 function updateMiniTimer(){

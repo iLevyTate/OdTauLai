@@ -61,6 +61,8 @@ Scripts in [`index.html`](index.html) run in declaration order. There are no ES 
 
 Core mutable state (tasks, timer, goals, lists, …) lives primarily in [`js/timer.js`](js/timer.js). [`js/storage.js`](js/storage.js) snapshots that state to `localStorage` with an IndexedDB mirror and handles migrations.
 
+**Task classifications:** each task may have a `category` string id (life area). Defaults and user overrides live in `cfg.categories` (see [`js/intel-features.js`](js/intel-features.js): `ensureClassificationConfig`, `DEFAULT_CATEGORY_DEFS`). There is no separate `context` field on tasks — location-style grouping uses lists and tags.
+
 ## Release identity
 
 [`js/version.js`](js/version.js) sets `window.ODTAULAI_RELEASE`. The service worker cache name in [`sw.js`](sw.js) must stay aligned (see [`tests/version-sync.test.mjs`](tests/version-sync.test.mjs)).
@@ -86,7 +88,7 @@ user query
    ├──► top‑20 recently‑modified open tasks  ────────────►│ compact JSON lines (≤200 chars/task, ≤1800 chars total)
    │                                                      │
    ▼                                                      ▼
-[ system prompt: enumerate TOOL_SCHEMA + few‑shot ]   [ user prompt: context + request ]
+[ system prompt: enumerate TOOL_SCHEMA + few‑shot ]   [ user prompt: retrieved task snippets + request ]
                           │
                           ▼
                  genGenerate() — streaming

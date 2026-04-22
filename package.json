@@ -3,6 +3,10 @@
   "private": true,
   "description": "Static PWA — npm scripts are for CI and local checks only (no install step).",
   "scripts": {
-    "test": "node scripts/run-tests.mjs"
+    "test": "node scripts/run-tests.mjs",
+    "build:icons": "node scripts/build-icons.mjs"
+  },
+  "devDependencies": {
+    "@resvg/resvg-js": "^2.6.2"
   }
 }

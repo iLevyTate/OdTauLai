@@ -123,7 +123,7 @@ function defaultTaskProps(){return{
   listId:activeListId,archived:false,
   recur:null,order:Date.now(),
   remindAt:null,reminderFired:false,
-  type:'task',effort:null,energyLevel:null,context:null,
+  type:'task',effort:null,energyLevel:null,
   blockedBy:[],checklist:[],notes:[],url:null,completionNote:null,
   // v5 — values alignment
   category:null,        // life area id (customizable in Settings)

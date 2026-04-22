@@ -83,17 +83,10 @@ function _repairTask(t){
                     text:      _str(n.text, ''),
                     createdAt: _str(n.createdAt, ''),
                   })).filter(n=>n.text),
-    // v4 contextual fields
+    // v4+ task metadata
     type:         _enum(t.type, ['task','bug','idea','errand','waiting'], 'task'),
     effort:       _enum(t.effort, ['xs','s','m','l','xl'], null) ?? null,
     energyLevel:  _enum(t.energyLevel, ['high','low'], null) ?? null,
-    context:      (function(){
-      const c = t.context;
-      if(c == null || c === '') return null;
-      const s = String(c).trim();
-      if(!s) return null;
-      return s.length > 64 ? s.slice(0, 64) : s;
-    })(),
     // v5 values alignment — category id is user-extensible (custom classifications)
     category:     (function(){
       const c = t.category;
@@ -230,7 +223,7 @@ function saveState(reason){
     } else {
       // Cheap comparator — any field difference = changed
       const fieldsToCompare = ['name','status','priority','dueDate','startDate','description','tags',
-        'starred','archived','completedAt','effort','energyLevel','context','category',
+        'starred','archived','completedAt','effort','energyLevel','category',
         'valuesAlignment','parentId','listId','url','estimateMin','recur','remindAt','type','blockedBy',
         'completions','habitLastRecordedTotalSec',
         'totalSec','sessions','checklist','notes','_ext'];
@@ -560,7 +553,7 @@ const TASK_EXPORT_FIELDS = [
   'id','name','parentId','listId',
   'status','priority','starred','archived',
   'dueDate','startDate','remindAt','completedAt','created',
-  'category','effort','energyLevel','context','type',
+  'category','effort','energyLevel','type',
   'estimateMin','totalSec','sessions',
   'tags','valuesAlignment','blockedBy',
   'checklistDone','checklistTotal','notesCount',
@@ -590,7 +583,6 @@ function _taskToExportRow(t){
     category:        t.category || null,
     effort:          t.effort || null,
     energyLevel:     t.energyLevel || null,
-    context:         t.context || null,
     type:            t.type || 'task',
     estimateMin:     t.estimateMin || 0,
     totalSec:        t.totalSec || 0,
@@ -690,7 +682,7 @@ function exportTasksJSON(){
         dueDate: row.dueDate, startDate: row.startDate, remindAt: row.remindAt,
         completedAt: row.completedAt, created: row.created,
         category: row.category, effort: row.effort, energyLevel: row.energyLevel,
-        context: row.context, type: row.type,
+        type: row.type,
         estimateMin: row.estimateMin, totalSec: row.totalSec, sessions: row.sessions,
         tags: row.tags, valuesAlignment: row.valuesAlignment, blockedBy: row.blockedBy,
         checklist: row._checklist, notes: row._notes,
@@ -777,7 +769,6 @@ function _csvRowToTask(obj, existingTask){
   if('category' in obj)        T.category = str(obj.category);
   if('effort' in obj)          T.effort = str(obj.effort);
   if('energyLevel' in obj)     T.energyLevel = str(obj.energyLevel);
-  if('context' in obj)         T.context = str(obj.context);
   if('type' in obj)            T.type = obj.type || 'task';
   if('estimateMin' in obj)     T.estimateMin = num(obj.estimateMin);
   if('totalSec' in obj)        T.totalSec = num(obj.totalSec);
@@ -966,7 +957,7 @@ function archiveDay(state){
         totalSec:t.totalSec, sessions:t.sessions,
         parentId:t.parentId||null,
         status:t.status, priority:t.priority,
-        category:t.category, effort:t.effort, context:t.context,
+        category:t.category, effort:t.effort,
         type:t.type, energyLevel:t.energyLevel,
         dueDate:t.dueDate, completedAt:t.completedAt,
         valuesAlignment:t.valuesAlignment||[],

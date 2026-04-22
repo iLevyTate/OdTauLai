@@ -64,6 +64,8 @@
     copy:          '<rect x="8" y="8" width="13" height="13" rx="2" ry="2"/><path d="M4 16H3a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v1"/>',
     harmonize:     '<path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><path d="M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/><circle cx="12" cy="12" r="3"/>',
     spark:         '<path d="M12 3c.5 2.5 2 4 4.5 4.5-2.5.5-4 2-4.5 4.5-.5-2.5-2-4-4.5-4.5 2.5-.5 4-2 4.5-4.5z"/>',
+    wand:          '<path d="M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8L19 13M17.8 6.2L19 5M3 21l9-9M12.2 6.2L11 5"/>',
+    split:         '<path d="M8 3h5a2 2 0 0 1 2 2v5M8 21h5a2 2 0 0 0 2-2v-5M3 8h5M3 16h5"/>',
     // Schwartz values
     compass:       '<circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/>',
     trophy:        '<path d="M6 9H4a2 2 0 0 1-2-2V5h4"/><path d="M18 9h2a2 2 0 0 0 2-2V5h-4"/><path d="M6 3h12v7a6 6 0 0 1-12 0V3z"/><path d="M10 21h4"/><path d="M12 17v4"/>',
@@ -75,14 +77,13 @@
 
   // Life-category lookup by category key — used on task items and harmonize panels.
   const CATEGORY_ICON = {
-    health: 'heart',
-    finance: 'dollar',
-    work: 'briefcase',
-    relationships: 'users',
-    learning: 'book',
-    home: 'home',
-    personal: 'leaf',
-    other: 'pin',
+    bodyMindSpirit: 'leaf',
+    relationships: 'heart',
+    community: 'users',
+    jobLearningFinances: 'briefcase',
+    interests: 'sparkles',
+    personalCare: 'home',
+    general: 'pin',
   };
 
   /**

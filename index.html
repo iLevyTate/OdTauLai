@@ -34,6 +34,7 @@
 <!-- Icons -->
 <link rel="manifest" href="manifest.json" id="pwa-manifest">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" id="pwa-apple-icon">
+<link rel="icon" type="image/svg+xml" href="icons/icon-small.svg">
 <link rel="icon" href="favicon.ico" sizes="any">
 <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png" id="pwa-favicon">
 <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
@@ -55,7 +56,33 @@
 <div id="onlineStatus" class="offline-indicator" style="display:none" role="status" aria-live="polite"></div>
 <div class="container" id="mainTabpanels" role="main" aria-label="App content">
   <div class="header">
-    <h1><img src="icons/favicon-32.png" alt="" class="header-logo" width="32" height="32" onerror="this.style.display='none'">ODTAULAI</h1>
+    <h1>
+      <svg class="header-logo" viewBox="0 0 512 512" width="32" height="32" aria-hidden="true">
+        <defs>
+          <radialGradient id="hdrBg" cx="38%" cy="32%" r="78%">
+            <stop offset="0%" stop-color="#0e1a2e"/>
+            <stop offset="55%" stop-color="#0a1320"/>
+            <stop offset="100%" stop-color="#060c16"/>
+          </radialGradient>
+          <linearGradient id="hdrMark" x1="18%" y1="22%" x2="82%" y2="88%">
+            <stop offset="0%" stop-color="#9cc3ff"/>
+            <stop offset="45%" stop-color="#6aa8ff"/>
+            <stop offset="100%" stop-color="#3d7fd4"/>
+          </linearGradient>
+          <filter id="hdrGlow" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="b"/>
+            <feMerge>
+              <feMergeNode in="b"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+        </defs>
+        <rect width="512" height="512" rx="88" ry="88" fill="url(#hdrBg)"/>
+        <path d="M 119.2 177 A 158 158 0 1 1 177 392.8" fill="none" stroke="url(#hdrMark)" stroke-width="22" stroke-linecap="round"/>
+        <path d="M 168 268 L 228 328 L 352 184" fill="none" stroke="url(#hdrMark)" stroke-width="28" stroke-linecap="round" stroke-linejoin="round" filter="url(#hdrGlow)"/>
+      </svg>
+      ODTAULAI
+    </h1>
     <div class="header-mid">
       <div class="header-date" id="headerDate"></div>
       <button type="button" class="what-next-pill" id="whatNextBtn" onclick="openWhatNext()" title="Top-ranked next actions">What next?</button>
@@ -122,6 +149,7 @@
           oninput="maybeShowEnhanceBtn()"
           onkeydown="if(event.key==='Enter'){if(window._smartAddPreview){applySmartAddAndSubmit()}else{addTask()}}">
         <button class="task-enhance-btn" id="taskEnhanceBtn" onclick="smartAddEnhance()" style="display:none" title="Suggest metadata from your task history (embeddings)" data-icon="sparkles" aria-label="Smart-add suggestions"></button>
+        <button class="task-enhance-btn task-enhance-btn--llm" id="taskParseBtn" onclick="smartAddParseWithLLM()" style="display:none" title="Parse this freeform sentence with the on-device LLM" data-icon="wand" aria-label="Parse with LLM"></button>
       </div>
       <button class="task-add" onclick="if(window._smartAddPreview){applySmartAddAndSubmit()}else{addTask()}">+ Add</button>
     </div>
@@ -397,7 +425,7 @@
       <details class="set-section">
         <summary class="set-section-sum">Classifications</summary>
         <div class="set-section-body">
-          <p style="font-size:11px;color:var(--text-3);line-height:1.5;margin:0 0 10px">Customize life categories and contexts. Task data stores stable ids; rename labels anytime.</p>
+          <p style="font-size:11px;color:var(--text-3);line-height:1.5;margin:0 0 10px">Customize life areas (7 default groups). Task data stores stable ids; rename labels and accent colors anytime.</p>
           <div id="classificationManager"></div>
         </div>
       </details>
@@ -654,7 +682,7 @@
 
       <div class="mfield">
         <div class="mfield-lbl">Description</div>
-        <textarea class="mfield-textarea" id="mdDesc" placeholder="Context, acceptance criteria, links…"></textarea>
+        <textarea class="mfield-textarea" id="mdDesc" placeholder="Acceptance criteria, links, notes…"></textarea>
       </div>
 
       <details class="md-section">
@@ -709,7 +737,7 @@
         <summary class="md-section-sum">Classification</summary>
         <div class="md-section-body">
           <div class="mfield">
-            <div class="mfield-lbl">Life Category</div>
+            <div class="mfield-lbl">Life area</div>
             <div class="mfield-chips" id="mdCategoryChips"></div>
             <div id="mdValuesNote" style="font-size:11px;color:var(--text-3);margin-top:4px;font-style:italic"></div>
           </div>
@@ -724,8 +752,6 @@
             </div>
           </div>
           <div class="mfield">
-            <div class="mfield-lbl">Context</div>
-            <div class="mfield-chips" id="mdContextChips"></div>
           </div>
         </div>
       </details>
@@ -740,6 +766,14 @@
           <div class="mfield">
             <div class="mfield-lbl">Waiting on (blocked by)</div>
             <div id="mdBlockedBy"></div>
+          </div>
+          <div class="mfield md-similar-wrap" id="mdBreakdownWrap" style="display:none">
+            <button type="button" class="similar-acc-trigger" id="mdBreakdownTrigger" onclick="toggleBreakdownAccordion()">
+              <span>Break down with AI</span><span class="similar-acc-chevron">▼</span>
+            </button>
+            <div class="similar-acc-panel" id="mdBreakdownAccordion">
+              <div id="mdBreakdownBody" class="md-breakdown-body"></div>
+            </div>
           </div>
           <div class="mfield md-similar-wrap">
             <button type="button" class="similar-acc-trigger" id="mdSimilarTrigger" onclick="toggleSimilarAccordion()">

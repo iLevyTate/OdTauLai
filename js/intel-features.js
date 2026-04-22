@@ -3,9 +3,9 @@
  * Loads before ai.js — exports Schwartz constants for values UI + embeddings.
  */
 
-const LIFE_CATS = ['health','finance','work','relationships','learning','home','personal','other'];
+const LIFE_CATS = ['bodyMindSpirit','relationships','community','jobLearningFinances','interests','personalCare','general'];
 // Category / Schwartz icons are UI_ICONS keys, resolved to SVG at render time via window.icon()
-const CAT_ICON  = {health:'heart',finance:'dollar',work:'briefcase',relationships:'users',learning:'book',home:'home',personal:'leaf',other:'pin'};
+const CAT_ICON  = {bodyMindSpirit:'leaf',relationships:'heart',community:'users',jobLearningFinances:'briefcase',interests:'sparkles',personalCare:'home',general:'pin'};
 const SCHWARTZ = {
   'self-direction':{ icon:'compass', def:'Independent thought, creativity, freedom to choose your own goals.' },
   'stimulation':   { icon:'zap',     def:'Excitement, novelty, challenge, variety over routine.' },
@@ -26,21 +26,38 @@ window.SCHWARTZ = SCHWARTZ;
 window.VALUE_KEYS = VALUE_KEYS;
 
 const DEFAULT_CATEGORY_DEFS = [
-  { id: 'health', label: 'Health', icon: 'heart' },
-  { id: 'finance', label: 'Finance', icon: 'dollar' },
-  { id: 'work', label: 'Work', icon: 'briefcase' },
-  { id: 'relationships', label: 'Relationships', icon: 'users' },
-  { id: 'learning', label: 'Learning', icon: 'book' },
-  { id: 'home', label: 'Home', icon: 'home' },
-  { id: 'personal', label: 'Personal', icon: 'leaf' },
-  { id: 'other', label: 'Other', icon: 'pin' },
+  { id: 'bodyMindSpirit', label: 'Body, Mind & Spirit', icon: 'leaf', color: 'var(--cat-bodyMindSpirit)',
+    description: 'Physical health, mental wellness, spirituality',
+    coreValues: ['health', 'strength', 'spirituality', 'peace'] },
+  { id: 'relationships', label: 'Relationships', icon: 'heart', color: 'var(--cat-relationships)',
+    description: 'Family, friends, romantic partnerships',
+    coreValues: ['family', 'connection', 'loyalty', 'trust'] },
+  { id: 'community', label: 'Community', icon: 'users', color: 'var(--cat-community)',
+    description: 'Social groups, volunteering, civic engagement',
+    coreValues: ['service', 'justice', 'compassion'] },
+  { id: 'jobLearningFinances', label: 'Job, Learning & Finances', icon: 'briefcase', color: 'var(--cat-jobLearningFinances)',
+    description: 'Career, education, financial stability',
+    coreValues: ['achievement', 'growth', 'knowledge', 'leadership', 'security'] },
+  { id: 'interests', label: 'Interests', icon: 'sparkles', color: 'var(--cat-interests)',
+    description: 'Hobbies, creative pursuits, leisure activities',
+    coreValues: ['creativity', 'adventure', 'joy', 'humor'] },
+  { id: 'personalCare', label: 'Personal Care', icon: 'home', color: 'var(--cat-personalCare)',
+    description: 'Self-maintenance, routines, life management',
+    coreValues: ['balance', 'simplicity', 'patience', 'responsibility'] },
+  { id: 'general', label: 'General', icon: 'pin', color: 'var(--cat-general)',
+    description: 'Uncategorized or cross-domain tasks',
+    coreValues: [] },
 ];
-const DEFAULT_CONTEXT_DEFS = [
-  { id: 'work', label: 'Work', icon: 'briefcase' },
-  { id: 'home', label: 'Home', icon: 'home' },
-  { id: 'phone', label: 'Phone', icon: 'phone' },
-  { id: 'computer', label: 'Computer', icon: 'monitor' },
-  { id: 'errands', label: 'Errands', icon: 'car' },
+
+/** Preset accent colors (CSS variables) for the classification manager & chips */
+const CLASSIFICATION_COLOR_PRESETS = [
+  { value: 'var(--cat-bodyMindSpirit)', label: 'Purple — Body, Mind & Spirit' },
+  { value: 'var(--cat-relationships)', label: 'Red — Relationships' },
+  { value: 'var(--cat-community)', label: 'Amber — Community' },
+  { value: 'var(--cat-jobLearningFinances)', label: 'Green — Job, Learning & Finances' },
+  { value: 'var(--cat-interests)', label: 'Blue — Interests' },
+  { value: 'var(--cat-personalCare)', label: 'Pink — Personal Care' },
+  { value: 'var(--cat-general)', label: 'Gray — General' },
 ];
 
 function ensureClassificationConfig(c){
@@ -48,29 +65,31 @@ function ensureClassificationConfig(c){
   if(!Array.isArray(c.categories) || !c.categories.length){
     c.categories = DEFAULT_CATEGORY_DEFS.map(x => ({ ...x, hidden: false }));
   } else {
-    c.categories = c.categories.map(row => ({
-      id: String(row.id || '').trim().slice(0, 64) || null,
-      label: String(row.label || row.id || '').trim().slice(0, 80) || '',
-      icon: String(row.icon || 'pin').trim() || 'pin',
-      hidden: !!row.hidden,
-    })).filter(r => r.id);
+    c.categories = c.categories.map(row => {
+      const id = String(row.id || '').trim().slice(0, 64) || null;
+      const base = id ? DEFAULT_CATEGORY_DEFS.find(d => d.id === id) : null;
+      const coreRaw = row.coreValues;
+      const coreValues = Array.isArray(coreRaw)
+        ? coreRaw.map(v => String(v).trim()).filter(Boolean).slice(0, 32)
+        : (base && Array.isArray(base.coreValues) ? [...base.coreValues] : []);
+      let color = String(row.color || '').trim().slice(0, 80);
+      if(!color) color = base ? base.color : 'var(--cat-general)';
+      const desc = String(row.description != null ? row.description : (base ? base.description : '')).trim().slice(0, 500);
+      return {
+        id,
+        label: String(row.label || row.id || '').trim().slice(0, 80) || '',
+        icon: String(row.icon || 'pin').trim() || 'pin',
+        color,
+        description: desc,
+        coreValues,
+        hidden: !!row.hidden,
+      };
+    }).filter(r => r.id);
     if(!c.categories.length){
       c.categories = DEFAULT_CATEGORY_DEFS.map(x => ({ ...x, hidden: false }));
     }
   }
-  if(!Array.isArray(c.contexts) || !c.contexts.length){
-    c.contexts = DEFAULT_CONTEXT_DEFS.map(x => ({ ...x, hidden: false }));
-  } else {
-    c.contexts = c.contexts.map(row => ({
-      id: String(row.id || '').trim().slice(0, 64) || null,
-      label: String(row.label || row.id || '').trim().slice(0, 80) || '',
-      icon: String(row.icon || 'pin').trim() || 'pin',
-      hidden: !!row.hidden,
-    })).filter(r => r.id);
-    if(!c.contexts.length){
-      c.contexts = DEFAULT_CONTEXT_DEFS.map(x => ({ ...x, hidden: false }));
-    }
-  }
+  if('contexts' in c) delete c.contexts;
 }
 
 function hasClassificationCategory(cat){
@@ -80,13 +99,6 @@ function hasClassificationCategory(cat){
   ensureClassificationConfig(cfg);
   return (cfg.categories || []).some(c => c.id === cat);
 }
-function hasClassificationContext(ctx){
-  if(!ctx) return false;
-  if(['work','home','phone','computer','errands'].includes(ctx)) return true;
-  if(typeof cfg === 'undefined' || !cfg) return false;
-  ensureClassificationConfig(cfg);
-  return (cfg.contexts || []).some(c => c.id === ctx);
-}
 
 function getCategoryDef(id){
   if(!id) return null;
@@ -94,33 +106,34 @@ function getCategoryDef(id){
   const row = (typeof cfg !== 'undefined' && cfg && Array.isArray(cfg.categories))
     ? cfg.categories.find(x => x.id === id) : null;
   if(row){
-    return { id: row.id, label: row.label || row.id, icon: row.icon || 'pin' };
+    return {
+      id: row.id,
+      label: row.label || row.id,
+      icon: row.icon || 'pin',
+      color: row.color || 'var(--cat-general)',
+      description: row.description || '',
+      coreValues: Array.isArray(row.coreValues) ? row.coreValues : [],
+    };
+  }
+  const base = DEFAULT_CATEGORY_DEFS.find(x => x.id === id);
+  if(base){
+    return {
+      id: base.id,
+      label: base.label,
+      icon: base.icon,
+      color: base.color,
+      description: base.description,
+      coreValues: base.coreValues ? [...base.coreValues] : [],
+    };
   }
   const ic = CAT_ICON[id];
-  return { id, label: id, icon: ic || 'pin' };
-}
-
-function getContextDef(id){
-  if(!id) return null;
-  if(typeof cfg !== 'undefined' && cfg) ensureClassificationConfig(cfg);
-  const row = (typeof cfg !== 'undefined' && cfg && Array.isArray(cfg.contexts))
-    ? cfg.contexts.find(x => x.id === id) : null;
-  if(row){
-    return { id: row.id, label: row.label || row.id, icon: row.icon || 'pin' };
-  }
-  const fallback = { work: 'briefcase', home: 'home', phone: 'phone', computer: 'monitor', errands: 'car' };
-  return { id, label: id, icon: fallback[id] || 'pin' };
+  return { id, label: id, icon: ic || 'pin', color: 'var(--cat-general)', description: '', coreValues: [] };
 }
 
 function getActiveCategories(){
-  if(typeof cfg === 'undefined' || !cfg) return DEFAULT_CATEGORY_DEFS.slice();
+  if(typeof cfg === 'undefined' || !cfg) return DEFAULT_CATEGORY_DEFS.map(d => ({ ...d, hidden: false }));
   ensureClassificationConfig(cfg);
   return (cfg.categories || []).filter(c => !c.hidden);
-}
-function getActiveContexts(){
-  if(typeof cfg === 'undefined' || !cfg) return DEFAULT_CONTEXT_DEFS.slice();
-  ensureClassificationConfig(cfg);
-  return (cfg.contexts || []).filter(c => !c.hidden);
 }
 
 function slugClassId(label){
@@ -128,10 +141,10 @@ function slugClassId(label){
   return s || ('c' + Date.now().toString(36));
 }
 
-function classificationMove(kind, idx, dir){
+function classificationMove(idx, dir){
   if(typeof cfg === 'undefined' || !cfg) return;
   ensureClassificationConfig(cfg);
-  const arr = kind === 'cat' ? cfg.categories : cfg.contexts;
+  const arr = cfg.categories;
   const j = idx + dir;
   if(j < 0 || j >= arr.length) return;
   const tmp = arr[idx];
@@ -142,10 +155,10 @@ function classificationMove(kind, idx, dir){
   if(typeof saveState === 'function') saveState('user');
 }
 
-function classificationToggleHidden(kind, idx){
+function classificationToggleHidden(idx){
   if(typeof cfg === 'undefined' || !cfg) return;
   ensureClassificationConfig(cfg);
-  const arr = kind === 'cat' ? cfg.categories : cfg.contexts;
+  const arr = cfg.categories;
   if(!arr[idx]) return;
   arr[idx].hidden = !arr[idx].hidden;
   renderClassificationSettings();
@@ -154,10 +167,10 @@ function classificationToggleHidden(kind, idx){
   if(typeof saveState === 'function') saveState('user');
 }
 
-function classificationSetLabel(kind, idx, label){
+function classificationSetLabel(idx, label){
   if(typeof cfg === 'undefined' || !cfg) return;
   ensureClassificationConfig(cfg);
-  const arr = kind === 'cat' ? cfg.categories : cfg.contexts;
+  const arr = cfg.categories;
   if(!arr[idx]) return;
   arr[idx].label = String(label || '').trim().slice(0, 80) || arr[idx].id;
   refreshClassificationUi();
@@ -165,10 +178,10 @@ function classificationSetLabel(kind, idx, label){
   if(typeof saveState === 'function') saveState('user');
 }
 
-function classificationSetIcon(kind, idx, iconName){
+function classificationSetIcon(idx, iconName){
   if(typeof cfg === 'undefined' || !cfg) return;
   ensureClassificationConfig(cfg);
-  const arr = kind === 'cat' ? cfg.categories : cfg.contexts;
+  const arr = cfg.categories;
   if(!arr[idx]) return;
   arr[idx].icon = String(iconName || 'pin').trim() || 'pin';
   renderClassificationSettings();
@@ -185,11 +198,13 @@ async function classificationAdd(kind){
   ensureClassificationConfig(cfg);
   const label = String(raw).trim().slice(0, 80);
   let id = slugClassId(label);
-  const arr = kind === 'cat' ? cfg.categories : cfg.contexts;
+  const arr = cfg.categories;
   while(arr.some(x => x.id === id)){
     id = id + '-' + Math.random().toString(36).slice(2, 5);
   }
-  arr.push({ id, label, icon: 'pin', hidden: false });
+  arr.push({
+    id, label, icon: 'pin', color: 'var(--cat-general)', description: '', coreValues: [], hidden: false,
+  });
   renderClassificationSettings();
   refreshClassificationUi();
   if(typeof saveState === 'function') saveState('user');
@@ -201,27 +216,32 @@ function renderClassificationSettings(){
   ensureClassificationConfig(cfg);
   const iconKeys = (window.UI_ICONS && typeof window.UI_ICONS === 'object')
     ? Object.keys(window.UI_ICONS).sort() : ['pin'];
+  const presetVals = new Set(CLASSIFICATION_COLOR_PRESETS.map(p => p.value));
 
-  function rowsHtml(title, kind, list){
-    let h = '<div class="class-mgr-block"><div class="class-mgr-hdr">' + esc(title) + '</div>';
-    list.forEach((obj, idx) => {
-      const opt = iconKeys.map(k => '<option value="' + esc(k) + '"' + (k === obj.icon ? ' selected' : '') + '>' + esc(k) + '</option>').join('');
-      h += '<div class="class-mgr-row' + (obj.hidden ? ' class-mgr-row--hidden' : '') + '">'
-        + '<input type="text" class="class-mgr-in" value="' + esc(obj.label) + '" '
-        + 'onchange="classificationSetLabel(\'' + kind + '\',' + idx + ',this.value)" aria-label="Label"/>'
-        + '<select class="class-mgr-sel" onchange="classificationSetIcon(\'' + kind + '\',' + idx + ',this.value)" aria-label="Icon">' + opt + '</select>'
-        + '<button type="button" class="class-mgr-btn" onclick="classificationToggleHidden(\'' + kind + '\',' + idx + ')">' + (obj.hidden ? 'Show' : 'Hide') + '</button>'
-        + '<button type="button" class="class-mgr-btn" onclick="classificationMove(\'' + kind + '\',' + idx + ',-1)">↑</button>'
-        + '<button type="button" class="class-mgr-btn" onclick="classificationMove(\'' + kind + '\',' + idx + ',1)">↓</button>'
-        + '<code class="class-mgr-id" title="Stable id stored on tasks">' + esc(obj.id) + '</code>'
-        + '</div>';
-    });
-    h += '<button type="button" class="btn-ghost btn-sm class-mgr-add" onclick="classificationAdd(\'' + kind + '\')">+ Add ' + (kind === 'cat' ? 'category' : 'context') + '</button></div>';
-    return h;
-  }
+  let h = '<div class="class-mgr-block"><div class="class-mgr-hdr">Life areas</div>';
+  cfg.categories.forEach((obj, idx) => {
+    const opt = iconKeys.map(k => '<option value="' + esc(k) + '"' + (k === obj.icon ? ' selected' : '') + '>' + esc(k) + '</option>').join('');
+    let colOpts = '';
+    if(obj.color && !presetVals.has(obj.color)){
+      colOpts += '<option value="' + esc(obj.color) + '" selected>' + esc(obj.color) + '</option>';
+    }
+    colOpts += CLASSIFICATION_COLOR_PRESETS.map(p =>
+      '<option value="' + esc(p.value) + '"' + (p.value === obj.color ? ' selected' : '') + '>' + esc(p.label) + '</option>',
+    ).join('');
+    h += '<div class="class-mgr-row' + (obj.hidden ? ' class-mgr-row--hidden' : '') + '">'
+      + '<input type="text" class="class-mgr-in" value="' + esc(obj.label) + '" '
+      + 'onchange="classificationSetLabel(' + idx + ',this.value)" aria-label="Label"/>'
+      + '<select class="class-mgr-sel" onchange="classificationSetIcon(' + idx + ',this.value)" aria-label="Icon">' + opt + '</select>'
+      + '<select class="class-mgr-sel class-mgr-sel-color" onchange="classificationSetColor(' + idx + ',this.value)" aria-label="Color">' + colOpts + '</select>'
+      + '<button type="button" class="class-mgr-btn" onclick="classificationToggleHidden(' + idx + ')">' + (obj.hidden ? 'Show' : 'Hide') + '</button>'
+      + '<button type="button" class="class-mgr-btn" onclick="classificationMove(' + idx + ',-1)">↑</button>'
+      + '<button type="button" class="class-mgr-btn" onclick="classificationMove(' + idx + ',1)">↓</button>'
+      + '<code class="class-mgr-id" title="Stable id stored on tasks">' + esc(obj.id) + '</code>'
+      + '</div>';
+  });
+  h += '<button type="button" class="btn-ghost btn-sm class-mgr-add" onclick="classificationAdd()">+ Add life area</button></div>';
 
-  root.innerHTML = rowsHtml('Life categories', 'cat', cfg.categories)
-    + rowsHtml('Contexts', 'ctx', cfg.contexts);
+  root.innerHTML = h;
 }
 
 function refreshClassificationUi(){
@@ -255,9 +275,12 @@ function _heuristicMetadata(name){
   const lower = name.toLowerCase();
   if(/\burgent|asap|critical\b/.test(lower)) out.priority = 'urgent';
   else if(/\bimportant|soon\b/.test(lower)) out.priority = 'high';
-  if(/\b(dentist|doctor|health|gym|workout)\b/.test(lower)) out.category = 'health';
-  else if(/\b(pay|invoice|tax|bank|finance)\b/.test(lower)) out.category = 'finance';
-  else if(/\b(call|email|meeting|deadline|project)\b/.test(lower)) out.category = 'work';
+  if(/\b(dentist|doctor|health|gym|workout|meditation|yoga|therapy|spiritual)\b/.test(lower)) out.category = 'bodyMindSpirit';
+  else if(/\b(family|friend|date night|partner|spouse|romantic)\b/.test(lower)) out.category = 'relationships';
+  else if(/\b(volunteer|donation|community|mentor|advocacy|neighborhood)\b/.test(lower)) out.category = 'community';
+  else if(/\b(pay|invoice|tax|bank|finance|budget|invest|course|certif|deadline|meeting|project|career)\b/.test(lower)) out.category = 'jobLearningFinances';
+  else if(/\b(art|music|travel|hobby|gaming|read|sports|fun)\b/.test(lower)) out.category = 'interests';
+  else if(/\b(sleep|skincare|meal prep|organize|errand|reflection|routine)\b/.test(lower)) out.category = 'personalCare';
   return out;
 }
 
@@ -296,8 +319,6 @@ async function ensureSchwartzEmbeddings(){
 const KNN_MIN_SIM = 0.55;
 const KNN_CAT_MIN_CONF = 0.55;
 const KNN_CAT_MIN_MARGIN = 0.15;
-const KNN_CTX_MIN_CONF = 0.55;
-const KNN_CTX_MIN_MARGIN = 0.15;
 const KNN_PRIO_EFF_EN_MIN_CONF = 0.5;
 const KNN_TAG_TOP_FRAC = 0.6;
 
@@ -363,9 +384,6 @@ function predictMetadataFromVec(queryVec, opts){
 
   const cat = pickDiscrete('category', KNN_CAT_MIN_CONF, KNN_CAT_MIN_MARGIN, v => hasClassificationCategory(v));
   if(cat) merged.category = cat;
-
-  const ctx = pickDiscrete('context', KNN_CTX_MIN_CONF, KNN_CTX_MIN_MARGIN, v => hasClassificationContext(v));
-  if(ctx) merged.context = ctx;
 
   const prVote = _weightedFieldVote(top, 'priority');
   _confidence.priority = { value: prVote.value, confidence: prVote.confidence, margin: prVote.margin };
@@ -684,7 +702,7 @@ function _stableSortedJson(arr){
 
 /**
  * Build UPDATE_TASK ops from embeddings: Schwartz-style values + kNN metadata
- * (category, priority, effort, context, energy, tags) where they differ from current.
+ * (category, priority, effort, energy, tags) where they differ from current.
  * Uses dominant value keys when set (from settings) to filter alignment; otherwise top 3.
  * @param {{dominant?:string[], maxTasks?:number}} opts
  * @returns {Promise<Array<{name:'UPDATE_TASK', args:object}>>}
@@ -747,10 +765,6 @@ async function proposeHarmonizeUpdates(opts){
     }
     if(meta.effort && ['xs','s','m','l','xl'].includes(meta.effort) && meta.effort !== (t.effort || null)){
       args.effort = meta.effort;
-      changes++;
-    }
-    if(meta.context && hasClassificationContext(meta.context) && meta.context !== (t.context || null)){
-      args.context = meta.context;
       changes++;
     }
     if(meta.energyLevel && ['high','low'].includes(meta.energyLevel) && meta.energyLevel !== (t.energyLevel || null)){
@@ -823,15 +837,13 @@ window.invalidateListVectorCache = invalidateListVectorCache;
 window.proposeHarmonizeUpdates = proposeHarmonizeUpdates;
 window.ensureClassificationConfig = ensureClassificationConfig;
 window.getCategoryDef = getCategoryDef;
-window.getContextDef = getContextDef;
 window.getActiveCategories = getActiveCategories;
-window.getActiveContexts = getActiveContexts;
 window.hasClassificationCategory = hasClassificationCategory;
-window.hasClassificationContext = hasClassificationContext;
 window.renderClassificationSettings = renderClassificationSettings;
 window.refreshClassificationUi = refreshClassificationUi;
 window.classificationMove = classificationMove;
 window.classificationToggleHidden = classificationToggleHidden;
 window.classificationSetLabel = classificationSetLabel;
 window.classificationSetIcon = classificationSetIcon;
+window.classificationSetColor = classificationSetColor;
 window.classificationAdd = classificationAdd;

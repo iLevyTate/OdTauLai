@@ -51,8 +51,8 @@ Runs on **WebGPU** when available, **WASM** everywhere else (including iPhone). 
 What you actually get from it:
 
 - **Semantic search** — toggle `◎ Semantic` next to the search box. `"bills"` finds `"pay the electricity"`.
-- **Smart‑add suggestions** — type a new task and the app predicts category, priority, effort, context, energy, tags, and target list from your existing tasks via kNN.
-- **Harmonize all fields** — one click proposes updates for every task: values (Schwartz), category, priority, effort, context, energy, tags (merged, never wiped). Preview diffs. Apply what you want. Undo the last 10 batches.
+- **Smart‑add suggestions** — type a new task and the app predicts life area, priority, effort, energy, tags, and target list from your existing tasks via kNN.
+- **Harmonize all fields** — one click proposes updates for every task: values (Schwartz), life area, priority, effort, energy, tags (merged, never wiped). Preview diffs. Apply what you want. Undo the last 10 batches.
 - **Auto‑organize into lists** — route tasks to the list whose name + description matches best. Preview before apply.
 - **Duplicate detection** — near‑duplicate pairs by cosine ≥ 0.9, with archive‑and‑merge flow.
 - **Similar tasks** — top neighbors surface in the task detail drawer.
@@ -97,7 +97,8 @@ A derived impact score ranks every active task from signals you already have —
 - **Due dates** with smart chips (overdue / today / soon / future), **start dates**, **reminders**, **recurring** (daily / weekdays / weekly / monthly).
 - **Tags**, **starred pins**, **per‑task time tracking** with rollup from subtasks.
 - **Blockers** (`blockedBy`) — real dependency graph, used by the impact score.
-- **Effort** (xs/s/m/l/xl), **energy level**, **context** (`@home`, `@phone`, `@errands`).
+- **Effort** (xs/s/m/l/xl), **energy level**.
+- **Life areas** — seven default groups (customizable labels, icons, and accent colors in Settings → Classifications): *Body, Mind & Spirit* (purple), *Relationships* (red), *Community* (amber), *Job, Learning & Finances* (green), *Interests* (blue), *Personal Care* (pink), *General* (gray). Each can carry optional descriptive “core values” metadata (distinct from Schwartz alignment below).
 - **Values alignment** (Schwartz human values) per task.
 - **Checklists**, **notes**, **URL**, **completion notes** per task.
 - **Multiple lists** with colours and descriptions (descriptions drive AI list routing).
@@ -107,7 +108,7 @@ A derived impact score ranks every active task from signals you already have —
 - **Natural‑language quick add** (via `chrono-node`):
   `Buy milk tomorrow @urgent #shopping !star ~daily`
 - **Bulk paste import** — paste multi‑line text into the task input, a preview modal opens with one task per line; edit before committing. Skips lines >200 chars.
-- **Smart‑add enhancement** — hit the `✦` button next to the input to prefill category, priority, tags, and list from embeddings before you submit.
+- **Smart‑add enhancement** — hit the `✦` button next to the input to prefill life area, priority, tags, and list from embeddings before you submit.
 - **Drag‑and‑drop reorder**, subtask drop, list drop.
 - **Mobile swipe gestures** — swipe right to complete, swipe left to archive, with haptic feedback.
 

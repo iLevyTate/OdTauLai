@@ -441,6 +441,307 @@ async function genGenerate(opts){
   }
 }
 
+// ========== LLM HELPERS (hybrid AI: augment the embedding pipeline) ==========
+// Each helper is a pure wrapper around genGenerate. Inputs are plain objects so
+// callers pass only the minimal facts the LLM needs (no global `tasks` / `lists`
+// coupling). Every helper gracefully returns `null` when the LLM isn't ready,
+// on parse failure, or on timeout — callers MUST fall back to the ambient
+// embedding-only behaviour in that case. Think: "LLM makes good features
+// better when it's present; it must never make them worse when it's absent."
+//
+// Conventions:
+//   - Low temperature (0.1) for deterministic JSON; helpers that produce free
+//     prose use 0.3.
+//   - Short token budgets (64–192) to keep latency bounded. These helpers run
+//     interactively during harmonize/auto-organize/smart-add; 10s is too long.
+//   - System prompt hard-constrains output shape. Schema enforcement is still
+//     done by the caller (validateOps / manual guards) — trust but verify.
+
+function _stripCodeFences(s){
+  return String(s || '')
+    .replace(/^\s*```(?:json|js|javascript)?\s*/i, '')
+    .replace(/```\s*$/i, '')
+    .trim();
+}
+
+/** Extract the first {...} JSON object from a possibly-chatty LLM response. */
+function _extractJsonObject(text){
+  const s = _stripCodeFences(text);
+  if(!s) return null;
+  const start = s.indexOf('{');
+  if(start < 0) return null;
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  for(let i = start; i < s.length; i++){
+    const c = s[i];
+    if(inStr){
+      if(esc){ esc = false; continue; }
+      if(c === '\\'){ esc = true; continue; }
+      if(c === '"') inStr = false;
+      continue;
+    }
+    if(c === '"'){ inStr = true; continue; }
+    if(c === '{') depth++;
+    else if(c === '}'){
+      depth--;
+      if(depth === 0){
+        const json = s.slice(start, i + 1);
+        try{ return JSON.parse(json); }catch(_){ return null; }
+      }
+    }
+  }
+  return null;
+}
+
+function _extractFirstLine(text){
+  return String(text || '').replace(/```[\s\S]*?```/g, '').split('\n').map(s => s.trim()).find(Boolean) || '';
+}
+
+async function _genJsonCall({ system, user, maxTokens = 192, temperature = 0.1, signal }){
+  if(!_genReady || !_genPipe) return null;
+  try{
+    const raw = await genGenerate({
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user',   content: user   },
+      ],
+      maxTokens, temperature, signal,
+    });
+    return _extractJsonObject(raw);
+  }catch(e){
+    if(String(e && e.message) === 'GEN_ABORTED') return null;
+    console.warn('[gen] JSON helper failed', e);
+    return null;
+  }
+}
+
+async function _genTextCall({ system, user, maxTokens = 64, temperature = 0.3, signal }){
+  if(!_genReady || !_genPipe) return null;
+  try{
+    const raw = await genGenerate({
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user',   content: user   },
+      ],
+      maxTokens, temperature, signal,
+    });
+    const line = _extractFirstLine(_stripCodeFences(raw));
+    return line ? line.slice(0, 220) : null;
+  }catch(e){
+    if(String(e && e.message) === 'GEN_ABORTED') return null;
+    console.warn('[gen] text helper failed', e);
+    return null;
+  }
+}
+
+/**
+ * Refine a proposed UPDATE_TASK coming from the embedding-kNN pipeline.
+ * The LLM is allowed to (a) drop fields it thinks are wrong, (b) keep the
+ * rest, and (c) supply a short rationale for the preview card. It may NOT
+ * introduce new field values — that would let an unreliable model overwrite
+ * high-confidence embedding votes.
+ *
+ * @param {{name:string,description?:string,tags?:string[]}} task
+ * @param {Record<string,any>} proposed   Fields the kNN pipeline wants to set
+ * @param {number[]} fieldConfidences     Parallel array of confidences in [0,1]
+ * @returns {Promise<{ accept: Record<string,any>, rationale: string } | null>}
+ */
+async function genRefineTaskUpdate(task, proposed, fieldConfidences){
+  if(!_genReady) return null;
+  const fields = Object.keys(proposed || {}).filter(k => k !== 'id');
+  if(!fields.length) return null;
+  const sys = 'You review AI-proposed metadata edits for a single to-do task. '
+    + 'Given the task and the proposed field changes, decide which changes to KEEP and which to DROP. '
+    + 'You may only keep or drop — never invent new values. '
+    + 'Reply with a single JSON object: {"keep":["field1","field2"],"drop":["field3"],"rationale":"one short sentence"}. '
+    + 'No prose outside the JSON.';
+  const user = 'Task: ' + JSON.stringify({
+    name: String(task.name || '').slice(0, 200),
+    description: String(task.description || '').slice(0, 280),
+    tags: Array.isArray(task.tags) ? task.tags.slice(0, 10) : [],
+  })
+    + '\nProposed changes: ' + JSON.stringify(proposed)
+    + '\nPer-field confidence (0..1): ' + JSON.stringify(fieldConfidences || {});
+  const obj = await _genJsonCall({ system: sys, user, maxTokens: 192, temperature: 0.05 });
+  if(!obj || !Array.isArray(obj.keep)) return null;
+  const keep = new Set(obj.keep.map(x => String(x).trim()));
+  const accept = {};
+  for(const k of fields) if(keep.has(k)) accept[k] = proposed[k];
+  const rationale = typeof obj.rationale === 'string' ? obj.rationale.trim().slice(0, 220) : '';
+  return { accept, rationale };
+}
+
+/**
+ * Adjudicate a suspected-duplicate pair coming from the embedding cosine scan.
+ * LLM answers same / different / partial with a one-line reason.
+ *
+ * @param {{name:string,description?:string}} a
+ * @param {{name:string,description?:string}} b
+ * @returns {Promise<{ verdict:'same'|'different'|'partial', confidence:number, reason:string } | null>}
+ */
+async function genDedupeJudge(a, b){
+  if(!_genReady) return null;
+  const sys = 'You compare two to-do tasks and decide if they describe the SAME underlying work. '
+    + 'Respond ONLY with JSON: {"verdict":"same|different|partial","confidence":0..1,"reason":"short"}. '
+    + '"same" = identical actionable work. '
+    + '"partial" = overlapping but one covers strictly more. '
+    + '"different" = unrelated despite textual similarity.';
+  const user = 'A: ' + JSON.stringify({ name: String(a.name || '').slice(0, 200), description: String(a.description || '').slice(0, 200) })
+    + '\nB: ' + JSON.stringify({ name: String(b.name || '').slice(0, 200), description: String(b.description || '').slice(0, 200) });
+  const obj = await _genJsonCall({ system: sys, user, maxTokens: 128, temperature: 0.0 });
+  if(!obj) return null;
+  const verdict = ['same', 'different', 'partial'].includes(obj.verdict) ? obj.verdict : null;
+  if(!verdict) return null;
+  const confidence = Math.max(0, Math.min(1, Number(obj.confidence) || 0));
+  const reason = typeof obj.reason === 'string' ? obj.reason.trim().slice(0, 200) : '';
+  return { verdict, confidence, reason };
+}
+
+/**
+ * Suggest a handful of tags for a task. Tags must be drawn from
+ * existingTags when plausible (avoid tag sprawl); at most 2 new tags.
+ *
+ * @param {{name:string,description?:string}} task
+ * @param {string[]} existingTags
+ * @returns {Promise<{ tags:string[], rationale:string } | null>}
+ */
+async function genSuggestTags(task, existingTags){
+  if(!_genReady) return null;
+  const sys = 'You suggest 1 to 4 short lowercase tags for a to-do task. '
+    + 'Prefer tags already used in this workspace; introduce at most 2 new tags. '
+    + 'No spaces, no leading "#", no emojis. '
+    + 'Respond ONLY with JSON: {"tags":["tag1","tag2"],"rationale":"why"}.';
+  const user = 'Task: ' + JSON.stringify({
+    name: String(task.name || '').slice(0, 200),
+    description: String(task.description || '').slice(0, 280),
+  })
+    + '\nExisting tags: ' + JSON.stringify((existingTags || []).slice(0, 40));
+  const obj = await _genJsonCall({ system: sys, user, maxTokens: 128, temperature: 0.2 });
+  if(!obj || !Array.isArray(obj.tags)) return null;
+  const tags = obj.tags.map(t => String(t).toLowerCase().replace(/^#/, '').replace(/\s+/g, '-').replace(/[^a-z0-9_-]/g, ''))
+    .filter(Boolean).slice(0, 4);
+  if(!tags.length) return null;
+  const rationale = typeof obj.rationale === 'string' ? obj.rationale.trim().slice(0, 200) : '';
+  return { tags, rationale };
+}
+
+/**
+ * One-sentence explanation of why a task aligns with a Schwartz value.
+ * Called after the embedding-based value score crosses a visibility threshold.
+ *
+ * @param {{name:string,description?:string}} task
+ * @param {{key:string,label:string,score:number}} topValue
+ * @returns {Promise<string | null>}
+ */
+async function genValuesNote(task, topValue){
+  if(!_genReady || !topValue) return null;
+  const sys = 'You explain, in ONE short sentence (max 20 words), why a to-do task aligns with a personal value. '
+    + 'Be concrete; reference the task\'s specifics. No preamble, no quotes.';
+  const user = 'Task: ' + JSON.stringify({
+    name: String(task.name || '').slice(0, 200),
+    description: String(task.description || '').slice(0, 200),
+  })
+    + `\nValue: ${topValue.label} (${topValue.key})`;
+  return _genTextCall({ system: sys, user, maxTokens: 48, temperature: 0.3 });
+}
+
+/**
+ * Parse a single freeform sentence into a task skeleton. Complements the
+ * deterministic nlparse for cases the regex pipeline can't handle (e.g.
+ * "remind me when i get home to call mom about thanksgiving").
+ *
+ * @param {string} text
+ * @returns {Promise<{ name:string, priority?:string, dueDate?:string, tags?:string[], effort?:string, rationale?:string } | null>}
+ */
+async function genParseFreeform(text){
+  if(!_genReady) return null;
+  const s = String(text || '').trim();
+  if(!s) return null;
+  const sys = 'You extract a structured to-do task from one short freeform user sentence. '
+    + 'Respond ONLY with JSON. Shape: '
+    + '{"name":"short imperative","priority":"low|normal|high|urgent","dueDate":"YYYY-MM-DD","tags":["t1"],"effort":"xs|s|m|l|xl","rationale":"one short sentence"}. '
+    + 'Omit any field you cannot infer confidently. `name` is required.';
+  const user = 'Sentence: ' + JSON.stringify(s.slice(0, 500));
+  const obj = await _genJsonCall({ system: sys, user, maxTokens: 192, temperature: 0.1 });
+  if(!obj || typeof obj.name !== 'string' || !obj.name.trim()) return null;
+  const out = { name: obj.name.trim().slice(0, 200) };
+  if(['low','normal','high','urgent'].includes(obj.priority)) out.priority = obj.priority;
+  if(typeof obj.dueDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(obj.dueDate)) out.dueDate = obj.dueDate;
+  if(Array.isArray(obj.tags)){
+    const tags = obj.tags.map(t => String(t).toLowerCase().replace(/^#/, '').replace(/\s+/g, '-').replace(/[^a-z0-9_-]/g, ''))
+      .filter(Boolean).slice(0, 6);
+    if(tags.length) out.tags = tags;
+  }
+  if(['xs','s','m','l','xl'].includes(obj.effort)) out.effort = obj.effort;
+  if(typeof obj.rationale === 'string') out.rationale = obj.rationale.trim().slice(0, 200);
+  return out;
+}
+
+/**
+ * Break a vague "epic"-style task into concrete subtasks.
+ *
+ * @param {{name:string,description?:string}} task
+ * @param {{maxSubtasks?:number}} [opts]
+ * @returns {Promise<{ subtasks:Array<{name:string,effort?:string}>, rationale:string } | null>}
+ */
+async function genBreakdownTask(task, opts){
+  if(!_genReady) return null;
+  const maxN = Math.min(8, Math.max(2, (opts && opts.maxSubtasks) || 5));
+  const sys = `You break a large to-do into 2–${maxN} concrete next-action subtasks. `
+    + 'Each subtask must start with an imperative verb and fit on one line. '
+    + 'Respond ONLY with JSON: {"subtasks":[{"name":"…","effort":"xs|s|m|l|xl"}],"rationale":"why these steps"}.';
+  const user = 'Parent task: ' + JSON.stringify({
+    name: String(task.name || '').slice(0, 200),
+    description: String(task.description || '').slice(0, 400),
+  });
+  const obj = await _genJsonCall({ system: sys, user, maxTokens: 320, temperature: 0.3 });
+  if(!obj || !Array.isArray(obj.subtasks)) return null;
+  const subtasks = obj.subtasks
+    .map(s => s && typeof s.name === 'string' ? ({
+      name: s.name.trim().slice(0, 160),
+      effort: ['xs','s','m','l','xl'].includes(s.effort) ? s.effort : undefined,
+    }) : null)
+    .filter(s => s && s.name)
+    .slice(0, maxN);
+  if(!subtasks.length) return null;
+  const rationale = typeof obj.rationale === 'string' ? obj.rationale.trim().slice(0, 220) : '';
+  return { subtasks, rationale };
+}
+
+/**
+ * Short explanation of why a task is ranked at the top of "what next".
+ * Given the embedding ranker's chosen task and a handful of runners-up.
+ *
+ * @param {{name:string}} topTask
+ * @param {Array<{name:string}>} alternatives
+ * @returns {Promise<string | null>}
+ */
+async function genExplainRanking(topTask, alternatives){
+  if(!_genReady) return null;
+  const sys = 'You explain, in ONE short sentence, why the top task is a good next choice compared to the alternatives. '
+    + 'Reference the task specifics. Max 25 words. No preamble.';
+  const user = 'Top: ' + JSON.stringify({ name: String(topTask.name || '').slice(0, 160) })
+    + '\nAlternatives: ' + JSON.stringify((alternatives || []).slice(0, 5).map(a => ({ name: String(a.name || '').slice(0, 160) })));
+  return _genTextCall({ system: sys, user, maxTokens: 48, temperature: 0.3 });
+}
+
+/**
+ * Short explanation of why auto-organize wants to move a task to a list.
+ *
+ * @param {{name:string}} task
+ * @param {string} listName
+ * @returns {Promise<string | null>}
+ */
+async function genExplainMove(task, listName){
+  if(!_genReady) return null;
+  const sys = 'You explain, in ONE short sentence (max 18 words), why a to-do belongs on a named list. '
+    + 'Reference the task text. No preamble, no quotes.';
+  const user = 'Task: ' + JSON.stringify({ name: String(task.name || '').slice(0, 160) })
+    + `\nList: ${String(listName || '').slice(0, 60)}`;
+  return _genTextCall({ system: sys, user, maxTokens: 40, temperature: 0.3 });
+}
+
 if(typeof window !== 'undefined'){
   window.GEN_MODEL_PRESETS = GEN_MODEL_PRESETS;
   window.GEN_MODEL_ALT_SLUGS = GEN_MODEL_ALT_SLUGS;
@@ -466,4 +767,15 @@ if(typeof window !== 'undefined'){
   window.clearAskHistory = clearAskHistory;
   window.clearLLMCache = clearLLMCache;
   window._mobileRamHint = _mobileRamHint;
+  window.genRefineTaskUpdate = genRefineTaskUpdate;
+  window.genDedupeJudge = genDedupeJudge;
+  window.genSuggestTags = genSuggestTags;
+  window.genValuesNote = genValuesNote;
+  window.genParseFreeform = genParseFreeform;
+  window.genBreakdownTask = genBreakdownTask;
+  window.genExplainRanking = genExplainRanking;
+  window.genExplainMove = genExplainMove;
+  window._genExtractJsonObject = _extractJsonObject;
+  window._genExtractFirstLine  = _extractFirstLine;
+  window._genStripCodeFences   = _stripCodeFences;
 }

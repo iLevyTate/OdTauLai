@@ -180,7 +180,7 @@ function executeIntelOp(op){
     case 'UPDATE_TASK':{
       const t = findTask(a.id); if(!t) return null;
       snap = { type: 'updated', id: t.id, before: { ...t } };
-      const allow = ['name','priority','status','dueDate','startDate','effort','energyLevel','context','category','description','url','estimateMin','starred','type','valuesAlignment','valuesNote','tags'];
+      const allow = ['name','priority','status','dueDate','startDate','effort','energyLevel','category','description','url','estimateMin','starred','type','valuesAlignment','valuesNote','tags'];
       allow.forEach(f => { if(a[f] !== undefined) t[f] = a[f]; });
       if(t.status === 'done' && !t.completedAt) t.completedAt = stampCompletion();
       if(t.status !== 'done') t.completedAt = null;
@@ -348,8 +348,7 @@ function _pendingValsEqual(field, cur, next){
 function _humanizeFieldKey(k){
   const map = {
     priority: 'Priority',
-    category: 'Life category',
-    context: 'Context',
+    category: 'Life area',
     effort: 'Effort',
     energyLevel: 'Energy',
     tags: 'Tags',
@@ -370,10 +369,6 @@ function _formatFieldDisplay(field, val){
   if(val == null || val === '') return '—';
   if(field === 'category'){
     const d = (typeof getCategoryDef === 'function') ? getCategoryDef(val) : null;
-    return d ? d.label : String(val);
-  }
-  if(field === 'context'){
-    const d = (typeof getContextDef === 'function') ? getContextDef(val) : null;
     return d ? d.label : String(val);
   }
   if(field === 'valuesAlignment' && Array.isArray(val)){
@@ -471,6 +466,7 @@ function _renderPendingSimpleCard(op, idx){
   const st = _describeOpStructured(op);
   if(st.kind === 'update') return '';
   const ic = st.icon ? _pendingIcon(st.icon) : '';
+  const rat = op._rationale ? `<span class="pending-rationale" title="LLM rationale">${esc(op._rationale)}</span>` : '';
   return `<div class="pending-simple-card${st.danger ? ' pending-simple-card--danger' : ''}">
     <label class="pending-simple-row">
       <input type="checkbox" class="pending-op-master" data-op-idx="${idx}" checked>
@@ -479,6 +475,7 @@ function _renderPendingSimpleCard(op, idx){
         <span class="pending-simple-title">${esc(st.title)}</span>
         ${st.taskName ? `<span class="pending-simple-target">"${esc(st.taskName)}"</span>` : ''}
         ${st.detail ? `<span class="pending-simple-detail">${esc(st.detail)}</span>` : ''}
+        ${rat}
       </span>
     </label>
   </div>`;
@@ -509,6 +506,7 @@ function _renderPendingUpdateCard(op, idx){
       ${pill}
     </label>`;
   }).join('');
+  const rat = op._rationale ? `<div class="pending-rationale pending-rationale--card" title="LLM rationale">${esc(op._rationale)}</div>` : '';
   return `<div class="pending-task-card">
     <div class="pending-card-head">
       <label class="pending-card-head-lbl">
@@ -517,6 +515,7 @@ function _renderPendingUpdateCard(op, idx){
       </label>
       <span class="pending-card-badge">${changes.length} field update${changes.length !== 1 ? 's' : ''}</span>
     </div>
+    ${rat}
     <div class="pending-change-list">${rows}</div>
   </div>`;
 }
@@ -777,6 +776,88 @@ function _setIntelStatus(state, msg){
   syncHeaderAIChip(state, msg);
 }
 
+// ─── Hybrid AI helpers ─────────────────────────────────────────────────────
+// Embeddings drive the fast always-on path; the optional LLM (loaded from
+// Settings → GenAI) refines low-confidence outputs and supplies per-task
+// rationale. These helpers encapsulate the "try LLM → fall back silently"
+// pattern so each feature wires it in a single line.
+
+/** Race a promise against a timeout. Returns null on timeout/throw. */
+function _llmWithTimeout(promise, ms){
+  if(!promise || typeof promise.then !== 'function') return Promise.resolve(null);
+  const timeout = new Promise(resolve => setTimeout(() => resolve(null), ms));
+  return Promise.race([
+    promise.then(v => v == null ? null : v, () => null),
+    timeout,
+  ]);
+}
+
+/** Min per-field confidence across the fields actually being changed by this op. */
+function _opMinFieldConfidence(op){
+  const fc = op && op._fieldConfidence;
+  if(!fc || !op.args) return 1;
+  let min = 1;
+  for(const k of Object.keys(op.args)){
+    if(k === 'id') continue;
+    const entry = fc[k];
+    if(entry && typeof entry.confidence === 'number' && entry.confidence < min){
+      min = entry.confidence;
+    }
+  }
+  return min;
+}
+
+/**
+ * Walk `ops` (UPDATE_TASK) and ask the LLM to prune low-confidence fields
+ * plus attach a short rationale. Only runs when the LLM is loaded and when
+ * at least one field on that op scored < `lowConfThreshold`. Hard-capped at
+ * `maxRefines` calls so harmonize doesn't hang for a minute on a 500-task
+ * workspace. Silently no-ops on any failure.
+ */
+async function _refineOpsWithLLM(ops, { lowConfThreshold = 0.7, maxRefines = 6, perCallMs = 12000 } = {}){
+  if(typeof isGenReady !== 'function' || !isGenReady()) return 0;
+  if(typeof genRefineTaskUpdate !== 'function') return 0;
+  let refined = 0;
+  let attempts = 0;
+  for(const op of ops){
+    if(op.name !== 'UPDATE_TASK') continue;
+    if(attempts >= maxRefines) break;
+    if(_opMinFieldConfidence(op) >= lowConfThreshold) continue;
+    const t = findTask(op.args.id);
+    if(!t) continue;
+    const proposed = { ...op.args };
+    delete proposed.id;
+    const fieldConfMap = {};
+    if(op._fieldConfidence){
+      for(const k of Object.keys(proposed)){
+        const e = op._fieldConfidence[k];
+        fieldConfMap[k] = e && typeof e.confidence === 'number' ? Number(e.confidence.toFixed(2)) : null;
+      }
+    }
+    attempts++;
+    const res = await _llmWithTimeout(
+      genRefineTaskUpdate({ name: t.name, description: t.description, tags: t.tags }, proposed, fieldConfMap),
+      perCallMs,
+    );
+    if(!res) continue;
+    // Prune fields the LLM dropped; keep `id` and `valuesNote` (tied to valuesAlignment).
+    const nextArgs = { id: op.args.id };
+    for(const [k, v] of Object.entries(res.accept || {})) nextArgs[k] = v;
+    if(nextArgs.valuesAlignment && op.args.valuesNote) nextArgs.valuesNote = op.args.valuesNote;
+    // An LLM that drops everything is a strong "no" — skip the op entirely.
+    const kept = Object.keys(nextArgs).filter(k => k !== 'id');
+    if(!kept.length){
+      op._rejectedByLLM = true;
+      op._rationale = res.rationale || 'LLM suggested no change';
+      continue;
+    }
+    op.args = nextArgs;
+    if(res.rationale) op._rationale = res.rationale;
+    refined++;
+  }
+  return refined;
+}
+
 async function aiAlign(){
   if(typeof isIntelReady !== 'function' || !isIntelReady()){
     _setIntelStatus('error', 'Load the model first (AI chip or Tools)');
@@ -792,6 +873,10 @@ async function aiAlign(){
     await ensureSchwartzEmbeddings();
     const active = tasks.filter(t => !t.archived && t.status !== 'done').slice(0, 200);
     const ops = [];
+    const SCHWARTZ_LOCAL = window.SCHWARTZ || {};
+    const llmOn = typeof isGenReady === 'function' && isGenReady() && typeof genValuesNote === 'function';
+    let notesWritten = 0;
+    const MAX_LLM_NOTES = 8;
     for(const t of active){
       const vals = await alignValuesForTask(t.id);
       if(!vals.length) continue;
@@ -801,13 +886,26 @@ async function aiAlign(){
       const before = JSON.stringify([...(t.valuesAlignment || [])].map(String).sort());
       const after = JSON.stringify([...use].map(String).sort());
       if(before === after) continue;
+      // Prefer an LLM-written rationale for the top value; fall back to a
+      // generic note so behavior is unchanged when the LLM is absent.
+      let note = 'Cosine similarity vs Schwartz value descriptions';
+      if(llmOn && notesWritten < MAX_LLM_NOTES){
+        const topKey = use[0];
+        const meta = SCHWARTZ_LOCAL[topKey] || {};
+        const explanation = await _llmWithTimeout(
+          genValuesNote({ name: t.name, description: t.description }, { key: topKey, label: meta.def ? topKey : topKey, score: 1 }),
+          8000,
+        );
+        if(explanation){ note = explanation; notesWritten++; }
+      }
       ops.push({
         name: 'UPDATE_TASK',
         args: {
           id: t.id,
           valuesAlignment: use,
-          valuesNote: 'Cosine similarity vs Schwartz value descriptions',
+          valuesNote: note,
         },
+        _rationale: note !== 'Cosine similarity vs Schwartz value descriptions' ? note : undefined,
       });
     }
     if(!ops.length){
@@ -936,7 +1034,7 @@ function renderAIPanel(){
             <span class="intel-action-btn-text"><span class="intel-action-btn-lbl">Align values only</span><span class="intel-action-btn-sub">Requires 2–3 dominant values selected below</span></span>
           </button>
           <button type="button" class="intel-action-btn intel-action-btn--primary" onclick="intelHarmonizeFields()" ${!ready ? 'disabled' : ''}
-            title="Propose updates using values, category, priority, effort, context, energy, and tags from embeddings and similar tasks. Review before apply.">
+            title="Propose updates using values, life area, priority, effort, energy, and tags from embeddings and similar tasks. Review before apply.">
             ${_IC.harmonize}
             <span class="intel-action-btn-text"><span class="intel-action-btn-lbl">Harmonize all fields</span><span class="intel-action-btn-sub">Preview field updates from the embedding model</span></span>
           </button>
@@ -1064,6 +1162,97 @@ function intelRetryLoad(){
   });
 }
 
+/**
+ * LLM-powered task breakdown. Opens from the task-detail modal's
+ * "Break down with AI" accordion. Silently no-ops if the LLM isn't ready.
+ *
+ * UX: list the suggested subtasks with checkboxes (all selected by default)
+ * plus an "Add as subtasks" button that creates the chosen items as children
+ * of the currently-open task. No speculative mutation — user confirms.
+ */
+async function runMdBreakdown(){
+  const body = document.getElementById('mdBreakdownBody');
+  if(!body) return;
+  if(typeof isGenReady !== 'function' || !isGenReady()){
+    body.innerHTML = '<span class="intel-muted">Load the on-device LLM (Settings → Generative Ask) to break tasks down.</span>';
+    return;
+  }
+  const id = typeof editingTaskId !== 'undefined' ? editingTaskId : null;
+  const t = id != null && typeof findTask === 'function' ? findTask(id) : null;
+  if(!t){
+    body.innerHTML = '<span class="intel-muted">Open a task first.</span>';
+    return;
+  }
+
+  body.dataset.loaded = '1';
+  body.innerHTML = '<span class="intel-muted">Thinking through subtasks…</span>';
+
+  try{
+    const res = await _llmWithTimeout(
+      genBreakdownTask({ name: t.name, description: t.description }, { maxSubtasks: 6 }),
+      20000,
+    );
+    if(!res || !Array.isArray(res.subtasks) || !res.subtasks.length){
+      body.innerHTML = '<span class="intel-muted">LLM didn\u2019t return usable subtasks. Try adding a short description and retry.</span>'
+        + ' <button type="button" class="md-breakdown-btn" onclick="runMdBreakdown()" style="margin-top:8px">Retry</button>';
+      return;
+    }
+    window._mdBreakdownSuggestion = { taskId: t.id, subtasks: res.subtasks };
+    const rows = res.subtasks.map((s, i) => `
+      <label class="md-breakdown-row">
+        <input type="checkbox" data-idx="${i}" checked>
+        <span class="md-breakdown-name">${esc(s.name)}</span>
+        ${s.effort ? `<span class="md-breakdown-effort">${esc(String(s.effort).toUpperCase())}</span>` : ''}
+      </label>`).join('');
+    body.innerHTML = `
+      <div class="md-breakdown-list">${rows}</div>
+      ${res.rationale ? `<div class="pending-rationale" style="margin-top:8px">${esc(res.rationale)}</div>` : ''}
+      <div class="md-breakdown-actions">
+        <button type="button" class="md-breakdown-btn" onclick="runMdBreakdown()">Re-run</button>
+        <button type="button" class="md-breakdown-btn md-breakdown-btn--primary" onclick="acceptMdBreakdown()">Add as subtasks</button>
+      </div>`;
+  }catch(err){
+    console.warn('[breakdown]', err);
+    body.innerHTML = '<span class="intel-muted">Something went wrong. Try again.</span>'
+      + ' <button type="button" class="md-breakdown-btn" onclick="runMdBreakdown()" style="margin-top:8px">Retry</button>';
+  }
+}
+
+function acceptMdBreakdown(){
+  const sugg = window._mdBreakdownSuggestion;
+  const body = document.getElementById('mdBreakdownBody');
+  if(!sugg || !body) return;
+  const parent = typeof findTask === 'function' ? findTask(sugg.taskId) : null;
+  if(!parent){ body.innerHTML = '<span class="intel-muted">Parent task not found.</span>'; return; }
+
+  const selected = Array.from(body.querySelectorAll('input[type="checkbox"][data-idx]'))
+    .filter(cb => cb.checked)
+    .map(cb => sugg.subtasks[parseInt(cb.dataset.idx, 10)])
+    .filter(Boolean);
+  if(!selected.length){ return; }
+
+  const defaults = typeof defaultTaskProps === 'function' ? defaultTaskProps() : {};
+  const nowStr = typeof timeNowFull === 'function' ? timeNowFull() : new Date().toISOString();
+  const added = [];
+  for(const s of selected){
+    const id = (typeof taskIdCtr === 'number') ? (++taskIdCtr) : (Date.now() + Math.floor(Math.random() * 1000));
+    const child = Object.assign(
+      { id, name: s.name, totalSec: 0, sessions: 0, created: nowStr, parentId: parent.id, collapsed: false },
+      defaults,
+      { listId: parent.listId, effort: s.effort || null },
+    );
+    tasks.push(child);
+    added.push(child.id);
+  }
+  if(parent.collapsed) parent.collapsed = false;
+
+  body.innerHTML = `<span class="intel-muted">Added ${added.length} subtask${added.length === 1 ? '' : 's'}.</span>`;
+  window._mdBreakdownSuggestion = null;
+
+  if(typeof renderTaskList === 'function') renderTaskList();
+  if(typeof saveState === 'function') saveState('user');
+}
+
 async function intelFindDuplicatesUI(){
   if(!isIntelReady()){ _setIntelStatus('error', 'Model not ready'); return; }
   const sec = document.getElementById('intelDupSection');
@@ -1083,12 +1272,38 @@ async function intelFindDuplicatesUI(){
       window._dupSimMap.set(p.idB, Math.max(window._dupSimMap.get(p.idB) || 0, p.sim));
     });
     if(typeof renderTaskList === 'function') renderTaskList();
-    sec.innerHTML = '<div class="intel-dup-hdr">Near duplicates</div>' + pairs.slice(0, 30).map(p => `
-      <div class="intel-dup-row">
+
+    const shown = pairs.slice(0, 30);
+    // Optional LLM adjudication for the top-N pairs: "same / partial /
+    // different" with a short reason. Bounded to keep this interactive.
+    const verdicts = new Map();
+    if(typeof isGenReady === 'function' && isGenReady() && typeof genDedupeJudge === 'function'){
+      sec.innerHTML = '<span style="font-size:12px;color:var(--text-3)">Asking LLM to adjudicate top pairs…</span>';
+      const JUDGE = Math.min(6, shown.length);
+      for(let i = 0; i < JUDGE; i++){
+        const p = shown[i];
+        const v = await _llmWithTimeout(
+          genDedupeJudge(
+            { name: p.taskA.name, description: p.taskA.description },
+            { name: p.taskB.name, description: p.taskB.description },
+          ),
+          10000,
+        );
+        if(v) verdicts.set(p.idA + '-' + p.idB, v);
+      }
+    }
+    sec.innerHTML = '<div class="intel-dup-hdr">Near duplicates</div>' + shown.map(p => {
+      const v = verdicts.get(p.idA + '-' + p.idB);
+      const verdict = v ? `<span class="intel-dup-verdict intel-dup-verdict--${esc(v.verdict)}" title="${esc(v.reason)}">${esc(v.verdict)}</span>` : '';
+      const reason = v && v.reason ? `<div class="intel-dup-reason">${esc(v.reason)}</div>` : '';
+      return `<div class="intel-dup-row">
         <span class="intel-dup-pair">${esc(p.taskA.name.slice(0, 32))} ↔ ${esc(p.taskB.name.slice(0, 32))}</span>
         <span class="intel-dup-sim">${p.sim.toFixed(2)}</span>
+        ${verdict}
         <button type="button" class="btn-ghost btn-sm" onclick="intelMergeDuplicatePair(${p.idA},${p.idB})">Archive 2nd</button>
-      </div>`).join('');
+        ${reason}
+      </div>`;
+    }).join('');
   }catch(e){
     sec.innerHTML = '<span style="color:var(--danger)">Failed to scan</span>';
   }
@@ -1122,9 +1337,46 @@ async function intelHarmonizeFields(){
       _setIntelStatus('ready', 'No changes suggested — fields already match the model');
       return;
     }
-    _pendingOps = ops;
+    // Optional LLM refinement: prunes low-confidence field changes and
+    // attaches a short rationale per op. No-op if the LLM isn't loaded.
+    if(typeof isGenReady === 'function' && isGenReady()){
+      _setIntelStatus('working', 'Refining low-confidence suggestions with LLM…');
+      try{
+        const refined = await _refineOpsWithLLM(ops);
+        if(refined) console.info(`[harmonize] LLM refined ${refined} op(s)`);
+      }catch(e){ console.warn('[harmonize] LLM refine failed', e); }
+
+      // For the handful of ops that set valuesAlignment, upgrade the
+      // boilerplate valuesNote to an LLM-generated one-liner so the stored
+      // explanation is useful to the human user later.
+      try{
+        const SCHWARTZ_LOCAL = window.SCHWARTZ || {};
+        const valueOps = ops.filter(op => op.name === 'UPDATE_TASK' && Array.isArray(op.args.valuesAlignment) && op.args.valuesAlignment.length).slice(0, 6);
+        for(const op of valueOps){
+          const t = findTask(op.args.id);
+          if(!t) continue;
+          const topKey = op.args.valuesAlignment[0];
+          const note = await _llmWithTimeout(
+            genValuesNote({ name: t.name, description: t.description }, { key: topKey, label: topKey, score: 1 }),
+            7000,
+          );
+          if(note){
+            op.args.valuesNote = note;
+            if(!op._rationale) op._rationale = note;
+          }
+        }
+      }catch(e){ console.warn('[harmonize] values-note upgrade failed', e); }
+    }
+    // Drop any ops the LLM marked as rejected (_rejectedByLLM) or whose args
+    // have shrunk to just {id} after refinement.
+    const filtered = ops.filter(op => !op._rejectedByLLM && Object.keys(op.args).some(k => k !== 'id'));
+    if(!filtered.length){
+      _setIntelStatus('ready', 'LLM review rejected all suggestions — nothing to apply');
+      return;
+    }
+    _pendingOps = filtered;
     _renderPendingOps();
-    _setIntelStatus('ready', `Review ${ops.length} proposed update${ops.length === 1 ? '' : 's'}`);
+    _setIntelStatus('ready', `Review ${filtered.length} proposed update${filtered.length === 1 ? '' : 's'}`);
   }catch(err){
     console.warn('[harmonize]', err);
     _setIntelStatus('error', 'Harmonize failed');
@@ -1155,7 +1407,27 @@ async function intelAutoOrganize(){
       _setIntelStatus('ready', 'Every task is already in its best list');
       return;
     }
-    _pendingOps = proposals.map(p => ({ name: 'CHANGE_LIST', args: { id: p.id, listId: p.toListId } }));
+    const listById = new Map(lists.map(l => [l.id, l]));
+    const ops = proposals.map(p => ({ name: 'CHANGE_LIST', args: { id: p.id, listId: p.toListId } }));
+    // Optional LLM rationale, bounded: annotate up to 8 proposals so the
+    // preview can show "why this list?" without blocking large batches.
+    if(typeof isGenReady === 'function' && isGenReady() && typeof genExplainMove === 'function'){
+      _setIntelStatus('working', 'Explaining moves with LLM…');
+      const MAX = 8;
+      const slice = ops.slice(0, MAX);
+      for(let i = 0; i < slice.length; i++){
+        const op = slice[i];
+        const t = findTask(op.args.id);
+        const dest = listById.get(op.args.listId);
+        if(!t || !dest) continue;
+        const note = await _llmWithTimeout(
+          genExplainMove({ name: t.name }, dest.name || ''),
+          8000,
+        );
+        if(note) op._rationale = note;
+      }
+    }
+    _pendingOps = ops;
     _renderPendingOps();
     _setIntelStatus('idle', `Proposed ${proposals.length} move${proposals.length === 1 ? '' : 's'} — review & apply`);
   }catch(err){
@@ -1194,6 +1466,14 @@ function maybeShowEnhanceBtn(){
   const len = inp.value.trim().length;
   const showable = (typeof isIntelReady === 'function' && isIntelReady()) && len >= 3;
   btn.style.display = showable ? '' : 'none';
+  // LLM freeform parse button: only offered when a generative model is loaded.
+  // Shown for longer inputs (≥8 chars) where nlparse + embeddings struggle.
+  const parseBtn = document.getElementById('taskParseBtn');
+  if(parseBtn){
+    const llmOn = typeof isGenReady === 'function' && isGenReady();
+    const canParse = llmOn && len >= 8;
+    parseBtn.style.display = canParse ? '' : 'none';
+  }
   if((len < 3 || window._smartAddPreview) && !btn.disabled){
     window._smartAddPreview = null;
     const prev = document.getElementById('smartAddPreview');
@@ -1239,7 +1519,6 @@ async function smartAddEnhance(){
     if(sugg.priority && PR.includes(sugg.priority) && sugg.priority !== 'none') cleaned.priority = sugg.priority;
     if(sugg.category && typeof hasClassificationCategory === 'function' && hasClassificationCategory(sugg.category)) cleaned.category = sugg.category;
     if(sugg.effort && EFF.includes(sugg.effort)) cleaned.effort = sugg.effort;
-    if(sugg.context && typeof hasClassificationContext === 'function' && hasClassificationContext(sugg.context)) cleaned.context = sugg.context;
     if(sugg.energyLevel && EN.includes(sugg.energyLevel)) cleaned.energyLevel = sugg.energyLevel;
     if(Array.isArray(sugg.tags)) cleaned.tags = sugg.tags.filter(t => typeof t === 'string' && t.length && t.length < 25).slice(0, 5);
     if(sugg.dueDate && /^\d{4}-\d{2}-\d{2}$/.test(sugg.dueDate)) cleaned.dueDate = sugg.dueDate;
@@ -1270,11 +1549,96 @@ async function smartAddEnhance(){
   }
 }
 
+/**
+ * LLM-only companion to smartAddEnhance(). Takes a freeform sentence the
+ * deterministic parser can't confidently crack (e.g. "remind me when i get
+ * home to call mom about thanksgiving") and uses the on-device LLM to
+ * extract a cleaner task name plus optional metadata. Silently no-ops if
+ * the LLM isn't loaded.
+ */
+async function smartAddParseWithLLM(){
+  if(_intelBusy) return;
+  if(typeof isGenReady !== 'function' || !isGenReady()) return;
+  if(typeof genParseFreeform !== 'function') return;
+
+  const inp = document.getElementById('taskInput');
+  const btn = document.getElementById('taskParseBtn');
+  const prev = document.getElementById('smartAddPreview');
+  const raw = (inp?.value || '').trim();
+  if(!raw || raw.length < 8) return;
+
+  _intelBusy = true;
+  if(btn){
+    btn.disabled = true;
+    btn.setAttribute('aria-busy', 'true');
+    btn.dataset.prevHtml = btn.innerHTML;
+    btn.innerHTML = (window.icon && window.icon('harmonize', { size: 14, cls: 'is-spin' })) || '';
+  }
+
+  try{
+    const parsed = await _llmWithTimeout(genParseFreeform(raw), 12000);
+    if(!parsed || !parsed.name){
+      if(prev){
+        prev.innerHTML = '<span class="smart-add-empty">LLM couldn\u2019t parse that — try adding more context.</span>';
+        prev.style.display = '';
+      }
+      return;
+    }
+
+    // Rewrite the input to the cleaner imperative name so parseQuickAdd
+    // handles submit cleanly. Keep the cursor at end of the new name.
+    if(parsed.name && parsed.name !== raw){
+      inp.value = parsed.name;
+      try{ inp.setSelectionRange(parsed.name.length, parsed.name.length); }catch(_){}
+    }
+
+    const PR = ['urgent','high','normal','low'];
+    const EFF = ['xs','s','m','l','xl'];
+    const cleaned = {};
+    if(parsed.priority && PR.includes(parsed.priority)) cleaned.priority = parsed.priority;
+    if(parsed.dueDate && /^\d{4}-\d{2}-\d{2}$/.test(parsed.dueDate)) cleaned.dueDate = parsed.dueDate;
+    if(parsed.effort && EFF.includes(parsed.effort)) cleaned.effort = parsed.effort;
+    if(Array.isArray(parsed.tags) && parsed.tags.length) cleaned.tags = parsed.tags.slice(0, 5);
+
+    if(Object.keys(cleaned).length === 0){
+      window._smartAddPreview = null;
+      if(prev){
+        prev.innerHTML = parsed.rationale
+          ? `<span class="smart-add-empty">${esc(parsed.rationale)}</span>`
+          : '<span class="smart-add-empty">Parsed — press Enter to add.</span>';
+        prev.style.display = '';
+      }
+    } else {
+      window._smartAddPreview = cleaned;
+      _renderSmartAddChips(cleaned);
+      if(parsed.rationale && prev){
+        prev.insertAdjacentHTML(
+          'beforeend',
+          `<div class="pending-rationale" style="margin-top:6px">${esc(parsed.rationale)}</div>`,
+        );
+      }
+    }
+  }catch(err){
+    console.warn('[smart-add:llm]', err);
+  }finally{
+    _intelBusy = false;
+    if(btn){
+      btn.disabled = false;
+      btn.removeAttribute('aria-busy');
+      if(btn.dataset.prevHtml != null){
+        btn.innerHTML = btn.dataset.prevHtml;
+        delete btn.dataset.prevHtml;
+      } else {
+        btn.innerHTML = (window.icon && window.icon('wand')) || '';
+      }
+    }
+  }
+}
+
 function _renderSmartAddChips(s){
   const prev = document.getElementById('smartAddPreview');
   if(!prev) return;
   const effortTips = { xs:'Extra small — ~15 min', s:'Small — ~1 hr', m:'Medium — ~half day', l:'Large — ~full day', xl:'Extra large — multi-day' };
-  const ctxTips = { work:'At your desk/workplace', home:'At home', phone:'Requires a phone call', computer:'Requires a computer', errands:'Out and about' };
   const chips = [];
   if(s.priority) chips.push(`<span class="sa-chip sa-priority sa-p-${esc(s.priority)}" data-tip="Priority — tap to remove" onclick="smartAddRemove('priority')">priority: ${esc(s.priority)} ×</span>`);
   const ic = (n, size) => (window.icon && window.icon(n, {size: size||13})) || '';
@@ -1285,7 +1649,6 @@ function _renderSmartAddChips(s){
     chips.push(`<span class="sa-chip" data-tip="Category — tap to remove" onclick="smartAddRemove('category')"><span class="sa-chip-ic">${ic(catIc)}</span> ${esc(catLbl)} ×</span>`);
   }
   if(s.effort) chips.push(`<span class="sa-chip" data-tip="${escAttr(effortTips[s.effort] || 'Effort')} — tap to remove" onclick="smartAddRemove('effort')">effort: ${esc(String(s.effort).toUpperCase())} ×</span>`);
-  if(s.context) chips.push(`<span class="sa-chip" data-tip="${escAttr(ctxTips[s.context] || 'Context')} — tap to remove" onclick="smartAddRemove('context')">${esc(s.context)} ×</span>`);
   if(s.energyLevel) chips.push(`<span class="sa-chip" data-tip="Energy — tap to remove" onclick="smartAddRemove('energyLevel')"><span class="sa-chip-ic">${ic(s.energyLevel === 'high' ? 'flame' : 'leaf')}</span> ${esc(s.energyLevel)} ×</span>`);
   if(s.dueDate) chips.push(`<span class="sa-chip" data-tip="Due date — tap to remove" onclick="smartAddRemove('dueDate')"><span class="sa-chip-ic">${ic('calendar')}</span> ${esc(s.dueDate)} ×</span>`);
   if(s.tags && s.tags.length) s.tags.forEach(tag => chips.push(`<span class="sa-chip" data-tip="Tag — tap to remove" data-sa-tag="${encodeURIComponent(tag)}">#${esc(tag)} ×</span>`));
@@ -1372,14 +1735,30 @@ function openWhatNext(){
   const body = document.getElementById('whatNextBody');
   if(body){
     body.innerHTML = ranked.length
-      ? ranked.map(x => `
+      ? ranked.map((x, i) => `
         <button type="button" class="what-next-item" onclick="openTaskDetail(${x.t.id});closeWhatNext();">
           <span class="wn-name">${esc(x.t.name)}</span>
           <span class="wn-meta">${x.t.dueDate ? esc(x.t.dueDate) : 'no date'} · ${esc(x.t.priority || 'none')}</span>
+          ${i === 0 ? '<span class="wn-why" id="wnWhy" style="display:none"></span>' : ''}
         </button>`).join('')
       : '<span style="color:var(--text-3);font-size:12px">Nothing queued — add tasks or clear filters.</span>';
   }
   o.style.display = '';
+
+  // Opt-in LLM rationale for the top pick. Runs after the modal is visible
+  // so the user sees the ranking instantly; explanation appears when ready.
+  if(ranked.length >= 1 && typeof isGenReady === 'function' && isGenReady() && typeof genExplainRanking === 'function'){
+    const top = ranked[0].t;
+    const alts = ranked.slice(1).map(x => ({ name: x.t.name }));
+    _llmWithTimeout(genExplainRanking({ name: top.name }, alts), 9000).then(note => {
+      if(!note) return;
+      const el = document.getElementById('wnWhy');
+      if(el){
+        el.textContent = note;
+        el.style.display = '';
+      }
+    }).catch(() => {});
+  }
 }
 
 function closeWhatNext(){
@@ -1401,6 +1780,7 @@ function toggleTaskSearchSemantic(){
 window.executeIntelOp = executeIntelOp;
 window.renderAIPanel = renderAIPanel;
 window.smartAddEnhance = smartAddEnhance;
+window.smartAddParseWithLLM = smartAddParseWithLLM;
 window.applySmartAddAndSubmit = applySmartAddAndSubmit;
 window.maybeShowEnhanceBtn = maybeShowEnhanceBtn;
 window.aiAlign = aiAlign;
@@ -1410,6 +1790,8 @@ window.openWhatNext = openWhatNext;
 window.closeWhatNext = closeWhatNext;
 window.toggleTaskSearchSemantic = toggleTaskSearchSemantic;
 window.intelFindDuplicatesUI = intelFindDuplicatesUI;
+window.runMdBreakdown = runMdBreakdown;
+window.acceptMdBreakdown = acceptMdBreakdown;
 window.intelMergeDuplicatePair = intelMergeDuplicatePair;
 window.intelReembedAll = intelReembedAll;
 window.intelAutoOrganize = intelAutoOrganize;
@@ -1623,6 +2005,8 @@ async function genDownloadClick(){
     saveGenCfg(freshCfg);
     syncGenChip('ready', 'LLM ready');
     if(typeof syncAskPromoChip === 'function') syncAskPromoChip();
+    // LLM-dependent surfaces (parse-with-LLM button) may need to appear now.
+    if(typeof maybeShowEnhanceBtn === 'function') maybeShowEnhanceBtn();
   }catch(e){
     const msg = (e && e.message) ? e.message : 'Load failed';
     _askLoadError = { modelId: targetModelId, message: msg };

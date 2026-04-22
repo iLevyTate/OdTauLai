@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="ODTAULAI">
+  <defs>
+    <radialGradient id="sbg" cx="38%" cy="32%" r="78%">
+      <stop offset="0%" stop-color="#0e1a2e"/>
+      <stop offset="55%" stop-color="#0a1320"/>
+      <stop offset="100%" stop-color="#060c16"/>
+    </radialGradient>
+    <linearGradient id="smark" x1="18%" y1="22%" x2="82%" y2="88%">
+      <stop offset="0%" stop-color="#9cc3ff"/>
+      <stop offset="45%" stop-color="#6aa8ff"/>
+      <stop offset="100%" stop-color="#3d7fd4"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="88" ry="88" fill="url(#sbg)"/>
+  <!-- Shorter arc, thicker strokes, no glow (legible at 16-32 px) -->
+  <path d="M 142 156 A 132 132 0 1 1 156 356"
+        fill="none" stroke="url(#smark)" stroke-width="36" stroke-linecap="round"/>
+  <path d="M 178 262 L 232 316 L 340 188"
+        fill="none" stroke="url(#smark)" stroke-width="40" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
