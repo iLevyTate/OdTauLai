@@ -110,7 +110,8 @@ function renderArchive(){
   archives.slice().reverse().forEach((a,idx)=>{
     const doneG=a.goals?a.goals.filter(g=>g.done).length:0;
     const totalG=a.goals?a.goals.length:0;
-    const d=document.createElement('div');d.className='hist-day';d.onclick=function(){this.classList.toggle('open')};
+    const d=document.createElement('button');d.type='button';d.className='hist-day';d.setAttribute('aria-expanded','false');
+    d.onclick=function(){this.classList.toggle('open');this.setAttribute('aria-expanded',this.classList.contains('open')?'true':'false')};
     d.innerHTML=`<div class="hist-day-hdr"><span class="hist-day-date">${prettyDate(a.date)}</span><div class="hist-day-stats"><div class="hist-day-stat"><span style="color:var(--work)">${a.totalPomos||0}</span> sessions</div><div class="hist-day-stat"><span style="color:var(--long)">${fmtShort(a.totalFocusSec||0)}</span></div>${totalG?`<div class="hist-day-stat"><span style="color:var(--short)">${doneG}/${totalG}</span> goals</div>`:''}</div></div>`
       +`<div class="hist-day-detail">`
       +(a.goals&&a.goals.length?`<div class="hist-day-section"><div class="hist-day-section-title">Goals</div>${a.goals.map(g=>`<div class="hist-goal">${g.done?'✓':'○'} ${esc(g.text)}${g.doneAt?' <span style="color:#2a3a4a">('+esc(String(g.doneAt))+')</span>':''}</div>`).join('')}</div>`:'')
@@ -121,7 +122,7 @@ function renderArchive(){
   })
 }
 
-function clearArchive(){if(confirm('Clear all past day history? This cannot be undone.')){localStorage.removeItem(ARCHIVE_KEY);renderArchive()}}
+async function clearArchive(){if(!(await showAppConfirm('Clear all past day history? This cannot be undone.')))return;localStorage.removeItem(ARCHIVE_KEY);renderArchive()}
 
 function exportAllCSV(){
   const archives=getArchives();
@@ -176,7 +177,7 @@ function exportFile(format){
   const blob=new Blob([content],{type:'text/plain'});
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='odtaulai-'+todayKey()+'.'+ext;a.click();URL.revokeObjectURL(a.href);
 }
-function exportClipboard(){const content=buildReport('txt');navigator.clipboard.writeText(content).then(()=>{const btn=document.querySelector('.export-clip');const orig=btn.textContent;btn.textContent='Copied!';btn.style.color='#2ecc71';btn.style.borderColor='#1a4a2a';setTimeout(()=>{btn.textContent=orig;btn.style.color='';btn.style.borderColor=''},1500)}).catch(()=>{const ta=document.createElement('textarea');ta.value=content;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta)})}
+function exportClipboard(){const content=buildReport('txt');navigator.clipboard.writeText(content).then(()=>{const btn=gid('exportClipBtn')||document.querySelector('.export-clip');if(!btn)return;const orig=btn.textContent;btn.textContent='Copied!';btn.style.color='#2ecc71';btn.style.borderColor='#1a4a2a';setTimeout(()=>{btn.textContent=orig;btn.style.color='';btn.style.borderColor=''},1500)}).catch(()=>{const ta=document.createElement('textarea');ta.value=content;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta)})}
 
 // ========== v16 migration (WebLLM removal — reclaim ~1.5GB) ==========
 function runV16Migration(){
@@ -248,7 +249,9 @@ if(typeof hydrateIcons==='function') hydrateIcons();
 updateMiniTimer();
 // Apply saved active tab without scroll
 document.querySelectorAll('[data-tab]').forEach(el=>{el.style.display=el.dataset.tab===activeTab?'':'none'});
-document.querySelectorAll('.nav-tab').forEach(el=>{el.classList.toggle('active',el.dataset.navtab===activeTab)});
+document.querySelectorAll('.nav-tab').forEach(el=>{const on=el.dataset.navtab===activeTab;el.classList.toggle('active',on);el.setAttribute('aria-selected',on?'true':'false')});
+if(activeTab==='focus'&&typeof setTimerSub==='function') setTimerSub(cfg.timerSub||'pomo');
+if(typeof syncQaHintVisibility==='function') syncQaHintVisibility();
 if(activeTab==='settings'&&!settingsOpen)toggleSettings();
 
 // PWA status — standalone / file / SW; install UI lives in pwa.js (refreshPWAInstallUI)
@@ -266,21 +269,45 @@ if(activeTab==='settings'&&!settingsOpen)toggleSettings();
   },500)
 })();
 
-// Day rollover: archive the last persisted blob (yesterday's date + counters),
-// zero in-memory daily metrics, flush live tasks via saveState, reload.
-setInterval(()=>{
+// Day rollover — detect the boundary in memory so a tab left open past midnight
+// still archives yesterday's counters. (Previously we read localStorage, but
+// the 10s auto-save overwrites s.date to today before this check runs, which
+// swallowed the rollover for continuously-open tabs.)
+let _lastKnownDate = (typeof todayKey === 'function') ? todayKey() : null;
+function _handleDayRollover(){
   try{
-    const raw=localStorage.getItem(STORE_KEY);
-    if(!raw) return;
-    const s=JSON.parse(raw);
-    if(!s.date||s.date===todayKey()) return;
-    try{ archiveDay(s); }catch(e){ console.warn('[app] archiveDay at rollover', e); }
-    totalPomos=0;totalBreaks=0;totalFocusSec=0;pomosInCycle=0;
-    sessionHistory=[];timeLog=[];
+    const today = (typeof todayKey === 'function') ? todayKey() : null;
+    if(!today || !_lastKnownDate || today === _lastKnownDate) return;
+    // Build a yesterday-stamped snapshot from the live in-memory state and
+    // archive it. archiveDay dedupes by date so running twice is harmless.
+    const yesterday = {
+      date:           _lastKnownDate,
+      totalPomos:     totalPomos,
+      totalBreaks:    totalBreaks,
+      totalFocusSec:  totalFocusSec,
+      goals:          goals,
+      tasks:          tasks,
+      timeLog:        timeLog,
+      sessionHistory: sessionHistory,
+    };
+    try{ archiveDay(yesterday); }catch(e){ console.warn('[app] archiveDay at rollover', e); }
+    totalPomos=0; totalBreaks=0; totalFocusSec=0; pomosInCycle=0;
+    sessionHistory=[]; timeLog=[];
+    _lastKnownDate = today;
     if(typeof saveState==='function') saveState('auto');
-    location.reload();
+    if(typeof renderAll==='function') renderAll();
+    if(typeof renderLog==='function') renderLog();
+    if(typeof renderStats==='function') renderStats();
+    if(typeof renderArchive==='function') renderArchive();
   }catch(e){ console.warn('[app] day rollover', e); }
-},60000);
+}
+// Check every minute while the tab is alive…
+setInterval(_handleDayRollover, 60 * 1000);
+// …and again whenever the tab regains focus (backgrounded phones/laptops
+// often suspend setInterval for hours, so this covers the common case).
+document.addEventListener('visibilitychange', () => {
+  if(!document.hidden) _handleDayRollover();
+});
 
 // Init sync panel UI (renders the "Enable Sync" state by default)
 if(typeof renderSyncPanel==='function') renderSyncPanel();

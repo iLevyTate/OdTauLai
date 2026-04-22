@@ -2416,3 +2416,70 @@ body:has(.offline-indicator:not([style*="display:none"])){ padding-top:30px; }
   .ask-promo-chip kbd{font-size:9.5px;padding:1px 4px}
 }
 
+/* ═══ Layout / IA: header bar, track banner, timer sub-nav, first-task CTA ═══ */
+.header-nav-bar{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;width:100%;margin-bottom:14px;
+}
+.header-nav-bar .nav-tabs{flex:1;min-width:0;margin-bottom:0}
+.header-utils{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.header-icon-btn{
+  min-width:36px;height:36px;padding:0 10px;border-radius:10px;
+  background:var(--bg-2);border:1px solid var(--border);color:var(--text-2);
+  font-size:12px;font-weight:600;transition:background .15s,border-color .15s;
+}
+.header-icon-btn:hover{background:var(--bg-3);color:var(--text-1)}
+.header-icon-btn--kbd{font-size:10px;line-height:1.15;letter-spacing:.02em}
+.track-banner{
+  width:100%;max-width:720px;margin:-4px 0 12px;padding:8px 12px;
+  background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-md);
+  font-size:12px;
+}
+.track-banner-inner{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.track-banner-pulse{width:8px;height:8px;border-radius:50%;background:var(--success);animation:pulse 1.2s ease-in-out infinite}
+.track-banner-label{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-3)}
+.track-banner-task{font-weight:600;color:var(--text-1)}
+.track-banner-time{font-variant-numeric:tabular-nums;color:var(--text-2)}
+.md-name-strong{font-weight:700}
+.sw-lap{
+  display:flex;justify-content:space-between;gap:8px;
+  font-size:12px;padding:4px 0;border-bottom:1px solid var(--border);
+  color:var(--text-2);
+}
+.sw-lap:last-child{border-bottom:none}
+.sw-display{font-variant-numeric:tabular-nums}
+.timer-subnav{
+  display:flex;gap:4px;flex-wrap:wrap;width:100%;max-width:720px;
+  margin:0 0 10px;padding:4px;background:var(--bg-1);border:1px solid var(--border);
+  border-radius:var(--r-md);
+}
+.timer-sub-btn{
+  flex:1;min-width:72px;padding:8px 10px;border-radius:8px;
+  background:transparent;border:none;color:var(--text-3);
+  font-size:11px;font-weight:600;letter-spacing:.04em;transition:background .15s,color .15s;
+}
+.timer-sub-btn:hover{color:var(--text-1);background:var(--bg-2)}
+.timer-sub-btn.active{
+  color:var(--text-1);background:var(--bg-2);
+  box-shadow:inset 0 0 0 1px var(--border-strong);
+}
+.first-task-btn{
+  display:inline-block;margin:8px 0;padding:8px 14px;border-radius:var(--r-sm);
+  background:var(--accent-bg);color:var(--accent);border:1px solid var(--accent-border);
+  font-size:12px;font-weight:600;font-family:inherit;cursor:pointer;
+}
+.first-task-btn:hover{filter:brightness(1.08)}
+.mfield--readonly{
+  background:var(--bg-0)!important;cursor:default!important;color:var(--text-2);
+  border-color:var(--border)!important;
+}
+body.light-theme .mfield--readonly{background:var(--bg-2)!important}
+button.hist-day{display:block;width:100%;font:inherit;cursor:pointer;background:inherit}
+.filter-display-lbl{font-size:10px;color:var(--text-3);letter-spacing:.1em;text-transform:uppercase;margin-right:6px}
+.task-toolbar-display{align-items:center;gap:8px;flex-wrap:wrap}
+.app-dlg{max-width:420px}
+.app-dlg-msg{color:var(--text-1)}
+.app-dlg-overlay{z-index:1100}
+@media (max-width:640px){
+  .header-icon-btn--kbd{display:none}
+}
+

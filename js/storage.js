@@ -29,13 +29,20 @@ const _arr  = (v)          => Array.isArray(v)?v:[];
 const _obj  = (v,d={})     => (v&&typeof v==='object'&&!Array.isArray(v))?v:d;
 const _enum = (v,allowed,d)=> allowed.includes(v)?v:d;
 
+// Keys we emit on every repaired task (used to stash forward-compat / unknown
+// top-level fields into `_ext` so a newer app version can add fields, an
+// older build loads them, re-saves, and nothing is lost).
+const TRANSIENT_TASK_KEYS = new Set(['_habitCycledInSession']);
+
 // ── Task field repair — run on every task after migration ─────────────────────
 // Ensures every field has the right type regardless of what was stored.
 function _repairTask(t){
   if(!t||typeof t!=='object') return null;
-  return {
+  const id = _int(t.id, 0);
+  if (id <= 0) return null;
+  const out = {
     // Core identity
-    id:           _int(t.id, 0),
+    id:           id,
     name:         _str(t.name, 'Untitled task'),
     parentId:     t.parentId!=null ? _int(t.parentId) : null,
     collapsed:    _bool(t.collapsed, false),
@@ -110,60 +117,73 @@ function _repairTask(t){
     // of treating every task as "just modified" after each page refresh.
     lastModified: (typeof t.lastModified === 'number' && t.lastModified > 0) ? t.lastModified : null,
   };
+  const ext = { ..._obj(t._ext) };
+  const known = new Set(Object.keys(out));
+  for (const k of Object.keys(t)) {
+    if (known.has(k) || k === '_ext' || TRANSIENT_TASK_KEYS.has(k)) continue;
+    if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
+    ext[k] = t[k];
+  }
+  for (const k of Object.keys(ext)) {
+    if (k in out) delete ext[k];
+  }
+  if (Object.keys(ext).length) out._ext = ext;
+  return out;
 }
 
 // ── Migration runner ──────────────────────────────────────────────────────────
-// Each block is wrapped independently so a failure in one version doesn't
-// prevent later migrations from running.
+// Each step is isolated: a failure in one version never silently bumps the
+// version past the failing step, so future loads get a chance to retry and
+// newer-version fields are never "forgotten" because they landed in a skipped
+// block. `reached` tracks the highest version successfully applied; `s.v` is
+// set to that value at the end (it only advances, never rolls back).
 function migrateState(s){
   if(!s||typeof s!=='object') return null;
   const v = _int(s.v, 1);
+  let reached = v;
 
-  if(v < 2){
-    try{
-      s.lists     = _arr(s.lists);
-      s.listIdCtr = _int(s.listIdCtr, 0);
-      s.activeListId = s.activeListId ?? null;
-      if(Array.isArray(s.tasks)) s.tasks = s.tasks.map(t=>({listId:null,..._obj(t)}));
-    }catch(e){ console.warn('[migration v2]',e); }
-  }
-  if(v < 3){
-    try{
-      s.collapsedSections = _obj(s.collapsedSections);
-      s.taskGroupBy       = _str(s.taskGroupBy, 'none');
-      if(Array.isArray(s.tasks)) s.tasks = s.tasks.map(t=>({recur:null,remindAt:null,reminderFired:false,..._obj(t)}));
-    }catch(e){ console.warn('[migration v3]',e); }
-  }
-  if(v < 4){
-    try{
-      if(Array.isArray(s.tasks)) s.tasks = s.tasks.map(t=>({
-        startDate:null,type:'task',effort:null,energyLevel:null,
-        context:null,blockedBy:[],checklist:[],notes:[],url:null,completionNote:null,
-        ..._obj(t)
-      }));
-    }catch(e){ console.warn('[migration v4]',e); }
-  }
-  if(v < 5){
-    try{
-      if(Array.isArray(s.tasks)) s.tasks = s.tasks.map(t=>({
-        category:null,valuesAlignment:[],valuesNote:null,..._obj(t)
-      }));
-    }catch(e){ console.warn('[migration v5]',e); }
-  }
-  if(v < 6){
-    try{
-      if(Array.isArray(s.tasks)){
-        s.tasks = s.tasks.map(t => {
-          const o = _obj(t);
-          const base = { completions: [], ...o };
-          if(o.recur){
-            base.habitLastRecordedTotalSec = _int(o.totalSec, 0);
-          }
-          return base;
-        });
-      }
-    }catch(e){ console.warn('[migration v6]',e); }
-  }
+  const step = (target, fn) => {
+    if(v >= target) return;           // already migrated in a previous run
+    if(reached < target - 1) return;  // previous step didn't finish — don't skip over it
+    try{ fn(); reached = target; }
+    catch(e){ console.warn('[migration v'+target+']', e); }
+  };
+
+  step(2, () => {
+    s.lists     = _arr(s.lists);
+    s.listIdCtr = _int(s.listIdCtr, 0);
+    s.activeListId = s.activeListId ?? null;
+    if(Array.isArray(s.tasks)) s.tasks = s.tasks.map(t=>({listId:null,..._obj(t)}));
+  });
+  step(3, () => {
+    s.collapsedSections = _obj(s.collapsedSections);
+    s.taskGroupBy       = _str(s.taskGroupBy, 'none');
+    if(Array.isArray(s.tasks)) s.tasks = s.tasks.map(t=>({recur:null,remindAt:null,reminderFired:false,..._obj(t)}));
+  });
+  step(4, () => {
+    if(Array.isArray(s.tasks)) s.tasks = s.tasks.map(t=>({
+      startDate:null,type:'task',effort:null,energyLevel:null,
+      context:null,blockedBy:[],checklist:[],notes:[],url:null,completionNote:null,
+      ..._obj(t)
+    }));
+  });
+  step(5, () => {
+    if(Array.isArray(s.tasks)) s.tasks = s.tasks.map(t=>({
+      category:null,valuesAlignment:[],valuesNote:null,..._obj(t)
+    }));
+  });
+  step(6, () => {
+    if(Array.isArray(s.tasks)){
+      s.tasks = s.tasks.map(t => {
+        const o = _obj(t);
+        const base = { completions: [], ...o };
+        if(o.recur){
+          base.habitLastRecordedTotalSec = _int(o.totalSec, 0);
+        }
+        return base;
+      });
+    }
+  });
 
   // ── Field-level repair pass — runs on EVERY load regardless of version ──────
   // This is the safety net: even if a migration was skipped or data was
@@ -172,7 +192,10 @@ function migrateState(s){
     s.tasks = s.tasks.map(_repairTask).filter(Boolean);
   }
 
-  s.v = SCHEMA_VERSION;
+  // Only advance the stored version to the highest step that actually ran.
+  // This is what lets a flaky migration retry on the next load instead of
+  // being permanently skipped.
+  s.v = Math.max(v, reached);
   return s;
 }
 
@@ -210,7 +233,7 @@ function saveState(reason){
         'starred','archived','completedAt','effort','energyLevel','context','category',
         'valuesAlignment','parentId','listId','url','estimateMin','recur','remindAt','type','blockedBy',
         'completions','habitLastRecordedTotalSec',
-        'totalSec','sessions','checklist','notes'];
+        'totalSec','sessions','checklist','notes','_ext'];
       let changed = false;
       for (const f of fieldsToCompare){
         const a = JSON.stringify(t[f]);
@@ -253,16 +276,21 @@ function saveState(reason){
   }catch(e){
     // QuotaExceededError — warn user. Most common cause: archive grew huge.
     window._saveError = e.name || 'save-failed';
-    // Show a non-blocking warning banner once
-    if(!document.getElementById('quotaWarning')){
+    // Re-show the banner on repeated failures (dismissing the old one alone is not enough
+    // if the user needs another reminder). Debounce a bit to avoid a tight error loop.
+    const now = Date.now();
+    if (now - (window._lastQuotaBannerAt || 0) >= 2000) {
+      window._lastQuotaBannerAt = now;
+      const old = document.getElementById('quotaWarning');
+      if (old) old.remove();
       const w = document.createElement('div');
       w.id = 'quotaWarning';
       w.className = 'quota-warning';
       const warnIc = (window.icon && window.icon('alertTriangle', {size:14})) || '';
       w.innerHTML = `
         <span class="quota-warning-msg">${warnIc}<span>Storage nearly full — new changes may not be saved.</span></span>
-        <button onclick="document.getElementById('quotaWarning').remove()">Dismiss</button>
-        <button onclick="exportData();document.getElementById('quotaWarning').remove()">Backup now</button>`;
+        <button type="button" onclick="document.getElementById('quotaWarning').remove()">Dismiss</button>
+        <button type="button" onclick="exportData();document.getElementById('quotaWarning').remove()">Backup now</button>`;
       document.body.appendChild(w);
     }
   }
@@ -271,13 +299,28 @@ function saveState(reason){
   if(reason === 'user') showSaveIndicator();
 
   queueMicrotask(() => {
-    if(typeof embedStore === 'undefined' || !embedStore || !embedStore.ensure) return;
-    _intelEmbedIds.forEach(id => {
-      const t = typeof findTask === 'function' ? findTask(id) : null;
-      if(t) embedStore.ensure(t).catch(() => {});
-    });
-    if(typeof scheduleIntelDupRefresh === 'function') scheduleIntelDupRefresh();
+    _queueEmbedEnsure(_intelEmbedIds);
   });
+}
+
+let _embedEnsureIds=new Set();
+let _embedEnsureT=null;
+function _flushEmbedEnsure(){
+  _embedEnsureT=null;
+  if(typeof embedStore === 'undefined' || !embedStore || !embedStore.ensure) return;
+  const ids=[..._embedEnsureIds];
+  _embedEnsureIds.clear();
+  ids.forEach(id=>{
+    const t=typeof findTask==='function'?findTask(id):null;
+    if(t) embedStore.ensure(t).catch(()=>{});
+  });
+  if(typeof scheduleIntelDupRefresh==='function') scheduleIntelDupRefresh();
+}
+function _queueEmbedEnsure(ids){
+  if(!ids||!ids.length) return;
+  ids.forEach(id=>_embedEnsureIds.add(id));
+  if(_embedEnsureT) return;
+  _embedEnsureT=setTimeout(_flushEmbedEnsure,250);
 }
 
 // ── Apply validated+migrated state to live variables ─────────────────────────
@@ -305,6 +348,7 @@ function _applyState(s){
     // Config — repair individual values defensively
     if(s.cfg && typeof s.cfg==='object'){
       cfg = s.cfg;
+      if(!cfg.timerSub) cfg.timerSub='pomo';
       if(typeof ensureClassificationConfig === 'function') ensureClassificationConfig(cfg);
       const cw=gid('cfgWork'); if(cw) cw.value = _int(cfg.work,25);
       const cs=gid('cfgShort');if(cs) cs.value = _int(cfg.short,5);
@@ -331,6 +375,13 @@ function _applyState(s){
       taskIdCtr = _int(s.taskIdCtr, 0);
       activeTaskId  = null;
       taskStartedAt = null;
+      // Seed the change-detection snapshot so the first post-load save
+      // doesn't treat every existing task as "just modified" — which would
+      // (a) spuriously bump every task's lastModified (breaking sync
+      // last-write-wins across devices) and (b) re-embed every task for
+      // semantic search on every page refresh.
+      _prevTaskSnapshot = {};
+      tasks.forEach(t => { _prevTaskSnapshot[t.id] = {...t}; });
     }
 
     // Lists
@@ -430,6 +481,8 @@ function loadState(){
         renderAll(); renderLog(); renderGoalList();
         renderIntList(); renderQuickTimers();
         applyTheme(); setTaskView(taskView); setSmartView(smartView);
+        if(activeTab==='focus'&&typeof setTimerSub==='function') setTimerSub(cfg.timerSub||'pomo');
+        if(typeof syncQaHintVisibility==='function') syncQaHintVisibility();
         console.info('[storage] Recovered from IDB backup');
         if(typeof showExportToast === 'function') showExportToast('Restored from backup');
       }
@@ -890,12 +943,18 @@ function _applyIncomingTask(incoming, report){
 
 
 // ── Misc ──────────────────────────────────────────────────────────────────────
-function setToggle(id,val){ const el=gid(id); if(!el)return; if(val)el.classList.add('on'); else el.classList.remove('on'); }
+function setToggle(id,val){ const el=gid(id); if(!el)return; if(val)el.classList.add('on'); else el.classList.remove('on'); el.setAttribute('aria-checked',val?'true':'false'); }
+
+// Cap payload per archived day so Past Days + quota stays bounded.
+const _ARCHIVE_MAX_TIME_LOG = 500;
+const _ARCHIVE_MAX_SESSION_HISTORY = 400;
 
 function archiveDay(state){
   try{
     const archives = JSON.parse(localStorage.getItem(ARCHIVE_KEY)||'[]');
     if(archives.find(a=>a.date===state.date)) return;
+    const tl = _arr(state.timeLog);
+    const sh = _arr(state.sessionHistory);
     archives.push({
       date:          state.date,
       totalPomos:    _int(state.totalPomos,0),
@@ -916,8 +975,8 @@ function archiveDay(state){
         checklistTotal:(t.checklist||[]).length,
         listId:t.listId,
       })),
-      timeLog: _arr(state.timeLog),
-      sessionHistory: _arr(state.sessionHistory),
+      timeLog:        tl.length > _ARCHIVE_MAX_TIME_LOG ? tl.slice(-_ARCHIVE_MAX_TIME_LOG) : tl,
+      sessionHistory: sh.length > _ARCHIVE_MAX_SESSION_HISTORY ? sh.slice(-_ARCHIVE_MAX_SESSION_HISTORY) : sh,
     });
     while(archives.length>90) archives.shift();
     localStorage.setItem(ARCHIVE_KEY, JSON.stringify(archives));

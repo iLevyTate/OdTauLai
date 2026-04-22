@@ -1,6 +1,6 @@
 // ========== CONFIG ==========
-function updateConfig(){cfg.work=Math.max(1,parseInt(gid('cfgWork').value)||25);cfg.short=Math.max(1,parseInt(gid('cfgShort').value)||5);cfg.long=Math.max(1,parseInt(gid('cfgLong').value)||15);cfg.cycle=Math.max(2,parseInt(gid('cfgCycle').value)||4);if(!running&&!finished){setPhaseTime();renderPips()}saveState('user')}
-function toggleOpt(id){const el=gid(id);el.classList.toggle('on');if(id==='togBreak')cfg.autoBreak=el.classList.contains('on');if(id==='togWork')cfg.autoWork=el.classList.contains('on');if(id==='togSound'){cfg.sound=el.classList.contains('on');if(running){if(cfg.sound)schedulePhaseAudio();else cancelScheduledAudio()}}if(id==='togLink')cfg.linkTask=el.classList.contains('on');if(id==='togNotif'){cfg.notif=el.classList.contains('on');if(cfg.notif)reqNotifPerm()}saveState('user')}
+function updateConfig(){cfg.work=Math.max(1,parseInt(gid('cfgWork').value)||25);cfg.short=Math.max(1,parseInt(gid('cfgShort').value)||5);cfg.long=Math.max(1,parseInt(gid('cfgLong').value)||15);cfg.cycle=Math.max(2,parseInt(gid('cfgCycle').value)||4);if(!running&&!finished){setPhaseTime();renderTimerChrome()}saveState('user')}
+function toggleOpt(id){const el=gid(id);el.classList.toggle('on');const on=el.classList.contains('on');el.setAttribute('aria-checked',on?'true':'false');if(id==='togBreak')cfg.autoBreak=on;if(id==='togWork')cfg.autoWork=on;if(id==='togSound'){cfg.sound=on;if(running){if(cfg.sound)schedulePhaseAudio();else cancelScheduledAudio()}}if(id==='togLink')cfg.linkTask=on;if(id==='togNotif'){cfg.notif=on;if(cfg.notif)reqNotifPerm()}saveState('user')}
 let settingsOpen=false;
 function toggleSettings(){
   const body=gid('settingsBody'),arrow=gid('settingsArrow');
@@ -29,7 +29,7 @@ window.addEventListener('resize',_reflowSettingsIfOpen);
 window.addEventListener('orientationchange',_reflowSettingsIfOpen);
 
 // ========== STATE ==========
-let cfg={work:25,short:5,long:15,cycle:4,autoBreak:true,autoWork:false,sound:true,linkTask:true,notif:true};
+let cfg={work:25,short:5,long:15,cycle:4,autoBreak:true,autoWork:false,sound:true,linkTask:true,notif:true,timerSub:'pomo'};
 let phase='work',pomosInCycle=0,totalPomos=0,totalBreaks=0,totalFocusSec=0;
 let totalDuration=0,remaining=0,running=false,finished=false;
 let startedAt=0,pausedRemaining=0,tickId=null;
@@ -51,17 +51,34 @@ function getPC(p){return p==='work'?'var(--work)':p==='short'?'var(--short)':'va
 function getPBg(p){return p==='work'?'var(--work-bg)':p==='short'?'var(--short-bg)':'var(--long-bg)'}
 function getPBd(p){return p==='work'?'var(--work-border)':p==='short'?'var(--short-border)':'var(--long-border)'}
 function getPL(p){return p==='work'?'Focus':p==='short'?'Short Break':'Long Break'}
-function switchPhase(p){if(running)return;phase=p;finished=false;fireCounts={};setPhaseTime();renderAll()}
+function switchPhase(p){if(running)return;phase=p;finished=false;fireCounts={};setPhaseTime();renderTimerChrome()}
 function setPhaseTime(){totalDuration=getPS(phase);remaining=totalDuration;pausedRemaining=totalDuration}
-function renderAll(){
+function renderTimerChrome(){
   gid('mainCard').style.background=getPBg(phase);gid('mainCard').style.borderColor=getPBd(phase);
   gid('ringFg').setAttribute('stroke',getPC(phase));gid('ringFg').setAttribute('stroke-dashoffset','0');
   gid('display').textContent=fmt(remaining);gid('display').style.color=getPC(phase);gid('display').className='ring-time';
   gid('phaseLabel').textContent=getPL(phase);gid('phaseLabel').style.color=getPC(phase);
   document.querySelectorAll('.tab').forEach(t=>t.className='tab');
   document.querySelectorAll('.tab')[phase==='work'?0:phase==='short'?1:2].classList.add('active',phase==='work'?'work':phase==='short'?'short':'long');
-  renderPips();renderCtrls();renderStats();renderTaskList();renderGoalList();renderArchive();updateTitle();updateMiniTimer()
+  renderPips();renderCtrls();updateTitle();updateMiniTimer();
 }
+function renderAll(){
+  renderTimerChrome();
+  renderStats();renderTaskList();renderGoalList();renderArchive();
+}
+function setTimerSub(sub){
+  const allowed=['pomo','quick','sw','chimes'];
+  if(!allowed.includes(sub)) sub='pomo';
+  cfg.timerSub=sub;
+  document.querySelectorAll('.timer-sub-panel[data-timer-sub]').forEach(el=>{
+    el.style.display=el.getAttribute('data-timer-sub')===sub?'':'none';
+  });
+  document.querySelectorAll('.timer-sub-btn').forEach(b=>{
+    b.classList.toggle('active',b.getAttribute('data-sub')===sub);
+  });
+  if(typeof saveState==='function') saveState('auto');
+}
+window.setTimerSub=setTimerSub;
 function renderPips(){const c=gid('pips');c.innerHTML='';for(let i=0;i<cfg.cycle;i++){const d=document.createElement('div');d.className='pip'+(i<pomosInCycle?' done':i===pomosInCycle&&phase==='work'?' current':'');d.title='Jump to pomo '+(i+1);d.onclick=(function(idx){return function(){jumpToPomo(idx)}})(i);c.appendChild(d)}}
 function jumpToPomo(idx){if(running)return;if(idx<0||idx>=cfg.cycle)return;pomosInCycle=idx;renderPips();saveState('user')}
 function renderCtrls(){
@@ -73,9 +90,9 @@ function renderCtrls(){
 }
 
 // ========== TIMER ==========
-function startTimer(){if(totalDuration<=0)return;running=true;finished=false;startedAt=Date.now();pausedRemaining=remaining;fireCounts={};if(cfg.linkTask&&phase==='work'&&activeTaskId)taskStartedAt=Date.now();clearInterval(tickId);tickId=setInterval(tick,200);reqNotifPerm();schedulePhaseAudio();startKeepalive();renderCtrls()}
-function pauseTimer(){running=false;const el=Math.floor((Date.now()-startedAt)/1000);pausedRemaining=Math.max(0,pausedRemaining-el);remaining=pausedRemaining;if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000);taskStartedAt=null}}cancelScheduledAudio();maybeStopKeepalive();renderCtrls();renderTaskList();saveState('user')}
-function resumeTimer(){running=true;startedAt=Date.now();if(cfg.linkTask&&phase==='work'&&activeTaskId)taskStartedAt=Date.now();clearInterval(tickId);tickId=setInterval(tick,200);schedulePhaseAudio();startKeepalive();renderCtrls()}
+function startTimer(){if(totalDuration<=0)return;running=true;finished=false;startedAt=Date.now();pausedRemaining=remaining;fireCounts={};if(cfg.linkTask&&phase==='work'&&activeTaskId)taskStartedAt=Date.now();clearInterval(tickId);tickId=setInterval(tick,250);reqNotifPerm();schedulePhaseAudio();startKeepalive();renderCtrls();if(typeof _updateActiveTaskTickSchedule==='function')_updateActiveTaskTickSchedule();}
+function pauseTimer(){running=false;const el=Math.floor((Date.now()-startedAt)/1000);pausedRemaining=Math.max(0,pausedRemaining-el);remaining=pausedRemaining;if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000);taskStartedAt=null}}cancelScheduledAudio();maybeStopKeepalive();renderCtrls();renderTaskList();saveState('user');if(typeof _updateActiveTaskTickSchedule==='function')_updateActiveTaskTickSchedule();}
+function resumeTimer(){running=true;startedAt=Date.now();if(cfg.linkTask&&phase==='work'&&activeTaskId)taskStartedAt=Date.now();clearInterval(tickId);tickId=setInterval(tick,250);schedulePhaseAudio();startKeepalive();renderCtrls();if(typeof _updateActiveTaskTickSchedule==='function')_updateActiveTaskTickSchedule();}
 function tick(){
   if(!running)return;
   const el=Math.floor((Date.now()-startedAt)/1000);remaining=Math.max(0,pausedRemaining-el);
@@ -83,7 +100,7 @@ function tick(){
   gid('ringFg').setAttribute('stroke-dashoffset',String(circ-(remaining/totalDuration)*circ));
   const disp=gid('display');disp.textContent=fmt(remaining);disp.className='ring-time'+(remaining<=10&&remaining>0?' warn':'');
   intervals.forEach(iv=>{if(iv.intervalSec<=0)return;const exp=Math.floor(totalEl/iv.intervalSec),prev=fireCounts[iv.id]||0;if(exp>prev&&totalEl>0){if(cfg.sound&&!audioScheduled)playChime(iv.chime);fireCounts[iv.id]=exp;flashInt(iv.id)}});
-  if(remaining!==lastTickSec){lastTickSec=remaining;renderIntList()}
+  if(remaining!==lastTickSec){lastTickSec=remaining;if(intervals.length)renderIntList();}
   renderBanner();updateTitle();updateMiniTimer();
   if(remaining<=0){running=false;finished=true;clearInterval(tickId);onPhaseComplete()}
 }
@@ -109,7 +126,7 @@ function resetAll(){running=false;finished=false;clearInterval(tickId);cancelSch
 // ========== STOPWATCH ==========
 function swToggle(){if(swRunning){swRunning=false;swPausedEl+=Date.now()-swStartTime;gid('swStartBtn').textContent='Resume';gid('swStartBtn').className='btn btn-primary';maybeStopKeepalive()}else{swRunning=true;swStartTime=Date.now();clearInterval(swTickId);swTickId=setInterval(swTick,100);gid('swStartBtn').textContent='Pause';gid('swStartBtn').className='btn btn-pause';startKeepalive()}}
 function swTick(){if(!swRunning)return;swElapsed=swPausedEl+Date.now()-swStartTime;gid('swDisplay').textContent=fmtHMS(Math.floor(swElapsed/1000))}
-function swLap(){if(swElapsed<=0)return;const s=Math.floor(swElapsed/1000),d=document.createElement('div');d.style.cssText='font-size:10px;color:#5a8ab5;padding:4px 8px;background:#0a1320;border-radius:4px;display:flex;justify-content:space-between';d.innerHTML='<span>Lap '+(swLapList.length+1)+'</span><span>'+fmtHMS(s)+'</span>';gid('swLaps').prepend(d);swLapList.push(s)}
+function swLap(){if(swElapsed<=0)return;const s=Math.floor(swElapsed/1000),d=document.createElement('div');d.className='sw-lap';d.innerHTML='<span>Lap '+(swLapList.length+1)+'</span><span>'+fmtHMS(s)+'</span>';gid('swLaps').prepend(d);swLapList.push(s)}
 function swReset(){swRunning=false;swElapsed=0;swPausedEl=0;swLapList=[];clearInterval(swTickId);gid('swDisplay').textContent='00:00:00';gid('swStartBtn').textContent='Start';gid('swStartBtn').className='btn btn-primary';gid('swLaps').innerHTML=''}
 
 // ========== QUICK TIMERS ==========

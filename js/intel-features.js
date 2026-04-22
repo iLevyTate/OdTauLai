@@ -175,12 +175,13 @@ function classificationSetIcon(kind, idx, iconName){
   if(typeof saveState === 'function') saveState('user');
 }
 
-function classificationAdd(kind){
+async function classificationAdd(kind){
   if(typeof cfg === 'undefined' || !cfg) return;
-  const raw = kind === 'cat'
-    ? prompt('New category name:')
-    : prompt('New context name:');
-  if(!raw || !String(raw).trim()) return;
+  const promptLabel = kind === 'cat' ? 'New category name:' : 'New context name:';
+  const raw = typeof showAppPrompt === 'function'
+    ? await showAppPrompt(promptLabel, '')
+    : (kind === 'cat' ? prompt('New category name:') : prompt('New context name:'));
+  if(raw === null || !String(raw).trim()) return;
   ensureClassificationConfig(cfg);
   const label = String(raw).trim().slice(0, 80);
   let id = slugClassId(label);
