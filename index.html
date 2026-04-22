@@ -53,9 +53,8 @@
 </head>
 <body>
 <!-- Offline status indicator — only visible when navigator.onLine is false -->
-<div id="onlineStatus" class="offline-indicator" style="display:none"></div>
-<div class="container">
-
+<div id="onlineStatus" class="offline-indicator" style="display:none" role="status" aria-live="polite"></div>
+<div class="container" id="mainTabpanels" role="main" aria-label="App content">
   <div class="header">
     <h1>
       <svg class="header-logo" viewBox="0 0 512 512" width="32" height="32" aria-hidden="true">
@@ -90,46 +89,48 @@
     </div>
   </div>
 
-  <div id="banner" style="display:none;width:100%;padding:10px 14px;background:#0d1a2d;border:1px solid #1a2d44;border-radius:10px;margin-bottom:14px">
-    <div style="display:flex;align-items:center;gap:8px">
-      <div style="width:8px;height:8px;border-radius:50%;background:var(--work);animation:pulse 1.5s infinite"></div>
-      <span style="font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#5a8ab5">Tracking</span>
-      <span id="bannerTask" style="font-size:12px;font-weight:600;color:#b0c4d8;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
-      <span id="bannerTime" style="font-size:14px;font-weight:800;color:var(--work);font-variant-numeric:tabular-nums"></span>
+  <div id="banner" class="track-banner" style="display:none">
+    <div class="track-banner-inner">
+      <div class="track-banner-pulse" aria-hidden="true"></div>
+      <span class="track-banner-label">Tracking</span>
+      <span id="bannerTask" class="track-banner-task"></span>
+      <span id="bannerTime" class="track-banner-time"></span>
     </div>
   </div>
 
   <!-- Main Nav Tabs -->
-  <div style="display:flex;gap:8px;align-items:center;width:100%;max-width:960px;margin-bottom:10px">
-    <div class="nav-tabs" id="navTabs" style="flex:1;margin-bottom:0">
-    <button class="nav-tab active" data-navtab="tasks" onclick="showTab('tasks')">
-      <span class="nav-tab-icon">☰</span>
+  <div class="header-nav-bar">
+    <div class="nav-tabs" id="navTabs" role="tablist" aria-label="Main">
+    <button type="button" class="nav-tab active" data-navtab="tasks" onclick="showTab('tasks')" role="tab" aria-selected="true" id="navTab-tasks">
+      <span class="nav-tab-icon" aria-hidden="true">☰</span>
       <span>Tasks</span>
     </button>
-    <button class="nav-tab" data-navtab="focus" onclick="showTab('focus')">
-      <span class="nav-tab-icon">◉</span>
+    <button type="button" class="nav-tab" data-navtab="focus" onclick="showTab('focus')" role="tab" aria-selected="false" id="navTab-focus">
+      <span class="nav-tab-icon" aria-hidden="true">◉</span>
       <span>Timer</span>
     </button>
-    <button class="nav-tab" data-navtab="tools" onclick="showTab('tools')">
-      <span class="nav-tab-icon">✦</span>
+    <button type="button" class="nav-tab" data-navtab="tools" onclick="showTab('tools')" role="tab" aria-selected="false" id="navTab-tools">
+      <span class="nav-tab-icon" aria-hidden="true">✦</span>
       <span>Tools</span>
     </button>
-    <button class="nav-tab" data-navtab="data" onclick="showTab('data')">
-      <span class="nav-tab-icon">▤</span>
+    <button type="button" class="nav-tab" data-navtab="data" onclick="showTab('data')" role="tab" aria-selected="false" id="navTab-data">
+      <span class="nav-tab-icon" aria-hidden="true">▤</span>
       <span>Data</span>
     </button>
-    <button class="nav-tab" data-navtab="settings" onclick="showTab('settings')">
-      <span class="nav-tab-icon">⚙</span>
+    <button type="button" class="nav-tab" data-navtab="settings" onclick="showTab('settings')" role="tab" aria-selected="false" id="navTab-settings">
+      <span class="nav-tab-icon" aria-hidden="true">⚙</span>
       <span>Settings</span>
     </button>
     </div>
+    <div class="header-utils">
     <button type="button" id="headerAIChip" class="ai-chip ai-chip--idle" onclick="headerAIClick()" title="Task understanding — opens Tools">
       <span class="ai-chip-dot" aria-hidden="true"></span>
       <span class="ai-chip-label" aria-hidden="true">AI</span>
       <span id="aiChipLive" class="ai-chip-sr" aria-live="polite"></span>
     </button>
-    <button type="button" id="themeToggleBtn" onclick="toggleTheme()" title="Toggle theme" style="width:38px;height:38px;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-sm);color:var(--text-2);font-size:16px;cursor:pointer">🌙</button>
-    <button type="button" id="cmdKBtn" onclick="openCmdK()" title="Command palette (Ctrl+K or ⌘K)" style="width:38px;height:38px;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-sm);color:var(--text-2);font-size:14px;cursor:pointer">⌘K</button>
+    <button type="button" id="themeToggleBtn" class="header-icon-btn" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">🌙</button>
+    <button type="button" id="cmdKBtn" class="header-icon-btn header-icon-btn--kbd" onclick="openCmdK()" title="Command palette" aria-label="Command palette">⌘K</button>
+    </div>
   </div>
 
   <!-- Tasks (primary ClickUp-style task manager) -->
@@ -142,6 +143,7 @@
 
     <!-- Add task form: TOP — primary action -->
     <div class="task-form">
+      <label class="sr-only" for="taskInput">New task</label>
       <div class="task-input-wrap">
         <input class="task-input" id="taskInput" placeholder="Add a task… or paste multiple lines to import"
           oninput="maybeShowEnhanceBtn()"
@@ -152,7 +154,8 @@
       <button class="task-add" onclick="if(window._smartAddPreview){applySmartAddAndSubmit()}else{addTask()}">+ Add</button>
     </div>
     <div id="smartAddPreview" class="smart-add-preview" style="display:none"></div>
-    <div class="qa-hint">QUICK ADD: <code>today</code> / <code>tomorrow</code> / weekdays · natural dates (e.g. next Friday, in 3 days) · <code>@urgent</code> <code>@high</code> <code>@low</code> · <code>#tag</code> · <code>!star</code> · <code>~daily</code> <code>~weekly</code></div>
+    <div class="qa-hint" id="qa-hint">QUICK ADD: <code>today</code> / <code>tomorrow</code> / weekdays · natural dates (e.g. next Friday, in 3 days) · <code>@urgent</code> <code>@high</code> <code>@low</code> · <code>#tag</code> · <code>!star</code> · <code>~daily</code> <code>~weekly</code></div>
+    <button type="button" class="qa-hint-reveal" id="qa-hint-reveal" style="display:none" onclick="showQaHint()">Show quick-add syntax</button>
     <button type="button" id="askPromoChip" class="ask-promo-chip" style="display:none" onclick="openAskMode()" aria-label="Ask a natural-language question about your tasks (keyboard: Control or Command plus K, then question mark)" title="Ask mode (Ctrl/⌘+K then ?)">
       <span aria-hidden="true">✨</span>
       <span>Ask · <kbd>Ctrl/⌘+K</kbd> then <kbd>?</kbd></span>
@@ -160,7 +163,8 @@
 
     <div class="task-search-bar">
       <div class="task-search-row">
-        <input type="text" class="task-search" id="taskSearch" placeholder="🔍 Search tasks…" oninput="updateTaskFilters()" autocomplete="off">
+        <label class="sr-only" for="taskSearch">Search tasks</label>
+        <input type="text" class="task-search" id="taskSearch" placeholder="Search tasks…" aria-label="Search tasks" oninput="updateTaskFilters()" autocomplete="off">
         <button type="button" class="task-search-clear" id="taskSearchClear" onclick="clearTaskSearch()" style="display:none" aria-label="Clear search">×</button>
         <span class="task-search-mode-pill" id="taskSearchSemanticPill" style="display:none">Semantic</span>
         <label class="task-search-semantic" title="Rank by meaning (requires model loaded)">
@@ -189,12 +193,6 @@
         <button id="viewBoard" onclick="setTaskView('board')">Board</button>
         <button id="viewCal" onclick="setTaskView('calendar')">Cal</button>
       </div>
-      <label class="task-tb-check" title="Show more chips on each row (category, values, duplicates)">
-        <input type="checkbox" id="cardDensityDetailed" onchange="onCardDensityToggle()"> Detailed
-      </label>
-      <label class="task-tb-check" title="Include completed tasks in the All view">
-        <input type="checkbox" id="showCompletedAll" onchange="onShowCompletedToggle()"> Show completed
-      </label>
       <span class="filters-summary" id="filtersSummary" aria-live="polite"></span>
       <button type="button" class="filters-toggle" id="filtersToggle" onclick="toggleFiltersPanel()" title="Filters & sort">
         <span class="ft-icon">⚙</span>
@@ -253,6 +251,15 @@
           <option value="list">Group: List</option>
         </select>
       </div>
+      <div class="task-toolbar-row task-toolbar-display">
+        <span class="filter-display-lbl">Display</span>
+        <label class="task-tb-check" title="Show more chips on each row (category, values, duplicates)">
+          <input type="checkbox" id="cardDensityDetailed" onchange="onCardDensityToggle()"> Detailed
+        </label>
+        <label class="task-tb-check" title="Include completed tasks in the All view">
+          <input type="checkbox" id="showCompletedAll" onchange="onShowCompletedToggle()"> Show completed
+        </label>
+      </div>
     </div>
 
     <!-- Lists bar: only if multiple lists exist -->
@@ -278,11 +285,11 @@
     <!-- Archived notice (only shown in archive view) -->
     <div class="archived-notice" id="archivedNotice" style="display:none">
       <span class="archived-notice-inner"><span class="archived-notice-ic" data-icon="archive"></span>Viewing archived tasks — click the restore button (<span class="archived-notice-restore" data-icon="rotateCcw"></span>) to bring them back</span>
-      <button onclick="if(confirm('Permanently delete ALL archived tasks? This cannot be undone.'))emptyArchive()">Empty Archive</button>
+      <button type="button" onclick="emptyArchiveWithConfirm()">Empty Archive</button>
     </div>
 
     <!-- List view (default) -->
-    <div class="task-list" id="taskList"><div class="task-empty" id="taskEmpty">No tasks yet — add one above to get started</div></div>
+    <div class="task-list" id="taskList"><div class="task-empty" id="taskEmpty"></div></div>
 
     <!-- Board view (kanban) -->
     <div class="board-view" id="boardView" style="display:none"></div>
@@ -291,8 +298,14 @@
     <div id="calendarView" style="display:none"></div>
   </div>
 
+  <div class="timer-subnav" data-tab="focus">
+    <button type="button" class="timer-sub-btn active" data-sub="pomo" onclick="setTimerSub('pomo')">Pomodoro</button>
+    <button type="button" class="timer-sub-btn" data-sub="quick" onclick="setTimerSub('quick')">Quick</button>
+    <button type="button" class="timer-sub-btn" data-sub="sw" onclick="setTimerSub('sw')">Stopwatch</button>
+    <button type="button" class="timer-sub-btn" data-sub="chimes" onclick="setTimerSub('chimes')">Chimes</button>
+  </div>
   <!-- Pomodoro Focus Timer -->
-  <div class="panel" data-tab="focus" style="padding:20px">
+  <div class="panel timer-sub-panel" data-tab="focus" data-timer-sub="pomo" style="padding:20px">
     <div class="shdr">
       <div class="sdot" style="background:var(--accent)"></div>
       <span class="slbl">Focus Timer</span>
@@ -318,7 +331,7 @@
   </div>
 
   <!-- Quick Timers -->
-  <div class="panel" data-tab="focus">
+  <div class="panel timer-sub-panel" data-tab="focus" data-timer-sub="quick" style="display:none">
     <div class="shdr">
       <div class="sdot" style="background:#48b5e0"></div>
       <span class="slbl">Quick Timers</span>
@@ -345,7 +358,7 @@
   </div>
 
   <!-- Stopwatch -->
-  <div class="panel" data-tab="focus">
+  <div class="panel timer-sub-panel" data-tab="focus" data-timer-sub="sw" style="display:none">
     <div class="shdr"><div class="sdot" style="background:#9b59b6"></div><span class="slbl">Stopwatch</span></div>
     <div style="text-align:center">
       <div id="swDisplay" style="font-size:42px;font-weight:800;color:#e2e8f0;letter-spacing:3px;font-variant-numeric:tabular-nums;margin-bottom:12px">00:00:00</div>
@@ -359,7 +372,7 @@
   </div>
 
   <!-- Intervals / repeating chimes -->
-  <div class="panel" data-tab="focus">
+  <div class="panel timer-sub-panel" data-tab="focus" data-timer-sub="chimes" style="display:none">
     <div class="shdr"><div class="sdot" style="background:#3d8bcc"></div><span class="slbl">Repeating Chimes</span><span class="scnt" id="intCount">0 set</span></div>
     <div class="iform">
       <div style="flex:1 1 100px"><label class="fl">Label</label><input class="fi fi-w" id="intLabel" placeholder="e.g. Posture check"></div>
@@ -392,11 +405,11 @@
           <div class="srow"><span class="sr-lbl">Short Break</span><input type="number" class="sinput" id="cfgShort" value="5" min="1" max="30" onchange="updateConfig()"><span class="sunit">min</span></div>
           <div class="srow"><span class="sr-lbl">Long Break</span><input type="number" class="sinput" id="cfgLong" value="15" min="1" max="60" onchange="updateConfig()"><span class="sunit">min</span></div>
           <div class="srow"><span class="sr-lbl">Sessions / Cycle</span><input type="number" class="sinput" id="cfgCycle" value="4" min="2" max="10" onchange="updateConfig()"></div>
-          <div class="srow"><span class="sr-lbl">Auto-start Breaks</span><div class="toggle on" id="togBreak" onclick="toggleOpt('togBreak')"><div class="tknob"></div></div></div>
-          <div class="srow"><span class="sr-lbl">Auto-start Focus</span><div class="toggle" id="togWork" onclick="toggleOpt('togWork')"><div class="tknob"></div></div></div>
-          <div class="srow"><span class="sr-lbl">Sound Alerts</span><div class="toggle on" id="togSound" onclick="toggleOpt('togSound')"><div class="tknob"></div></div></div>
-          <div class="srow"><span class="sr-lbl">Desktop Notifications</span><div class="toggle on" id="togNotif" onclick="toggleOpt('togNotif')"><div class="tknob"></div></div></div>
-          <div class="srow"><span class="sr-lbl">Link Task to Session</span><div class="toggle on" id="togLink" onclick="toggleOpt('togLink')"><div class="tknob"></div></div></div>
+          <div class="srow"><span class="sr-lbl">Auto-start Breaks</span><div class="toggle on" id="togBreak" role="switch" aria-checked="true" tabindex="0" onclick="toggleOpt('togBreak')"><div class="tknob"></div></div></div>
+          <div class="srow"><span class="sr-lbl">Auto-start Focus</span><div class="toggle" id="togWork" role="switch" aria-checked="false" tabindex="0" onclick="toggleOpt('togWork')"><div class="tknob"></div></div></div>
+          <div class="srow"><span class="sr-lbl">Sound Alerts</span><div class="toggle on" id="togSound" role="switch" aria-checked="true" tabindex="0" onclick="toggleOpt('togSound')"><div class="tknob"></div></div></div>
+          <div class="srow"><span class="sr-lbl">Desktop Notifications</span><div class="toggle on" id="togNotif" role="switch" aria-checked="true" tabindex="0" onclick="toggleOpt('togNotif')"><div class="tknob"></div></div></div>
+          <div class="srow"><span class="sr-lbl">Link Task to Session</span><div class="toggle on" id="togLink" role="switch" aria-checked="true" tabindex="0" onclick="toggleOpt('togLink')"><div class="tknob"></div></div></div>
           <div class="srow" style="flex-direction:column;align-items:flex-start;gap:6px;padding:12px 0 14px;border-bottom:1px solid var(--border)">
             <div style="display:flex;align-items:center;gap:8px;width:100%;justify-content:space-between">
               <span class="sr-lbl">Background Audio</span>
@@ -474,7 +487,7 @@
       <div class="export-row">
         <button class="export-btn export-txt" onclick="exportFile('txt')">.txt</button>
         <button class="export-btn export-md"  onclick="exportFile('md')">.md</button>
-        <button class="export-btn export-clip" onclick="exportClipboard()">Copy</button>
+        <button class="export-btn export-clip" id="exportClipBtn" onclick="exportClipboard()">Copy</button>
       </div>
     </div>
 
@@ -541,7 +554,7 @@
     </div>
     <p class="what-next-sub">Ranked by priority, due date, energy fit, and blockers (no embeddings).</p>
     <div class="what-next-ctx">
-      <label>Time available (min)</label>
+      <label for="whatNextTime">Time available (min)</label>
       <select id="whatNextTime" class="mfield-in" onchange="openWhatNext()">
         <option value="0">Any</option>
         <option value="15">15</option>
@@ -549,7 +562,7 @@
         <option value="60">60</option>
         <option value="120">120</option>
       </select>
-      <label>Energy</label>
+      <label for="whatNextEnergy">Energy</label>
       <select id="whatNextEnergy" class="mfield-in" onchange="openWhatNext()">
         <option value="">Any</option>
         <option value="high">High</option>
@@ -588,6 +601,34 @@
     <div class="modal-foot">
       <button type="button" class="mfoot-btn mfoot-cancel" onclick="closeBulkImportModal()">Cancel</button>
       <button type="button" class="mfoot-btn mfoot-save" id="bulkImportConfirm" onclick="confirmBulkImport()">Add tasks</button>
+    </div>
+  </div>
+</div>
+
+<!-- App confirm (replaces window.confirm) -->
+<div class="modal-overlay app-dlg-overlay" id="appConfirmModal" role="alertdialog" aria-modal="true" aria-labelledby="appConfirmMessage" style="z-index:1100" onclick="if(event.target===this)closeAppConfirm(false)">
+  <div class="modal app-dlg" onclick="event.stopPropagation()">
+    <div class="modal-body">
+      <p id="appConfirmMessage" class="app-dlg-msg" style="margin:0;font-size:14px;line-height:1.5"></p>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="mfoot-btn mfoot-cancel" onclick="closeAppConfirm(false)">Cancel</button>
+      <button type="button" class="mfoot-btn mfoot-save" id="appConfirmOk" onclick="closeAppConfirm(true)">OK</button>
+    </div>
+  </div>
+</div>
+
+<!-- App prompt (replaces window.prompt) -->
+<div class="modal-overlay app-dlg-overlay" id="appPromptModal" role="dialog" aria-modal="true" aria-labelledby="appPromptLabel" style="z-index:1100" onclick="if(event.target===this)closeAppPrompt(null)">
+  <div class="modal app-dlg" onclick="event.stopPropagation()">
+    <div class="modal-body">
+      <label id="appPromptLabel" for="appPromptInput" class="app-dlg-msg" style="display:block;margin:0 0 10px;font-size:13px;white-space:pre-wrap;line-height:1.45"></label>
+      <input type="text" class="mfield-in" id="appPromptInput" style="width:100%" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();submitAppPrompt()}">
+      <textarea class="mfield-textarea" id="appPromptTextarea" style="width:100%;min-height:88px;display:none" rows="4" spellcheck="true"></textarea>
+    </div>
+    <div class="modal-foot">
+      <button type="button" class="mfoot-btn mfoot-cancel" onclick="closeAppPrompt(null)">Cancel</button>
+      <button type="button" class="mfoot-btn mfoot-save" id="appPromptOk" onclick="submitAppPrompt()">OK</button>
     </div>
   </div>
 </div>
@@ -640,11 +681,6 @@
       </div>
 
       <div class="mfield">
-        <div class="mfield-lbl">Repeat</div>
-        <div class="recur-options" id="mdRecur"></div>
-      </div>
-
-      <div class="mfield">
         <div class="mfield-lbl">Description</div>
         <textarea class="mfield-textarea" id="mdDesc" placeholder="Acceptance criteria, links, notes…"></textarea>
       </div>
@@ -652,6 +688,10 @@
       <details class="md-section">
         <summary class="md-section-sum">Tags &amp; list</summary>
         <div class="md-section-body">
+          <div class="mfield">
+            <div class="mfield-lbl">Repeat</div>
+            <div class="recur-options" id="mdRecur"></div>
+          </div>
           <div class="mfield">
             <div class="mfield-lbl">Tags</div>
             <div class="tags-editor" id="mdTagsEditor"></div>
@@ -679,7 +719,7 @@
             </div>
             <div class="mfield">
               <div class="mfield-lbl">Time Tracked</div>
-              <div class="mfield-in" id="mdTracked" style="background:#0a1320;cursor:default">—</div>
+              <div class="mfield-in mfield--readonly" id="mdTracked">—</div>
             </div>
           </div>
           <div class="mfield" id="mdCompletionNoteWrap">

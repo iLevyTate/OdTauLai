@@ -564,7 +564,10 @@ async function submitAddCalFeed(){
     const proxy = document.getElementById('cfProxy').value.trim();
     if(!url){ alert('URL is required'); return; }
     if(!proxy){
-      if(!confirm('No proxy set — direct fetch will likely fail due to browser CORS restrictions. Continue anyway?')) return;
+      const cmsg = 'No proxy set — direct fetch will likely fail due to browser CORS restrictions. Continue anyway?';
+      if(typeof showAppConfirm === 'function'){
+        if(!(await showAppConfirm(cmsg))) return;
+      }else if(!confirm(cmsg)) return;
     } else {
       // Remember proxy as default for next time
       try { localStorage.setItem(CALFEEDS_PROXY, proxy); } catch(e) {}
@@ -601,15 +604,16 @@ async function syncAllCalFeedsAndRerender(){
   if(typeof renderTaskList === 'function') renderTaskList();
 }
 
-function confirmRemoveCalFeed(feedId){
+async function confirmRemoveCalFeed(feedId){
   _loadCalFeeds();
   const f = _calFeeds.feeds.find(x => x.id === feedId);
   if(!f) return;
-  if(confirm(`Remove "${f.label}"? This only removes it from ODTAULAI — your actual calendar is unaffected.`)){
-    removeCalFeed(feedId);
-    renderCalFeedsPanel();
-    if(typeof renderTaskList === 'function') renderTaskList();
-  }
+  const q = `Remove "${f.label}"? This only removes it from ODTAULAI — your actual calendar is unaffected.`;
+  const ok = typeof showAppConfirm === 'function' ? await showAppConfirm(q) : confirm(q);
+  if(!ok) return;
+  removeCalFeed(feedId);
+  renderCalFeedsPanel();
+  if(typeof renderTaskList === 'function') renderTaskList();
 }
 
 // Auto-sync all feeds on app start (non-blocking, errors silent)

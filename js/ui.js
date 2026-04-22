@@ -412,6 +412,11 @@ function toggleTheme(){
 function applyTheme(){
   document.body.classList.toggle('light-theme',theme==='light');
   const btn=gid('themeToggleBtn');if(btn)btn.textContent=theme==='dark'?'🌙':'☀';
+  const meta=document.querySelector('meta[name="theme-color"]');
+  if(meta){
+    const c=getComputedStyle(document.body).getPropertyValue('--bg-0').trim();
+    if(c) meta.setAttribute('content',c);
+  }
 }
 function hasVisibleDescendant(taskId,visibleSet){
   return getTaskDescendantIds(taskId).some(id=>visibleSet.has(id))
@@ -672,9 +677,13 @@ function renderBoard(visibleTasks){
   })
 }
 
-// Task Detail Modal
+// Task Detail Modal — chips mutate the live task object while open. _taskModalSnapshot
+// is a deep clone taken on open; closeTaskDetail() restores it on Cancel/Escape/backdrop
+// unless skipRevert (Save, Delete).
+let _taskModalSnapshot=null;
 function openTaskDetail(id){
   const t=findTask(id);if(!t)return;
+  _taskModalSnapshot=JSON.parse(JSON.stringify(t));
   editingTaskId=id;
   gid('mdName').value=t.name;
   gid('mdCheckbox').classList.toggle('checked',t.status==='done');
@@ -689,7 +698,7 @@ function openTaskDetail(id){
   gid('mdTracked').textContent=fmtHMS(getRolledUpTime(id))+' · '+getRolledUpSessions(id)+' sessions';
   const path=getTaskPath(id);
   const pathStr=path.length>1?path.slice(0,-1).join(' › ')+' › ':'';
-  gid('mdStats').innerHTML='<span><b>Path:</b> '+esc(pathStr)+'<b style="color:#e2e8f0">'+esc(t.name)+'</b></span> · <span>Created '+esc(t.created||'—')+'</span>'+(t.completedAt?' · <span>Done '+esc(String(t.completedAt))+'</span>':'');
+  gid('mdStats').innerHTML='<span><b>Path:</b> '+esc(pathStr)+'<b class="md-name-strong">'+esc(t.name)+'</b></span> · <span>Created '+esc(t.created||'—')+'</span>'+(t.completedAt?' · <span>Done '+esc(String(t.completedAt))+'</span>':'');
   // List selector
   const listSel=gid('mdList');listSel.innerHTML='';
   lists.forEach(l=>{const opt=document.createElement('option');opt.value=l.id;opt.textContent=l.name;if((t.listId||lists[0].id)===l.id)opt.selected=true;listSel.appendChild(opt)});
@@ -815,6 +824,7 @@ async function refreshMdSimilarTasks(id){
   body.innerHTML = '<span class="intel-muted">Finding neighbors…</span>';
   try{
     const sim = await similarTasksFor(id, 5);
+    if (editingTaskId !== id) return;
     if(!sim.length){
       body.innerHTML = '<span class="intel-muted">No similar tasks found yet.</span>';
       return;
@@ -826,6 +836,7 @@ async function refreshMdSimilarTasks(id){
       </button>`).join('');
     if(acc) acc.classList.add('open');
   }catch(e){
+    if (editingTaskId !== id) return;
     body.innerHTML = '<span class="intel-muted">Could not load neighbors.</span>';
   }
 }
@@ -862,17 +873,29 @@ function _taskModalTabTrap(e){
   if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}
   else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}
 }
-function closeTaskDetail(){
+function closeTaskDetail(opts){
+  const skipRevert=opts&&opts.skipRevert;
+  if(!skipRevert&&_taskModalSnapshot&&editingTaskId!=null){
+    const id=editingTaskId,si=tasks.findIndex(x=>x.id===id);
+    if(si>=0){
+      const snap=JSON.parse(JSON.stringify(_taskModalSnapshot));
+      tasks[si]=snap;
+    }
+  }
+  _taskModalSnapshot=null;
   gid('taskModal').classList.remove('open');
+  if(!skipRevert) renderTaskList();
   editingTaskId=null;
   document.removeEventListener('keydown',_taskModalTabTrap,true);
   if(_taskModalPrevFocus&&_taskModalPrevFocus.focus)try{_taskModalPrevFocus.focus()}catch(e){}
   _taskModalPrevFocus=null;
+  if(typeof _updateActiveTaskTickSchedule==='function')_updateActiveTaskTickSchedule();
 }
 function saveTaskDetail(){
   if(!editingTaskId)return;
   const t=findTask(editingTaskId);if(!t)return;
-  if(t.recur&&t.status==='done'&&typeof completeHabitCycle==='function'){
+  try{
+  if(t.recur&&t.status==='done'&&typeof completeHabitCycle==='function'&&!t._habitCycledInSession){
     completeHabitCycle(t);
     gid('mdCheckbox').classList.remove('checked');gid('mdCheckbox').textContent='';
   }
@@ -888,11 +911,22 @@ function saveTaskDetail(){
   t.listId=parseInt(gid('mdList').value)||t.listId;
   if(t.status==='done'&&!t.completedAt)t.completedAt=stampCompletion();
   if(t.status!=='done')t.completedAt=null;
-  closeTaskDetail();renderTaskList();saveState('user')
+  _taskModalSnapshot=null;
+  gid('taskModal').classList.remove('open');
+  editingTaskId=null;
+  document.removeEventListener('keydown',_taskModalTabTrap,true);
+  if(_taskModalPrevFocus&&_taskModalPrevFocus.focus)try{_taskModalPrevFocus.focus()}catch(e){}
+  _taskModalPrevFocus=null;
+  }finally{
+    try{ delete t._habitCycledInSession; }catch(e){}
+  }
+  renderTaskList();
+  saveState('user');
+  if(typeof _updateActiveTaskTickSchedule==='function')_updateActiveTaskTickSchedule();
 }
 function deleteTaskFromModal(){
   if(!editingTaskId)return;
-  const id=editingTaskId;closeTaskDetail();removeTask(id);
+  const id=editingTaskId;closeTaskDetail({skipRevert:true});removeTask(id);
 }
 function toggleTaskDone(){
   if(!editingTaskId)return;
@@ -950,10 +984,109 @@ function _tickActiveTaskRow(){
   }
   renderBanner();
 }
-setInterval(_tickActiveTaskRow,1000);
+let _activeTaskTickId=null;
+function _updateActiveTaskTickSchedule(){
+  if(activeTaskId){
+    if(!_activeTaskTickId) _activeTaskTickId=setInterval(_tickActiveTaskRow,1000);
+  }else if(_activeTaskTickId){
+    clearInterval(_activeTaskTickId);
+    _activeTaskTickId=null;
+  }
+}
+window._updateActiveTaskTickSchedule=_updateActiveTaskTickSchedule;
 
-// ESC closes modal
-document.addEventListener('keydown',e=>{if(e.key==='Escape'&&gid('taskModal').classList.contains('open'))closeTaskDetail()});
+// ========== APP DIALOGS (replace native confirm/prompt) ==========
+let _appConfirmResolve=null;
+function closeAppConfirm(ok){
+  const ov=gid('appConfirmModal');
+  if(ov) ov.classList.remove('open');
+  const fn=_appConfirmResolve;
+  _appConfirmResolve=null;
+  if(fn) fn(!!ok);
+}
+function showAppConfirm(message){
+  return new Promise(resolve=>{
+    const ov=gid('appConfirmModal'), m=gid('appConfirmMessage');
+    if(!ov||!m){ resolve(confirm(message)); return; }
+    m.textContent=message;
+    _appConfirmResolve=resolve;
+    ov.classList.add('open');
+    setTimeout(()=>{const b=gid('appConfirmOk');if(b)b.focus()},30);
+  });
+}
+let _appPromptResolve=null,_appPromptMultiline=false;
+function _appPromptTextareaKeydown(e){
+  if(!_appPromptMultiline) return;
+  if((e.metaKey||e.ctrlKey)&&e.key==='Enter'){
+    e.preventDefault();
+    submitAppPrompt();
+  }
+}
+function closeAppPrompt(val){
+  const multi=gid('appPromptTextarea');
+  if(multi && multi._appPromptKd){
+    multi.removeEventListener('keydown', multi._appPromptKd);
+    multi._appPromptKd=null;
+  }
+  const ov=gid('appPromptModal');
+  if(ov) ov.classList.remove('open');
+  const fn=_appPromptResolve;
+  _appPromptResolve=null;
+  _appPromptMultiline=false;
+  if(fn) fn(val);
+}
+function submitAppPrompt(){
+  const single=gid('appPromptInput'), multi=gid('appPromptTextarea');
+  let v='';
+  if(_appPromptMultiline&&multi) v=multi.value;
+  else if(single) v=single.value;
+  closeAppPrompt(v);
+}
+function showAppPrompt(label, defaultValue, opts){
+  opts=opts||{};
+  return new Promise(resolve=>{
+    const ov=gid('appPromptModal'), lb=gid('appPromptLabel'), single=gid('appPromptInput'), multi=gid('appPromptTextarea');
+    if(!ov||!lb){ resolve(prompt(label, defaultValue||'')||null); return; }
+    const useMulti=!!opts.multiline;
+    _appPromptMultiline=useMulti;
+    lb.textContent=label;
+    if(lb.setAttribute) lb.setAttribute('for', useMulti ? 'appPromptTextarea' : 'appPromptInput');
+    if(single){ single.style.display=useMulti?'none':''; single.value=defaultValue||'' }
+    if(multi){
+      if(multi._appPromptKd){ multi.removeEventListener('keydown', multi._appPromptKd); multi._appPromptKd=null }
+      multi.style.display=useMulti?'':'none';
+      multi.value=defaultValue||'';
+      if(useMulti){
+        multi._appPromptKd=_appPromptTextareaKeydown;
+        multi.addEventListener('keydown', multi._appPromptKd);
+      }
+    }
+    _appPromptResolve=resolve;
+    ov.classList.add('open');
+    setTimeout(()=>{(useMulti?multi:single)?.focus()},30);
+  });
+}
+window.closeAppConfirm=closeAppConfirm;
+window.closeAppPrompt=closeAppPrompt;
+window.submitAppPrompt=submitAppPrompt;
+window.showAppConfirm=showAppConfirm;
+window.showAppPrompt=showAppPrompt;
+
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Escape') return;
+  const ac=gid('appConfirmModal');
+  if(ac&&ac.classList.contains('open')){ e.preventDefault(); closeAppConfirm(false); return }
+  const ap=gid('appPromptModal');
+  if(ap&&ap.classList.contains('open')){ e.preventDefault(); closeAppPrompt(null); return }
+  const cmdk=gid('cmdkOverlay');
+  if(cmdk&&cmdk.classList.contains('open')){ e.preventDefault(); if(typeof closeCmdK==='function') closeCmdK(); return }
+  const wno=gid('whatNextOverlay');
+  if(wno&&wno.style.display!=='none'){ e.preventDefault(); if(typeof closeWhatNext==='function') closeWhatNext(); return }
+  const bulk=gid('bulkImportModal');
+  if(bulk&&bulk.classList.contains('open')){ e.preventDefault(); if(typeof closeBulkImportModal==='function') closeBulkImportModal(); return }
+  const tm=gid('taskModal');
+  if(tm&&tm.classList.contains('open')){ e.preventDefault(); closeTaskDetail(); }
+});
 
 // ========== LOG ==========
 function addLog(name,durSec,type){timeLog.unshift({id:++logIdCtr,name,durSec,type,time:timeNow()});renderLog();saveState('user')}
@@ -966,13 +1099,15 @@ function showTab(tab){
   if(typeof closeCmdK==='function')closeCmdK();
   activeTab=tab;
   document.querySelectorAll('[data-tab]').forEach(el=>{el.style.display=el.dataset.tab===tab?'':'none'});
-  document.querySelectorAll('.nav-tab').forEach(el=>{el.classList.toggle('active',el.dataset.navtab===tab)});
-  // Auto-open settings accordion when user switches to Settings tab
+  document.querySelectorAll('.nav-tab').forEach(el=>{const on=el.dataset.navtab===tab;el.classList.toggle('active',on);el.setAttribute('aria-selected',on?'true':'false')});
   if(tab==='settings'&&!settingsOpen)toggleSettings();
-  // Scroll to top of content for clean view
-  window.scrollTo({top:gid('navTabs').offsetTop-20,behavior:'smooth'});
+  const nav=gid('navTabs');
+  if(nav&&nav.getBoundingClientRect().top<0){
+    window.scrollTo({top:nav.offsetTop-20,behavior:'smooth'});
+  }
+  if(tab==='focus'&&typeof setTimerSub==='function') setTimerSub(cfg.timerSub||'pomo');
   updateMiniTimer();
-  saveState('auto')
+  saveState('auto');
 }
 
 // ========== FLOATING MINI TIMER ==========
@@ -1027,14 +1162,13 @@ function miniTimerToggle(){
 
 // ========== STATS ==========
 function renderStats(){gid('statPomos').textContent=totalPomos;const fm=Math.floor(totalFocusSec/60);gid('statFocus').textContent=fm>=60?Math.floor(fm/60)+'h '+fm%60+'m':fm+'m';gid('statBreaks').textContent=totalBreaks;const h=gid('historyBlocks');h.innerHTML='';sessionHistory.forEach(s=>{const b=document.createElement('div');b.className='hblock h'+s.type[0];h.appendChild(b)})}
-function resetStats(){
-  if(!confirm('Reset today\'s data? Current progress will be archived to Past Days.'))return;
-  // Archive current day before resetting
+async function resetStats(){
+  if(!(await showAppConfirm('Reset today\'s pomodoro stats and time log? Tasks and goals are not affected. A snapshot is archived to Past Days if there is progress to keep.')))return;
   const state={date:todayKey(),totalPomos,totalBreaks,totalFocusSec,goals:goals.map(g=>({text:g.text,done:g.done,doneAt:g.doneAt})),tasks:tasks.map(t=>({name:t.name,totalSec:getTaskElapsed(t),sessions:t.sessions})),timeLog,sessionHistory};
   if(totalPomos>0||goals.length>0||tasks.length>0)archiveDay(state);
-  totalPomos=0;totalBreaks=0;totalFocusSec=0;pomosInCycle=0;sessionHistory=[];
-  goals=[];goalIdCtr=0;tasks=[];taskIdCtr=0;activeTaskId=null;taskStartedAt=null;timeLog=[];
-  renderStats();renderPips();renderGoalList();renderTaskList();renderLog();renderBanner();renderArchive();saveState('user')
+  totalPomos=0;totalBreaks=0;totalFocusSec=0;pomosInCycle=0;sessionHistory=[];timeLog=[];
+  renderStats();renderPips();renderGoalList();renderTaskList();renderLog();renderBanner();renderArchive();saveState('user');
+  if(typeof _updateActiveTaskTickSchedule==='function')_updateActiveTaskTickSchedule();
 }
 function updateTitle(){if(running)document.title=(phase==='work'?'🔴':'🟢')+' '+fmt(remaining)+' — '+getPL(phase);else if(finished)document.title='✅ '+getPL(phase)+' Complete';else document.title='ODTAULAI'}
 

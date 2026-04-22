@@ -217,8 +217,34 @@ async function addTask(){
     id:++taskIdCtr,name,totalSec:0,sessions:0,created:timeNowFull(),
     parentId:null,collapsed:false
   },defaultTaskProps(),props));
-  inp.value='';maybeShowSwipeTip();renderTaskList();saveState('user')
+  inp.value='';maybeShowSwipeTip();
+  if(typeof cfg==='object'&&cfg&&!cfg.qaHintHidden){
+    cfg.qaHintTaskCount=(cfg.qaHintTaskCount||0)+1;
+    if(cfg.qaHintTaskCount>=3) cfg.qaHintHidden=true;
+  }
+  if(typeof syncQaHintVisibility==='function') syncQaHintVisibility();
+  renderTaskList();saveState('user')
 }
+
+function showQaHint(){
+  const h=gid('qa-hint'),r=gid('qa-hint-reveal');
+  if(h) h.style.display='';
+  if(r) r.style.display='none';
+  if(typeof cfg==='object'&&cfg){cfg.qaHintHidden=false;saveState('user')}
+}
+function syncQaHintVisibility(){
+  const h=gid('qa-hint'),r=gid('qa-hint-reveal');
+  if(!h) return;
+  if(typeof cfg==='object'&&cfg&&cfg.qaHintHidden){
+    h.style.display='none';
+    if(r) r.style.display='inline';
+  }else{
+    h.style.display='';
+    if(r) r.style.display='none';
+  }
+}
+window.showQaHint=showQaHint;
+window.syncQaHintVisibility=syncQaHintVisibility;
 
 const SWIPE_TIP_KEY = 'odtaulai_swipe_tip_dismissed';
 function maybeShowSwipeTip(){
@@ -361,7 +387,12 @@ function getTaskPath(taskId){
 function getTaskElapsed(t){let s=t.totalSec;if(activeTaskId===t.id&&taskStartedAt)s+=Math.floor((Date.now()-taskStartedAt)/1000);return s}
 
 // Due date helpers
-function todayISO(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')}
+/** Local calendar day YYYY-MM-DD — same as `todayKey()` in utils.js */
+function todayISO(){
+  if (typeof todayKey === 'function') return todayKey();
+  const d = new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
 function getDueClass(dateStr){
   if(!dateStr)return null;
   const today=todayISO();
@@ -414,16 +445,17 @@ function toggleTask(id){
     // Auto-set status to In Progress when starting time
     const t=findTask(id);if(t&&t.status==='open')t.status='progress';
   }
-  renderTaskList();renderBanner();saveState('user')
+  renderTaskList();renderBanner();saveState('user');
+  if(typeof window._updateActiveTaskTickSchedule==='function')window._updateActiveTaskTickSchedule();
 }
 
-function removeTask(id){
+async function removeTask(id){
   event&&event.stopPropagation();
   const task=findTask(id);if(!task)return;
   // If viewing archive, this is a permanent delete
   if(task.archived||smartView==='archived'){
     const descendants=getTaskDescendantIds(id);
-    if(!confirm('Permanently delete "'+task.name+'"'+(descendants.length>0?' and '+descendants.length+' subtask'+(descendants.length!==1?'s':''):'')+'? Cannot be undone.'))return;
+    if(!(await showAppConfirm('Permanently delete "'+task.name+'"'+(descendants.length>0?' and '+descendants.length+' subtask'+(descendants.length!==1?'s':''):'')+'? Cannot be undone.')))return;
     const toRemove=[id,...descendants];
     if(toRemove.includes(activeTaskId)){
       if(taskStartedAt){const t=findTask(activeTaskId);if(t)t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000)}
@@ -436,7 +468,7 @@ function removeTask(id){
   }else{
     // Archive it
     const descendants=getTaskDescendantIds(id);
-    if(descendants.length>0&&!confirm('Archive "'+task.name+'" and '+descendants.length+' subtask'+(descendants.length!==1?'s':'')+'?'))return;
+    if(descendants.length>0&&!(await showAppConfirm('Archive "'+task.name+'" and '+descendants.length+' subtask'+(descendants.length!==1?'s':'')+'?')))return;
     const toArchive=[id,...descendants];
     if(toArchive.includes(activeTaskId)){
       if(taskStartedAt){const t=findTask(activeTaskId);if(t)t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000)}
@@ -460,6 +492,13 @@ function emptyArchive(){
   tasks=tasks.filter(t=>!t.archived);
   renderTaskList();saveState('user')
 }
+async function emptyArchiveWithConfirm(){
+  const msg='Permanently delete ALL archived tasks? This cannot be undone.';
+  if(typeof showAppConfirm==='function'){if(!(await showAppConfirm(msg)))return}
+  else if(!confirm(msg))return;
+  emptyArchive();
+}
+window.emptyArchiveWithConfirm=emptyArchiveWithConfirm;
 
 // Smart Views
 function setSmartView(v){
@@ -604,6 +643,7 @@ function completeHabitCycle(t){
   t.status='open';
   t.completedAt=null;
   t.dueDate=advanceRecurringDate(t.dueDate||todayISO(),t.recur);
+  t._habitCycledInSession = true;
 }
 
 function getHabitStreak(t){
@@ -698,35 +738,38 @@ function ensureDefaultList(){
   lists.forEach(l=>{if(typeof l.description!=='string')l.description=''});
 }
 const LIST_DESC_HINT='Short description (optional) — feeds Auto-organize so new tasks get routed here.\nExamples: "bills, taxes, budgets, investments" or "household chores, repairs, cleaning".';
-function addList(){
-  const name=prompt('List name:');if(!name||!name.trim())return;
-  const description=(prompt(LIST_DESC_HINT,'')||'').trim();
+async function addList(){
+  const name=await showAppPrompt('List name:','');
+  if(name===null||!String(name).trim())return;
+  const descriptionRaw=await showAppPrompt(LIST_DESC_HINT,'',{multiline:true});
+  if(descriptionRaw===null)return;
+  const description=String(descriptionRaw).trim();
   const colors=['#2ecc71','#3d8bcc','#e056a0','#e8a838','#9b59b6','#48b5e0','#c0392b','#1abc9c'];
   const color=colors[lists.length%colors.length];
-  lists.push({id:++listIdCtr,name:name.trim(),color,description});
+  lists.push({id:++listIdCtr,name:String(name).trim(),color,description});
   activeListId=listIdCtr;
   if(typeof invalidateListVectorCache==='function')invalidateListVectorCache();
   renderLists();renderTaskList();saveState('user')
 }
-function editList(id){
+async function editList(id){
   event&&event.stopPropagation();
   const l=lists.find(x=>x.id===id);if(!l)return;
-  const name=prompt('List name:',l.name);
+  const name=await showAppPrompt('List name:',l.name);
   if(name===null)return;
-  if(!name.trim()){alert('Name cannot be empty.');return}
-  const description=prompt(LIST_DESC_HINT,l.description||'');
-  if(description===null)return;
-  l.name=name.trim();
-  l.description=description.trim();
+  if(!String(name).trim()){alert('Name cannot be empty.');return}
+  const descriptionRaw=await showAppPrompt(LIST_DESC_HINT,l.description||'',{multiline:true});
+  if(descriptionRaw===null)return;
+  l.name=String(name).trim();
+  l.description=String(descriptionRaw).trim();
   if(typeof invalidateListVectorCache==='function')invalidateListVectorCache();
   renderLists();renderTaskList();saveState('user')
 }
-function removeList(id){
+async function removeList(id){
   event&&event.stopPropagation();
   if(lists.length<=1){alert('You need at least one list.');return}
   const list=lists.find(l=>l.id===id);if(!list)return;
   const taskCount=tasks.filter(t=>t.listId===id).length;
-  if(!confirm('Delete list "'+list.name+'"?'+(taskCount>0?' '+taskCount+' task(s) will be moved to the first remaining list.':'')))return;
+  if(!(await showAppConfirm('Delete list "'+list.name+'"?'+(taskCount>0?' '+taskCount+' task(s) will be moved to the first remaining list.':''))))return;
   lists=lists.filter(l=>l.id!==id);
   const fallbackId=lists[0].id;
   tasks.forEach(t=>{if(t.listId===id)t.listId=fallbackId});
@@ -781,6 +824,7 @@ function updateFiltersSummary(){
   el.textContent=grpPart?sortPart+' · '+grpPart:sortPart;
 }
 
+let _semanticSearchReqId=0;
 function updateTaskFilters(){
   taskFilters.search=gid('taskSearch').value.toLowerCase().trim();
   taskFilters.status=gid('filterStatus').value;
@@ -798,19 +842,24 @@ function updateTaskFilters(){
   if(semPill) semPill.style.display=(gid('taskSearchSemantic')&&gid('taskSearchSemantic').checked)?'':'none';
   if(window._taskSearchSemantic && taskFilters.search && typeof semanticSearch === 'function' && typeof isIntelReady === 'function' && isIntelReady()){
     const rawQ = gid('taskSearch').value.trim();
+    const myReq=++_semanticSearchReqId;
     void (async () => {
       try{
         const results = await semanticSearch(rawQ, 800);
+        if(myReq!==_semanticSearchReqId) return;
         window._semanticScores = new Map(results.map(r => [r.id, r.score]));
       }catch(e){
+        if(myReq!==_semanticSearchReqId) return;
         window._semanticScores = null;
       }
+      if(myReq!==_semanticSearchReqId) return;
       renderTaskList();
     })();
     return;
   }
   window._semanticScores = null;
-  renderTaskList()
+  _semanticSearchReqId++;
+  renderTaskList();
 }
 function setTaskView(v){
   taskView=v;
@@ -1029,7 +1078,7 @@ function renderTaskList(){
       {
         const ic=(window.icon && window.icon('sparkles',{size:28}))||'';
         const mod=/(Mac|iPhone|iPod|iPad)/i.test(navigator.platform||'')?'⌘':'Ctrl';
-        empty.innerHTML='<div class="empty-ic" style="opacity:.6;margin-bottom:8px">'+ic+'</div><div style="font-weight:500;margin-bottom:4px">No tasks yet</div><div style="font-size:12px;opacity:.85;margin-bottom:6px">Add your first task above, or press <strong>'+mod+'+K</strong> to open the command palette (jump anywhere).</div><div style="font-size:12px;opacity:.7;margin-bottom:8px"><strong>Filters</strong> (button above) set sort, group, and status — smart-view chips are quick lenses on top.</div><div style="font-size:11px;opacity:.55;font-family:var(--font-mono,monospace);line-height:1.6">Buy milk <span style="color:var(--accent,#48b5e0)">tomorrow @urgent #shopping !star</span></div>';
+        empty.innerHTML='<div class="empty-ic" style="opacity:.6;margin-bottom:8px">'+ic+'</div><div style="font-weight:500;margin-bottom:4px">No tasks yet</div><button type="button" class="first-task-btn" onclick="var i=gid(&quot;taskInput&quot;);if(i){i.focus();i.select();}">+ Add your first task</button><div style="font-size:12px;opacity:.85;margin:10px 0 6px">Or press <strong>'+mod+'+K</strong> to open the command palette.</div><div style="font-size:12px;opacity:.7;margin-bottom:8px"><strong>Filters</strong> (button above) set sort, group, and status — smart-view chips are quick lenses on top.</div><div style="font-size:11px;opacity:.55;font-family:var(--font-mono,monospace);line-height:1.6">Buy milk <span style="color:var(--accent,#48b5e0)">tomorrow @urgent #shopping !star</span></div>';
       }
     }
     return;
@@ -1091,6 +1140,7 @@ function getGroupColor(key){
 }
 function renderGroupedTasks(visibleTasks){
   const list=gid('taskList');
+  const visibleSet=new Set(visibleTasks.map(t=>t.id));
   // Only show root-level in groups (subtasks appear under their parents)
   const roots=visibleTasks.filter(t=>!t.parentId);
   const groups={};
@@ -1120,7 +1170,11 @@ function renderGroupedTasks(visibleTasks){
         // Show descendants inline (no further grouping) if not collapsed
         if(!t.collapsed){
           function renderKids(pid,depth){
-            getTaskChildren(pid).forEach(c=>{if(!c.archived){renderTaskItem(c,depth);if(!c.collapsed)renderKids(c.id,depth+1)}});
+            getTaskChildren(pid).forEach(c=>{
+              if(!visibleSet.has(c.id)) return;
+              renderTaskItem(c,depth);
+              if(!c.collapsed) renderKids(c.id, depth+1);
+            });
           }
           renderKids(t.id,1);
         }

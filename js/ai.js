@@ -666,7 +666,7 @@ function acceptProposedOps(ops, meta){
   }
 }
 
-function intelApplyPending(){
+async function intelApplyPending(){
   const hasDelete = _pendingOps.some(o => o.name === 'DELETE_TASK');
   const dangerAck = document.getElementById('pendingDangerAck');
   if(hasDelete && (!dangerAck || !dangerAck.checked)){
@@ -675,7 +675,9 @@ function intelApplyPending(){
   }
   if(_pendingDestructive === 'hard' && !hasDelete){
     const msg = 'Proposed changes include bulk destructive actions (archive/move to list). Apply anyway?';
-    if(typeof window !== 'undefined' && typeof window.confirm === 'function'){
+    if(typeof showAppConfirm === 'function'){
+      if(!(await showAppConfirm(msg))){ _setIntelStatus('ready', 'Cancelled'); return; }
+    }else if(typeof window !== 'undefined' && typeof window.confirm === 'function'){
       if(!window.confirm(msg)){ _setIntelStatus('ready', 'Cancelled'); return; }
     }
   }
@@ -1391,11 +1393,12 @@ async function intelAutoOrganize(){
   }
   const withDesc = lists.filter(l => (l.description || '').trim().length >= 4).length;
   if(withDesc === 0){
-    if(!confirm(
-      'None of your lists have descriptions yet — routing will use list names alone, which can be noisy.\n\n'
+    const msg = 'None of your lists have descriptions yet — routing will use list names alone, which can be noisy.\n\n'
       + 'Tip: click the ✎ on a list chip to add a short description like "bills, taxes, budgets" for Finance.\n\n'
-      + 'Continue anyway?'
-    )) return;
+      + 'Continue anyway?';
+    if(typeof showAppConfirm === 'function'){
+      if(!(await showAppConfirm(msg))) return;
+    }else if(!confirm(msg)) return;
   }
   _setIntelStatus('working', 'Scoring tasks against lists…');
   try{

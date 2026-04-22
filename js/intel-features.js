@@ -188,22 +188,13 @@ function classificationSetIcon(idx, iconName){
   if(typeof saveState === 'function') saveState('user');
 }
 
-function classificationSetColor(idx, colorVal){
+async function classificationAdd(kind){
   if(typeof cfg === 'undefined' || !cfg) return;
-  ensureClassificationConfig(cfg);
-  const arr = cfg.categories;
-  if(!arr[idx]) return;
-  arr[idx].color = String(colorVal || '').trim().slice(0, 80) || 'var(--cat-general)';
-  renderClassificationSettings();
-  refreshClassificationUi();
-  if(typeof renderTaskList === 'function') renderTaskList();
-  if(typeof saveState === 'function') saveState('user');
-}
-
-function classificationAdd(){
-  if(typeof cfg === 'undefined' || !cfg) return;
-  const raw = prompt('New life area name:');
-  if(!raw || !String(raw).trim()) return;
+  const promptLabel = kind === 'cat' ? 'New category name:' : 'New context name:';
+  const raw = typeof showAppPrompt === 'function'
+    ? await showAppPrompt(promptLabel, '')
+    : (kind === 'cat' ? prompt('New category name:') : prompt('New context name:'));
+  if(raw === null || !String(raw).trim()) return;
   ensureClassificationConfig(cfg);
   const label = String(raw).trim().slice(0, 80);
   let id = slugClassId(label);
