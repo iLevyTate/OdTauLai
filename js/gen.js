@@ -17,6 +17,7 @@ const GEN_MODEL_PRESETS = [
   { id:'HuggingFaceTB/SmolLM2-360M-Instruct',        dtype:'q4', sizeMb:230, label:'SmolLM2 360M (balanced)',       note:'Recommended for most devices' },
   { id:'HuggingFaceTB/SmolLM2-135M-Instruct',        dtype:'q4', sizeMb:100, label:'SmolLM2 135M (tiny)',           note:'Lowest RAM — older phones' },
   { id:'onnx-community/Qwen2.5-0.5B-Instruct',       dtype:'q4', sizeMb:320, label:'Qwen2.5 0.5B (bigger)',         note:'Desktop / WebGPU preferred' },
+  { id:'onnx-community/Qwen2.5-1.5B-Instruct',     dtype:'q4', sizeMb:600, label:'Qwen2.5 1.5B (native tools)',  note:'Brain uses tokenizer tools + <tool_call> XML; WebGPU recommended' },
   { id:'onnx-community/SmolLM2-360M-Instruct',       dtype:'q4', sizeMb:230, label:'SmolLM2 360M (onnx-community)', note:'Use if HuggingFaceTB mirror fails' },
   { id:'onnx-community/SmolLM2-135M-Instruct-ONNX',  dtype:'q4', sizeMb:100, label:'SmolLM2 135M (onnx-community)', note:'Use if HuggingFaceTB mirror fails' },
 ];
@@ -359,7 +360,7 @@ function genAbort(){
 
 /**
  * Generate text. Streams tokens via onToken if provided.
- * @param {{ messages?:Array, prompt?:string, maxTokens?:number, temperature?:number, onToken?:(t:string)=>void, signal?:AbortSignal }} opts
+ * @param {{ messages?:Array, prompt?:string, tools?:Array, maxTokens?:number, temperature?:number, onToken?:(t:string)=>void, signal?:AbortSignal }} opts
  * @returns {Promise<string>} Full generated text (without the prompt).
  */
 async function genGenerate(opts){
@@ -388,7 +389,9 @@ async function genGenerate(opts){
     const tokenizer = _genPipe.tokenizer;
     let inputs;
     if(Array.isArray(opts.messages) && typeof tokenizer.apply_chat_template === 'function'){
-      inputs = tokenizer.apply_chat_template(opts.messages, { tokenize: false, add_generation_prompt: true });
+      const tplOpts = { tokenize: false, add_generation_prompt: true };
+      if(Array.isArray(opts.tools) && opts.tools.length) tplOpts.tools = opts.tools;
+      inputs = tokenizer.apply_chat_template(opts.messages, tplOpts);
     } else if(typeof opts.prompt === 'string'){
       inputs = opts.prompt;
     } else {
@@ -457,6 +460,52 @@ async function genGenerate(opts){
 //   - System prompt hard-constrains output shape. Schema enforcement is still
 //     done by the caller (validateOps / manual guards) — trust but verify.
 
+/**
+ * Qwen2.5 chat template asks the model to return JSON in `<tool_call>...</tool_call>`.
+ * Returns `null` if there are no `<tool_call>` tags, or if tags exist but no inner JSON parsed (caller may fall back to parseOpsJson).
+ *
+ * Limitation: the inner match is non-greedy up to the first `</tool_call>`. If a string value in the JSON
+ * contains that closing tag literally, extraction can truncate or fail to parse (then returns null for fallback).
+ * @param {string} text
+ * @returns {Array<{ name:string, args:object }> | null}
+ */
+function parseQwen25ToolCallBlocks(text){
+  const s = String(text || '');
+  if(s.indexOf('<tool_call>') < 0) return null;
+  const rx = /<tool_call>\s*([\s\S]*?)\s*<\/tool_call>/gi;
+  const out = [];
+  let m;
+  const pushOne = (obj) => {
+    if(!obj || typeof obj.name !== 'string') return;
+    const name = String(obj.name).toUpperCase().replace(/\s/g, '_');
+    let a = obj.arguments;
+    if(a == null) a = {};
+    else if(typeof a === 'string'){
+      try{ a = JSON.parse(a); }catch(e){ a = {}; }
+    }
+    if(typeof a !== 'object' || Array.isArray(a)) a = {};
+    out.push({ name, args: a });
+  };
+  while((m = rx.exec(s)) !== null){
+    const inner = (m[1] || '').trim();
+    if(!inner) continue;
+    let obj;
+    try{ obj = JSON.parse(inner); }catch(e){ continue; }
+    if(Array.isArray(obj)) obj.forEach(pushOne);
+    else pushOne(obj);
+  }
+  if(!out.length) return null;
+  return out;
+}
+
+/**
+ * @returns {boolean} True when the loaded model uses Qwen2.5 native `<tool_call>` (see parseQwen25ToolCallBlocks).
+ */
+function isGenModelNativeQwen25Tools(){
+  const id = _genModelId || '';
+  return /Qwen2\.5-.+Instruct/i.test(String(id));
+}
+
 function _stripCodeFences(s){
   return String(s || '')
     .replace(/^\s*```(?:json|js|javascript)?\s*/i, '')
@@ -498,6 +547,12 @@ function _extractFirstLine(text){
   return String(text || '').replace(/```[\s\S]*?```/g, '').split('\n').map(s => s.trim()).find(Boolean) || '';
 }
 
+/** Strips fences, first non-empty line, then caps length — shared by _genTextCall and test hook. */
+function _formatGenTextCallOutput(raw){
+  const line = _extractFirstLine(_stripCodeFences(raw));
+  return line ? line.slice(0, 220) : null;
+}
+
 async function _genJsonCall({ system, user, maxTokens = 192, temperature = 0.1, signal }){
   if(!_genReady || !_genPipe) return null;
   try{
@@ -526,8 +581,7 @@ async function _genTextCall({ system, user, maxTokens = 64, temperature = 0.3, s
       ],
       maxTokens, temperature, signal,
     });
-    const line = _extractFirstLine(_stripCodeFences(raw));
-    return line ? line.slice(0, 220) : null;
+    return _formatGenTextCallOutput(raw);
   }catch(e){
     if(String(e && e.message) === 'GEN_ABORTED') return null;
     console.warn('[gen] text helper failed', e);
@@ -751,6 +805,8 @@ if(typeof window !== 'undefined'){
   window.genLoad = genLoad;
   window.genAbortLoad = genAbortLoad;
   window.genGenerate = genGenerate;
+  window.parseQwen25ToolCallBlocks = parseQwen25ToolCallBlocks;
+  window.isGenModelNativeQwen25Tools = isGenModelNativeQwen25Tools;
   window.genAbort = genAbort;
   window.isGenReady = isGenReady;
   window.isGenLoading = isGenLoading;
@@ -778,4 +834,5 @@ if(typeof window !== 'undefined'){
   window._genExtractJsonObject = _extractJsonObject;
   window._genExtractFirstLine  = _extractFirstLine;
   window._genStripCodeFences   = _stripCodeFences;
+  window._formatGenTextCallOutput = _formatGenTextCallOutput;
 }

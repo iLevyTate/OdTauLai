@@ -1895,7 +1895,7 @@
 .task-search-semantic{font-size:11px;color:var(--text-3);display:flex;align-items:center;gap:5px;white-space:nowrap;cursor:pointer;user-select:none}
 .task-search-semantic--disabled{opacity:.65;cursor:not-allowed}
 .task-search-semantic--disabled input{cursor:not-allowed}
-.what-next-overlay{position:fixed;inset:0;background:rgba(5,10,18,.72);z-index:400;display:flex;align-items:flex-start;justify-content:center;padding:max(16px, env(safe-area-inset-top)) 12px 24px;overflow:auto}
+.what-next-overlay{position:fixed;inset:0;background:rgba(5,10,18,.72);z-index:1450;display:flex;align-items:flex-start;justify-content:center;padding:max(16px, env(safe-area-inset-top)) 12px 24px;overflow:auto}
 .what-next-panel{background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-lg);max-width:440px;width:100%;padding:16px 18px;box-shadow:var(--shadow-1);margin-top:8vh}
 .what-next-hdr{display:flex;justify-content:space-between;align-items:center;font-weight:700;font-size:15px;margin-bottom:6px}
 .what-next-x{background:none;border:none;color:var(--text-3);cursor:pointer;font-size:16px;padding:4px}
@@ -2315,6 +2315,18 @@ body:has(.offline-indicator:not([style*="display:none"])){ padding-top:30px; }
 .class-mgr-btn:hover{border-color:var(--accent-border);color:var(--text-1)}
 .class-mgr-id{font-size:10px;color:var(--text-4);padding:2px 6px;background:var(--bg-3);border-radius:4px}
 .class-mgr-add{margin-top:4px}
+.class-mgr-cat{margin-bottom:8px}
+.class-mgr-cat--hidden{opacity:0.55}
+.class-mgr-details{margin-top:4px;border-radius:6px;border:1px solid var(--border);background:var(--bg-1);padding:0 8px 8px;font-size:12px;color:var(--text-2)}
+.class-mgr-details > summary{cursor:pointer;padding:6px 0;font-size:11px;color:var(--text-3)}
+.class-mgr-focus-p,.class-mgr-ex{margin:6px 0 0}
+.class-mgr-cv{margin:6px 0 0 18px;padding:0}
+.class-mgr-reclass{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:12px 0 4px}
+.class-mgr-hint{font-size:11px;color:var(--text-3)}
+
+.wn-cal-hint{display:block;margin-top:4px;font-size:11px;color:var(--text-3);font-style:italic}
+.cal-ev-mk-task{margin-left:6px;padding:2px 6px;font-size:10px;border-radius:4px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-2);cursor:pointer}
+.cal-ev-mk-task:hover{border-color:var(--accent-border);color:var(--text-1)}
 
 .md-habit-log{font-size:12px;color:var(--text-2)}
 .habit-log-sum{margin-bottom:8px;font-size:12px;color:var(--text-3)}

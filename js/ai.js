@@ -153,6 +153,106 @@ function headerAIClick(){
 // ══════════════════════════════════════════════════════════════════════════════
 // TASK MUTATIONS (used by pending ops + duplicate merge)
 // ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * On-device life-area classification: centroid + kNN. Async because embeddings load from IDB.
+ * @returns {Promise<{type:string, id?:number, before?:object}|{type:'noop'}|null>}
+ */
+/**
+ * Preview life-area classification without mutating the task (for pending-op cards).
+ * @returns {Promise<{ nextCat:string, beforeCat:string|null, confidence:number } | { skip:true, beforeCat?:string|null } | null>}
+ */
+// region predictClassifyCategory-test-extract
+async function predictClassifyCategory(taskId){
+  const t = taskId != null ? findTask(taskId) : null;
+  if(!t) return null;
+  if(typeof isIntelReady !== 'function' || !isIntelReady()) return null;
+  if(typeof embedStore === 'undefined' || !embedStore.ensure) return null;
+  try{
+    await embedStore.ensure(t);
+    const rec = await embedStore.get(t.id);
+    if(!rec || !rec.vec) return null;
+    let centroids = null;
+    if(typeof ensureCategoryCentroids === 'function'){
+      try{ centroids = await ensureCategoryCentroids(); }catch(e){}
+    }
+    const store = (embedStore && typeof embedStore.all === 'function') ? await embedStore.all() : new Map();
+    if(typeof predictMetadataFromVec !== 'function') return null;
+    const meta = predictMetadataFromVec(rec.vec, {
+      store,
+      excludeId: t.id,
+      categoryCentroidVecs: centroids || undefined,
+      k: 5,
+    });
+    const nextCat = meta && meta.category;
+    const beforeCat = t.category || null;
+    if(!nextCat || nextCat === 'general' || (typeof hasClassificationCategory === 'function' && !hasClassificationCategory(nextCat))){
+      return { skip: true, beforeCat };
+    }
+    if(nextCat === beforeCat) return { skip: true, beforeCat };
+    let confidence = 0;
+    const cKnn = meta._confidence && meta._confidence.category;
+    if(cKnn && typeof cKnn.confidence === 'number') confidence = cKnn.confidence;
+    else{
+      const cCen = meta._confidence && meta._confidence.categoryCentroid;
+      if(cCen && typeof cCen.sim === 'number') confidence = Math.max(0, Math.min(1, cCen.sim));
+    }
+    return { nextCat, beforeCat, confidence };
+  }catch(e){
+    console.warn('[predictClassifyCategory]', e);
+    return null;
+  }
+}
+// endregion predictClassifyCategory-test-extract
+
+async function executeClassifyTaskOp(op){
+  const a = op && op.args;
+  const t = a && a.id != null ? findTask(a.id) : null;
+  if(!t) return null;
+  const pc = op && op._previewCategory;
+  if(pc){
+    if(pc.skip) return { type: 'noop' };
+    if(pc.nextCat){
+      if(typeof hasClassificationCategory === 'function' && !hasClassificationCategory(pc.nextCat)) return { type: 'noop' };
+      if(pc.nextCat === (t.category || null)) return { type: 'noop' };
+      const beforeCat = t.category;
+      t.category = pc.nextCat;
+      return { type: 'updated', id: t.id, before: { category: beforeCat } };
+    }
+    return { type: 'noop' };
+  }
+  if(typeof isIntelReady !== 'function' || !isIntelReady()) return { type: 'noop' };
+  if(typeof embedStore === 'undefined' || !embedStore.ensure) return { type: 'noop' };
+  try{
+    await embedStore.ensure(t);
+    const rec = await embedStore.get(t.id);
+    if(!rec || !rec.vec) return { type: 'noop' };
+    let centroids = null;
+    if(typeof ensureCategoryCentroids === 'function'){
+      try{ centroids = await ensureCategoryCentroids(); }catch(e){}
+    }
+    const store = (embedStore && typeof embedStore.all === 'function') ? await embedStore.all() : new Map();
+    if(typeof predictMetadataFromVec !== 'function') return { type: 'noop' };
+    const meta = predictMetadataFromVec(rec.vec, {
+      store,
+      excludeId: t.id,
+      categoryCentroidVecs: centroids || undefined,
+      k: 5,
+    });
+    const nextCat = meta && meta.category;
+    if(!nextCat || nextCat === 'general' || (typeof hasClassificationCategory === 'function' && !hasClassificationCategory(nextCat))){
+      return { type: 'noop' };
+    }
+    if(nextCat === (t.category || null)) return { type: 'noop' };
+    const beforeCat = t.category;
+    t.category = nextCat;
+    return { type: 'updated', id: t.id, before: { category: beforeCat } };
+  }catch(e){
+    console.warn('[executeClassifyTaskOp]', e);
+    return { type: 'noop' };
+  }
+}
+
 function executeIntelOp(op){
   const a = op.args;
   let snap = null;
@@ -168,12 +268,17 @@ function executeIntelOp(op){
         category: a.category || null,
         dueDate: a.dueDate || null,
         description: a.description || '',
-        tags: a.tags ? String(a.tags).split(',').map(s => s.trim()).filter(Boolean) : [],
+        tags: a.tags == null
+          ? []
+          : (Array.isArray(a.tags)
+            ? a.tags.map(s => String(s).replace(/^#/, '').trim()).filter(Boolean)
+            : String(a.tags).split(/[,\s]+/).map(s => s.replace(/^#/, '').trim()).filter(Boolean)),
         effort: a.effort || null,
         type: a.type || 'task',
         listId: a.listId || activeListId,
       });
       tasks.push(nt);
+      if(typeof _taskIndexRegister === 'function') _taskIndexRegister(nt);
       snap = { type: 'created', id };
       break;
     }
@@ -227,20 +332,24 @@ function executeIntelOp(op){
       const t = findTask(a.id); if(!t || !t.archived) return null;
       snap = { type: 'deleted', before: { ...t } };
       const desc = getTaskDescendantIds(t.id);
+      for(const rid of [t.id, ...desc]){ if(typeof _taskIndexRemove === 'function') _taskIndexRemove(rid); }
       tasks = tasks.filter(x => x.id !== t.id && !desc.includes(x.id));
+      if(typeof rebuildTaskIdIndex === 'function') rebuildTaskIdIndex();
       break;
     }
     case 'DUPLICATE_TASK':{
       const src = findTask(a.id); if(!src) return null;
       const id = ++taskIdCtr;
-      tasks.push(Object.assign({}, src, {
+      const dup = Object.assign({}, src, {
         id, name: src.name + ' (copy)',
         totalSec: 0, sessions: 0, created: timeNowFull(),
         completedAt: null, status: 'open', archived: false,
         tags: [...(src.tags || [])], blockedBy: [],
         checklist: (src.checklist || []).map(c => ({ ...c, done: false, doneAt: null })),
         notes: [],
-      }));
+      });
+      tasks.push(dup);
+      if(typeof _taskIndexRegister === 'function') _taskIndexRegister(dup);
       snap = { type: 'created', id };
       break;
     }
@@ -326,6 +435,70 @@ function executeIntelOp(op){
       t.recur = a.recur || null;
       break;
     }
+    case 'SNOOZE_TASK':{
+      const t = findTask(a.id); if(!t) return null;
+      snap = { type: 'updated', id: t.id, before: { ...t } };
+      if(a.untilDate) t.dueDate = a.untilDate;
+      t.remindAt = null;
+      t.reminderFired = false;
+      break;
+    }
+    case 'RESCHEDULE':{
+      const t = findTask(a.id); if(!t) return null;
+      snap = { type: 'updated', id: t.id, before: { ...t } };
+      if(a.dueDate) t.dueDate = a.dueDate;
+      if(a.remindAt != null) t.remindAt = a.remindAt;
+      t.reminderFired = false;
+      break;
+    }
+    case 'SPLIT_TASK':{
+      const src = findTask(a.id);
+      if(!src || !Array.isArray(a.parts) || a.parts.length < 2) return null;
+      const names = a.parts.map(p => (p && p.name) ? String(p.name).trim() : '').filter(Boolean);
+      if(names.length < 2) return null;
+      const beforeName = src.name;
+      const snaps = [{ type: 'updated', id: src.id, before: { name: beforeName } }];
+      src.name = names[0];
+      src.lastModified = Date.now();
+      const parId = src.parentId != null ? src.parentId : null;
+      let extBase = null;
+      if(src._ext && typeof src._ext === 'object'){
+        extBase = { ...src._ext };
+        delete extBase.calFeedId;
+        delete extBase.calEventUid;
+      }
+      for(let i = 1; i < names.length; i++){
+        const idNew = ++taskIdCtr;
+        const sib = Object.assign({}, src, {
+          id: idNew, name: names[i], totalSec: 0, sessions: 0, created: timeNowFull(),
+          completedAt: null, status: 'open', parentId: parId, archived: false, blockedBy: [],
+          notes: [],
+          checklist: [],
+          tags: Array.isArray(src.tags) ? [...src.tags] : [],
+          valuesAlignment: Array.isArray(src.valuesAlignment) ? [...src.valuesAlignment] : [],
+          completions: [],
+          lastModified: Date.now(),
+          _ext: extBase,
+        });
+        tasks.push(sib);
+        if(typeof _taskIndexRegister === 'function') _taskIndexRegister(sib);
+        snaps.push({ type: 'created', id: idNew });
+      }
+      return { type: 'batch', snaps };
+    }
+    case 'CREATE_FROM_EVENT':{
+      if(a.eventUid == null || a.feedId == null) return null;
+      if(typeof createTaskFromCalEventCore !== 'function') return null;
+      const idNew = createTaskFromCalEventCore(a.feedId, a.eventUid);
+      if(!idNew) return null;
+      return { type: 'created', id: idNew };
+    }
+    case 'QUERY_TASKS':
+    case 'GET_TASK_DETAIL':
+    case 'GET_CALENDAR_EVENTS':
+    case 'LIST_CATEGORIES':
+    case 'LIST_LISTS':
+      return { type: 'noop_read' };
     default: return null;
   }
   return snap;
@@ -458,6 +631,36 @@ function _describeOpStructured(op){
     case 'REMOVE_BLOCKER': return { kind: 'simple', title: 'Remove blocker', taskName, detail: 'Blocker #' + a.blockerId, icon: 'close', danger: false };
     case 'SET_REMINDER': return { kind: 'simple', title: 'Set reminder', taskName, detail: String(a.remindAt || ''), icon: 'timer', danger: false };
     case 'SET_RECUR': return { kind: 'simple', title: a.recur ? 'Set recurrence' : 'Clear recurrence', taskName, detail: a.recur ? String(a.recur) : '', icon: 'refresh', danger: false };
+    case 'SNOOZE_TASK': return { kind: 'simple', title: 'Snooze', taskName, detail: a.untilDate ? `Until ${a.untilDate}` : '', icon: 'timer', danger: false };
+    case 'RESCHEDULE': return { kind: 'simple', title: 'Reschedule', taskName, detail: [a.dueDate, a.remindAt].filter(Boolean).join(' · '), icon: 'refresh', danger: false };
+    case 'SPLIT_TASK': {
+      const nPart = (a.parts && a.parts.length) || 0;
+      const first = (Array.isArray(a.parts) && a.parts[0] && a.parts[0].name) ? String(a.parts[0].name).trim() : '';
+      const detail = nPart >= 2 && first
+        ? `Rename to "${first.slice(0, 120)}" + ${nPart - 1} sibling(s)`
+        : '';
+      return { kind: 'simple', title: `Split into ${nPart} parts`, taskName, detail, icon: 'list', danger: false };
+    }
+    case 'CLASSIFY_TASK': {
+      if(!t) return { kind: 'simple', title: 'Classify (life area)', taskName, detail: 'Task not found', icon: 'spark', danger: false };
+      const pc = op._previewCategory;
+      if(pc && pc.skip){
+        const det = pc.reason === 'embed_unavailable'
+          ? 'Couldn\'t classify (embeddings unavailable)'
+          : 'No confident match — will skip';
+        return { kind: 'simple', title: 'Classify (life area)', taskName, detail: det, icon: 'spark', danger: false };
+      }
+      if(pc && pc.nextCat){
+        const d = (typeof getCategoryDef === 'function') ? getCategoryDef(pc.nextCat) : null;
+        const label = d ? d.label : String(pc.nextCat);
+        const pct = (typeof pc.confidence === 'number')
+          ? Math.round(Math.max(0, Math.min(1, pc.confidence)) * 100)
+          : '—';
+        return { kind: 'simple', title: 'Classify (life area)', taskName, detail: `Propose: ${label} (${pct}%)`, icon: 'spark', danger: false };
+      }
+      return { kind: 'simple', title: 'Classify (life area)', taskName, detail: '', icon: 'spark', danger: false };
+    }
+    case 'CREATE_FROM_EVENT': return { kind: 'simple', title: 'Create task from event', taskName, detail: `feed ${a.feedId != null ? a.feedId : '—'}`, icon: 'plus', danger: false };
     default: return { kind: 'simple', title: op.name, taskName, detail: '', icon: 'gear', danger: false };
   }
 }
@@ -534,10 +737,12 @@ function aiUndo(){
     else flat.push(s);
   });
   flat.forEach(s => {
+    if(!s || s.type === 'noop' || s.type === 'noop_read') return;
     if(s.type === 'created') tasks = tasks.filter(t => t.id !== s.id);
     else if(s.type === 'updated'){ const t = findTask(s.id); if(t) Object.assign(t, s.before); }
     else if(s.type === 'deleted') tasks.push(s.before);
   });
+  if(typeof rebuildTaskIdIndex === 'function') rebuildTaskIdIndex();
   saveState('user');
   if(typeof renderTaskList === 'function') renderTaskList();
   _renderUndoBtn();
@@ -648,8 +853,26 @@ function intelRejectPending(){
  * @param {Array<{name:string,args:object}>} ops
  * @param {{ source?:string, destructiveLevel?:'none'|'warn'|'hard' }} [meta]
  */
-function acceptProposedOps(ops, meta){
+async function acceptProposedOps(ops, meta){
+  if(Array.isArray(ops) && ops.length > 50){
+    console.warn('[ask] Proposed op list truncated from', ops.length, 'to 50');
+  }
   const list = Array.isArray(ops) ? ops.slice(0, 50) : [];
+  const classifyIdx = [];
+  list.forEach((op, i) => { if(op && op.name === 'CLASSIFY_TASK') classifyIdx.push(i); });
+  await Promise.all(classifyIdx.map(async (i) => {
+    const op = list[i];
+    if(typeof predictClassifyCategory !== 'function') return;
+    const id = op.args && op.args.id;
+    try{
+      const pred = await predictClassifyCategory(id);
+      if(pred && pred.skip) op._previewCategory = { skip: true, beforeCat: pred.beforeCat };
+      else if(pred && pred.nextCat) op._previewCategory = { nextCat: pred.nextCat, beforeCat: pred.beforeCat, confidence: pred.confidence };
+      else if(pred == null) op._previewCategory = { skip: true, reason: 'embed_unavailable', beforeCat: (op.args && findTask(op.args.id)) ? (findTask(op.args.id).category || null) : null };
+    }catch(_){
+      op._previewCategory = { skip: true, reason: 'embed_unavailable' };
+    }
+  }));
   _pendingOps = list;
   _pendingDestructive = (meta && meta.destructiveLevel) || 'none';
   _pendingSource = (meta && meta.source) || null;
@@ -666,6 +889,31 @@ function acceptProposedOps(ops, meta){
   }
 }
 
+async function intelReclassifyUncategorized(){
+  if(typeof isIntelReady !== 'function' || !isIntelReady()){
+    _setIntelStatus('error', 'Load embeddings first (Tools tab or header chip)');
+    return;
+  }
+  if(typeof proposeReclassifyUncategorized !== 'function') return;
+  const ops = await proposeReclassifyUncategorized();
+  if(!ops.length){
+    _setIntelStatus('ready', 'No uncategorized tasks or no confident life-area match');
+    return;
+  }
+  await acceptProposedOps(ops, { source: 'reclassify', destructiveLevel: 'none' });
+}
+
+/**
+ * When Apply should prompt for the hard bulk (archive / move) confirmation.
+ * DELETE_TASK uses the checkbox ack in the panel instead of this dialog.
+ */
+function intelHardBulkConfirmNeeded(pendingOps, destructiveLevel){
+  if(!Array.isArray(pendingOps) || !pendingOps.length) return false;
+  const hasDelete = pendingOps.some(o => o && o.name === 'DELETE_TASK');
+  if(hasDelete) return false;
+  return destructiveLevel === 'hard';
+}
+
 async function intelApplyPending(){
   const hasDelete = _pendingOps.some(o => o.name === 'DELETE_TASK');
   const dangerAck = document.getElementById('pendingDangerAck');
@@ -673,7 +921,7 @@ async function intelApplyPending(){
     _setIntelStatus('error', 'Confirm permanent delete below');
     return;
   }
-  if(_pendingDestructive === 'hard' && !hasDelete){
+  if(intelHardBulkConfirmNeeded(_pendingOps, _pendingDestructive)){
     const msg = 'Proposed changes include bulk destructive actions (archive/move to list). Apply anyway?';
     if(typeof showAppConfirm === 'function'){
       if(!(await showAppConfirm(msg))){ _setIntelStatus('ready', 'Cancelled'); return; }
@@ -689,7 +937,9 @@ async function intelApplyPending(){
     const op = _pendingOps[idx];
 
     if(op.name !== 'UPDATE_TASK'){
-      selOps.push({ name: op.name, args: { ...op.args } });
+      const next = { name: op.name, args: { ...op.args } };
+      if(op._previewCategory) next._previewCategory = op._previewCategory;
+      selOps.push(next);
       continue;
     }
 
@@ -712,23 +962,27 @@ async function intelApplyPending(){
   const snaps = [];
   let applied = 0;
   const failures = [];
-  selOps.forEach(op => {
+  for(const op of selOps){
     try{
-      const s = executeIntelOp(op);
-      if(s){ snaps.push(s); applied++; }
-      else {
+      const s = op.name === 'CLASSIFY_TASK' && typeof executeClassifyTaskOp === 'function'
+        ? await executeClassifyTaskOp(op)
+        : executeIntelOp(op);
+      if(s){
+        if(s.type !== 'noop' && s.type !== 'noop_read') snaps.push(s);
+        applied++;
+      }else{
         let reason = 'unknown';
-        if(op.args.id && !findTask(op.args.id)) reason = `task #${op.args.id} not found`;
-        else if(op.name === 'DELETE_TASK' && op.args.id){
+        if(op.args && op.args.id && !findTask(op.args.id)) reason = `task #${op.args.id} not found`;
+        else if(op.name === 'DELETE_TASK' && op.args && op.args.id){
           const t = findTask(op.args.id);
           if(t && !t.archived) reason = 'task must be archived before permanent delete';
         }
         failures.push(`${op.name}: ${reason}`);
       }
     }catch(e){
-      failures.push(`${op.name}: ${(e.message || 'error').slice(0, 50)}`);
+      failures.push(`${op.name}: ${(e && e.message ? e.message : 'error').slice(0, 50)}`);
     }
-  });
+  }
 
   if(snaps.length){
     const sourceTag = _pendingSource ? ` via ${_pendingSource}` : '';
@@ -987,7 +1241,7 @@ function renderAIPanel(){
   const ready = typeof isIntelReady === 'function' && isIntelReady();
   const dev = typeof getIntelDevice === 'function' ? getIntelDevice() : null;
 
-  const embedModel = (typeof window !== 'undefined' && window.INTEL_EMBED_MODEL) || 'Xenova/gte-small';
+  const embedModel = (typeof window !== 'undefined' && window.INTEL_EMBED_MODEL) || 'Xenova/gte-base-en-v1.5';
   panel.innerHTML = `
     <div class="intel-card">
       <div class="intel-card-head">
@@ -1017,7 +1271,7 @@ function renderAIPanel(){
             </div>
           </div>
           <details class="intel-details"><summary>How it works</summary>
-            <p class="intel-details-body">A small on-device embedding model (<strong>${embedModel}</strong>, ~33 MB) encodes each task’s meaning as a vector. Cosine similarity drives semantic search, duplicate detection, smart-add hints, list routing, similar tasks, and harmonize proposals. Your task text stays local.</p>
+            <p class="intel-details-body">An on-device embedding model (<strong>${embedModel}</strong>) encodes each task’s meaning as a vector — WebGPU uses gte-base (~110 MB), WASM uses bge-small (~33 MB). Cosine similarity drives semantic search, duplicate detection, smart-add hints, list routing, similar tasks, and harmonize proposals. Your task text stays local.</p>
           </details>
         </div>
         <div id="intelProgressWrap" class="intel-progress-wrap" style="display:none">
@@ -1242,6 +1496,7 @@ function acceptMdBreakdown(){
       { listId: parent.listId, effort: s.effort || null },
     );
     tasks.push(child);
+    if(typeof _taskIndexRegister === 'function') _taskIndexRegister(child);
     added.push(child.id);
   }
   if(parent.collapsed) parent.collapsed = false;
@@ -1701,11 +1956,13 @@ async function applySmartAddAndSubmit(){
 
   const merged = Object.assign({}, defaultTaskProps(), sugg, parsed.props);
 
-  tasks.push(Object.assign({
+  const smartT = Object.assign({
     id: ++taskIdCtr, name: parsed.name,
     totalSec: 0, sessions: 0, created: timeNowFull(),
     parentId: null, collapsed: false,
-  }, merged));
+  }, merged);
+  tasks.push(smartT);
+  if(typeof _taskIndexRegister === 'function') _taskIndexRegister(smartT);
 
   inp.value = '';
   window._smartAddPreview = null;
@@ -1732,6 +1989,7 @@ function openWhatNext(){
   if(energy === 'high' || energy === 'low') opts.energy = energy;
 
   const ranked = rankWhatNext(tasks, opts).slice(0, 3);
+  const calHint = (typeof getWhatNextCalConflictHint === 'function') ? getWhatNextCalConflictHint({ timeMin }) : '';
   const body = document.getElementById('whatNextBody');
   if(body){
     body.innerHTML = ranked.length
@@ -1739,6 +1997,7 @@ function openWhatNext(){
         <button type="button" class="what-next-item" onclick="openTaskDetail(${x.t.id});closeWhatNext();">
           <span class="wn-name">${esc(x.t.name)}</span>
           <span class="wn-meta">${x.t.dueDate ? esc(x.t.dueDate) : 'no date'} · ${esc(x.t.priority || 'none')}</span>
+          ${i === 0 && calHint ? `<span class="wn-cal-hint" role="note">${esc(calHint)}</span>` : ''}
           ${i === 0 ? '<span class="wn-why" id="wnWhy" style="display:none"></span>' : ''}
         </button>`).join('')
       : '<span style="color:var(--text-3);font-size:12px">Nothing queued — add tasks or clear filters.</span>';
@@ -1778,6 +2037,8 @@ function toggleTaskSearchSemantic(){
 }
 
 window.executeIntelOp = executeIntelOp;
+window.executeClassifyTaskOp = executeClassifyTaskOp;
+window.predictClassifyCategory = predictClassifyCategory;
 window.renderAIPanel = renderAIPanel;
 window.smartAddEnhance = smartAddEnhance;
 window.smartAddParseWithLLM = smartAddParseWithLLM;
@@ -1805,6 +2066,8 @@ window.syncGenChip = syncGenChip;
 window.syncSemanticSearchUi = syncSemanticSearchUi;
 window.headerAIClick = headerAIClick;
 window.acceptProposedOps = acceptProposedOps;
+window.intelReclassifyUncategorized = intelReclassifyUncategorized;
+window.intelHardBulkConfirmNeeded = intelHardBulkConfirmNeeded;
 
 // ========== GENERATIVE AI (Ask) — Settings UI ==========
 // All LLM state lives in js/gen.js and js/ask.js. These functions just

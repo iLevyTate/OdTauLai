@@ -343,7 +343,7 @@ async function renderSystemInfo(info){
     <div><strong>Storage:</strong> ${storageLine}</div>
     <div><strong>Intelligence:</strong> ${typeof isIntelReady === 'function' && isIntelReady()
       ? `<span class="sys-info-ok">${okIc} Embeddings ready (${typeof getIntelDevice === 'function' ? getIntelDevice() || 'runtime' : ''})</span>`
-      : '<span style="color:var(--text-3)">Loads in background (~33 MB, cached offline)</span>'}</div>`;
+      : '<span style="color:var(--text-3)">Loads in background (WebGPU ~110 MB, WASM ~33 MB, cached offline)</span>'}</div>`;
 }
 // Initial render + re-render when online status changes
 setTimeout(() => { renderSystemInfo(); }, 400);
@@ -374,9 +374,35 @@ setTimeout(() => {
         if(pct) pct.textContent = v + '%';
         if(typeof syncHeaderAIChip === 'function') syncHeaderAIChip('loading', v + '%');
       });
-  intelLoad(onProgress).then(() => {
+  intelLoad(onProgress).then(async () => {
     if(w) w.style.display = 'none';
     if(retry) retry.style.display = 'none';
+    if(typeof embedStore !== 'undefined' && embedStore.migrateEmbedRuntimeIfNeeded){
+      try{
+        const mig = await embedStore.migrateEmbedRuntimeIfNeeded();
+        if(mig && mig.didPurge){
+          const ban = document.getElementById('embedReindexBanner');
+          if(ban){
+            ban.style.display = '';
+            ban.setAttribute('role', 'status');
+            ban.setAttribute('aria-live', 'polite');
+            ban.textContent = 'Re-indexing tasks…';
+          }
+          await embedStore.reindexAllOpenTasks((done, total) => {
+            const b = document.getElementById('embedReindexBanner');
+            if(b) b.textContent = 'Re-indexing tasks (' + done + ' of ' + total + ')…';
+          });
+          const b2 = document.getElementById('embedReindexBanner');
+          if(b2){
+            b2.textContent = 'Re-indexing complete.';
+            setTimeout(() => { if(b2) b2.style.display = 'none'; }, 4000);
+          }
+        }
+      }catch(e){ console.warn('[app] embed migration', e); }
+    }
+    if(typeof ensureCategoryCentroids === 'function'){
+      try{ await ensureCategoryCentroids(); }catch(e){}
+    }
     if(typeof ensureSchwartzEmbeddings === 'function'){
       ensureSchwartzEmbeddings().catch(() => {});
     }

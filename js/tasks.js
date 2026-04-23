@@ -1,7 +1,12 @@
 // ========== GOALS ==========
-function addGoal(){const inp=gid('goalInput');if(!inp)return;const text=inp.value.trim();if(!text)return;goals.push({id:++goalIdCtr,text,done:false,doneAt:null,addedAt:timeNow()});inp.value='';renderGoalList();saveState('user')}
-function toggleGoal(id){const g=goals.find(x=>x.id===id);if(g){g.done=!g.done;g.doneAt=g.done?timeNow():null}renderGoalList();saveState('user')}
-function removeGoal(id){goals=goals.filter(g=>g.id!==id);renderGoalList();saveState('user')}
+function addGoal(){const inp=gid('goalInput');if(!inp)return;const text=inp.value.trim();if(!text)return;goals.push({id:++goalIdCtr,text,done:false,doneAt:null,addedAt:timeNow(),lastModified:Date.now()});inp.value='';renderGoalList();saveState('user')}
+function toggleGoal(id){const g=goals.find(x=>x.id===id);if(g){g.done=!g.done;g.doneAt=g.done?timeNow():null;g.lastModified=Date.now()}renderGoalList();saveState('user')}
+function removeGoal(id){
+  if(typeof syncGoalDels==='object'&&syncGoalDels)syncGoalDels[id]=Date.now();
+  goals=goals.filter(g=>g.id!==id);
+  renderGoalList();
+  saveState('user');
+}
 function renderGoalList(){
   const list=gid('goalList');if(!list)return; // panel removed — skip everything
   const cnt=gid('goalCount');if(cnt)cnt.textContent=goals.filter(g=>g.done).length+' / '+goals.length;
@@ -213,10 +218,12 @@ async function addTask(){
     props = p.props;
   }
   if(!name){ name = raw; props = {}; }
-  tasks.push(Object.assign({
+  const _newT=Object.assign({
     id:++taskIdCtr,name,totalSec:0,sessions:0,created:timeNowFull(),
     parentId:null,collapsed:false
-  },defaultTaskProps(),props));
+  },defaultTaskProps(),props);
+  tasks.push(_newT);
+  _taskIndexRegister(_newT);
   inp.value='';maybeShowSwipeTip();
   if(typeof cfg==='object'&&cfg&&!cfg.qaHintHidden){
     cfg.qaHintTaskCount=(cfg.qaHintTaskCount||0)+1;
@@ -338,10 +345,12 @@ async function confirmBulkImport(){
       props = p.props;
     }
     if(!name){ name = line; props = {}; }
-    tasks.push(Object.assign({
+    const _bt=Object.assign({
       id:++taskIdCtr,name,totalSec:0,sessions:0,created:timeNowFull(),
       parentId:null,collapsed:false
-    },defaultTaskProps(),props));
+    },defaultTaskProps(),props);
+    tasks.push(_bt);
+    _taskIndexRegister(_bt);
   }
   const inp = gid('taskInput');
   if(inp) inp.value = '';
@@ -354,16 +363,47 @@ async function confirmBulkImport(){
 
 window.closeBulkImportModal = closeBulkImportModal;
 window.confirmBulkImport = confirmBulkImport;
-function findTask(id){return tasks.find(t=>t.id===id)}
+
+const _taskById=new Map();
+function _taskIndexRegister(t){
+  if(t&&t.id!=null) _taskById.set(t.id,t);
+}
+function _taskIndexRemove(id){
+  if(id!=null) _taskById.delete(id);
+}
+function rebuildTaskIdIndex(){
+  _taskById.clear();
+  if(Array.isArray(tasks)) tasks.forEach(_taskIndexRegister);
+}
+window.rebuildTaskIdIndex=rebuildTaskIdIndex;
+
+function findTask(id){
+  if(id==null) return undefined;
+  let hit=_taskById.get(id);
+  if(hit!==undefined) return hit;
+  if(typeof id==='string'&&/^-?\d+$/.test(id)){
+    const n=parseInt(id,10);
+    hit=_taskById.get(n);
+    if(hit!==undefined) return hit;
+  }
+  return tasks.find(t=>t.id===id);
+}
 
 // Tree helpers
 function getTaskChildren(parentId){return tasks.filter(t=>(t.parentId||null)===parentId)}
 function hasChildren(taskId){return tasks.some(t=>t.parentId===taskId)}
 function getTaskDescendantIds(taskId){
-  const result=[],queue=[taskId];
+  const result=[],seen=new Set(),queue=[taskId];
   while(queue.length){
     const id=queue.shift();
-    tasks.filter(t=>t.parentId===id).forEach(c=>{result.push(c.id);queue.push(c.id)});
+    for(const t of tasks){
+      if(t.parentId!==id) continue;
+      const cid=t.id;
+      if(seen.has(cid)) continue;
+      seen.add(cid);
+      result.push(cid);
+      queue.push(cid);
+    }
   }
   return result;
 }
@@ -379,11 +419,36 @@ function getRolledUpSessions(taskId){
   getTaskDescendantIds(taskId).forEach(id=>{const d=findTask(id);if(d)total+=d.sessions||0});
   return total;
 }
+const _TASK_PATH_MAX=64;
 function getTaskPath(taskId){
-  const path=[];let cur=findTask(taskId);
-  while(cur){path.unshift(cur.name);cur=cur.parentId?findTask(cur.parentId):null}
+  const path=[],seen=new Set();
+  let cur=findTask(taskId),depth=0;
+  while(cur&&depth<_TASK_PATH_MAX){
+    if(seen.has(cur.id)) break;
+    seen.add(cur.id);
+    path.unshift(cur.name);
+    cur=cur.parentId?findTask(cur.parentId):null;
+    depth++;
+  }
   return path;
 }
+
+/** Non-archived tasks pointing at a missing or archived parent become roots (sync/import repair). */
+function repairOrphanedTaskParents(){
+  if(!Array.isArray(tasks)) return 0;
+  let n=0;
+  for(const t of tasks){
+    if(t.archived||t.parentId==null) continue;
+    const p=findTask(t.parentId);
+    if(!p||p.archived){
+      console.warn('[tasks] Orphan repair: cleared parent for task',t.id);
+      t.parentId=null;
+      n++;
+    }
+  }
+  return n;
+}
+window.repairOrphanedTaskParents=repairOrphanedTaskParents;
 function getTaskElapsed(t){let s=t.totalSec;if(activeTaskId===t.id&&taskStartedAt)s+=Math.floor((Date.now()-taskStartedAt)/1000);return s}
 
 // Due date helpers
@@ -398,7 +463,7 @@ function getDueClass(dateStr){
   const today=todayISO();
   if(dateStr<today)return 'overdue';
   if(dateStr===today)return 'today';
-  const now=new Date(today),due=new Date(dateStr);
+  const now=new Date(today+'T00:00:00'),due=new Date(dateStr+'T00:00:00');
   const days=Math.round((due-now)/(1000*60*60*24));
   if(days<=3)return 'soon';
   return null;
@@ -417,7 +482,9 @@ function fmtDue(dateStr){
 // Subtask UI (nested)
 function addSubtaskPrompt(parentId){
   event&&event.stopPropagation();
+  if(subtaskPromptParent!=null&&subtaskPromptParent!==parentId) _subtaskFormDraftText='';
   subtaskPromptParent=parentId;
+  _subtaskFormDraftParent=parentId;
   const p=findTask(parentId);if(p&&p.collapsed)p.collapsed=false;
   renderTaskList();
   setTimeout(()=>{const i=document.querySelector('.task-sub-input[data-parent="'+parentId+'"]');if(i)i.focus()},20);
@@ -426,15 +493,31 @@ function addSubtask(parentId){
   const input=document.querySelector('.task-sub-input[data-parent="'+parentId+'"]');
   if(!input)return;
   const name=input.value.trim();
-  if(!name){subtaskPromptParent=null;renderTaskList();return}
+  if(!name){
+    subtaskPromptParent=null;
+    _subtaskFormDraftText='';
+    _subtaskFormDraftParent=null;
+    renderTaskList();
+    return;
+  }
   const parent=findTask(parentId);if(!parent)return;
-  tasks.push(Object.assign({
+  const _st=Object.assign({
     id:++taskIdCtr,name,totalSec:0,sessions:0,created:timeNowFull(),
     parentId,collapsed:false
-  },defaultTaskProps(),{listId:parent.listId}));
-  subtaskPromptParent=null;renderTaskList();saveState('user')
+  },defaultTaskProps(),{listId:parent.listId});
+  tasks.push(_st);
+  _taskIndexRegister(_st);
+  subtaskPromptParent=null;
+  _subtaskFormDraftText='';
+  _subtaskFormDraftParent=null;
+  renderTaskList();saveState('user')
 }
-function cancelSubtaskPrompt(){subtaskPromptParent=null;renderTaskList()}
+function cancelSubtaskPrompt(){
+  subtaskPromptParent=null;
+  _subtaskFormDraftText='';
+  _subtaskFormDraftParent=null;
+  renderTaskList();
+}
 function toggleCollapse(taskId){event&&event.stopPropagation();const t=findTask(taskId);if(!t)return;t.collapsed=!t.collapsed;renderTaskList();saveState('user')}
 
 // Time tracking
@@ -461,7 +544,12 @@ async function removeTask(id){
       if(taskStartedAt){const t=findTask(activeTaskId);if(t)t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000)}
       activeTaskId=null;taskStartedAt=null;
     }
+    for(const rid of toRemove) _taskIndexRemove(rid);
     tasks=tasks.filter(t=>!toRemove.includes(t.id));
+    if(typeof syncTaskDels==='object'&&syncTaskDels){
+      const t = Date.now();
+      for(const rid of toRemove) syncTaskDels[rid]=t;
+    }
     if(typeof embedStore !== 'undefined' && embedStore && embedStore.purge){
       embedStore.purge(toRemove).catch(()=>{});
     }
@@ -489,7 +577,17 @@ function restoreTask(id){
 }
 
 function emptyArchive(){
-  tasks=tasks.filter(t=>!t.archived);
+  const removed=tasks.filter(t=>t.archived).map(t=>t.id);
+  const keep=tasks.filter(t=>!t.archived);
+  tasks=keep;
+  if(removed.length&&typeof syncTaskDels==='object'&&syncTaskDels){
+    const t=Date.now();
+    for(const id of removed) syncTaskDels[id]=t;
+  }
+  if(removed.length&&typeof embedStore!=='undefined'&&embedStore&&embedStore.purge){
+    embedStore.purge(removed).catch(()=>{});
+  }
+  rebuildTaskIdIndex();
   renderTaskList();saveState('user')
 }
 async function emptyArchiveWithConfirm(){
@@ -587,6 +685,10 @@ function checkReminders(){
   tasks.forEach(t=>{
     if(!t.remindAt||t.reminderFired||t.archived||t.status==='done')return;
     const remindTime=new Date(t.remindAt).getTime();
+    if(!Number.isFinite(remindTime)){
+      console.warn('[tasks] Invalid remindAt on task',t.id);
+      return;
+    }
     if(now>=remindTime){
       t.reminderFired=true;fired=true;
       const late=(now-remindTime)>5*60*1000;
@@ -644,6 +746,11 @@ function completeHabitCycle(t){
   t.completedAt=null;
   t.dueDate=advanceRecurringDate(t.dueDate||todayISO(),t.recur);
   t._habitCycledInSession = true;
+  if(Array.isArray(t.checklist)){
+    for(const c of t.checklist){
+      if(c){ c.done=false; c.doneAt=null; }
+    }
+  }
 }
 
 function getHabitStreak(t){
@@ -727,8 +834,9 @@ function haptic(ms){
 // "pay rent" or "review purchases" to Finance.
 function ensureDefaultList(){
   if(lists.length===0){
-    lists.push({id:++listIdCtr,name:'Personal',color:'#2ecc71',description:'Personal life — errands, home, hobbies, relationships, health, self-care.'});
-    lists.push({id:++listIdCtr,name:'Work',color:'#3d8bcc',description:'Work and career — projects, meetings, deadlines, professional learning.'});
+    const t=Date.now();
+    lists.push({id:++listIdCtr,name:'Personal',color:'#2ecc71',description:'Personal life — errands, home, hobbies, relationships, health, self-care.',lastModified:t});
+    lists.push({id:++listIdCtr,name:'Work',color:'#3d8bcc',description:'Work and career — projects, meetings, deadlines, professional learning.',lastModified:t});
     activeListId=lists[0].id;
   }
   if(!activeListId&&lists.length)activeListId=lists[0].id;
@@ -736,6 +844,7 @@ function ensureDefaultList(){
   const defList=activeListId||lists[0].id;
   tasks.forEach(t=>{if(!t.listId)t.listId=defList});
   lists.forEach(l=>{if(typeof l.description!=='string')l.description=''});
+  repairOrphanedTaskParents();
 }
 const LIST_DESC_HINT='Short description (optional) — feeds Auto-organize so new tasks get routed here.\nExamples: "bills, taxes, budgets, investments" or "household chores, repairs, cleaning".';
 async function addList(){
@@ -746,7 +855,7 @@ async function addList(){
   const description=String(descriptionRaw).trim();
   const colors=['#2ecc71','#3d8bcc','#e056a0','#e8a838','#9b59b6','#48b5e0','#c0392b','#1abc9c'];
   const color=colors[lists.length%colors.length];
-  lists.push({id:++listIdCtr,name:String(name).trim(),color,description});
+  lists.push({id:++listIdCtr,name:String(name).trim(),color,description,lastModified:Date.now()});
   activeListId=listIdCtr;
   if(typeof invalidateListVectorCache==='function')invalidateListVectorCache();
   renderLists();renderTaskList();saveState('user')
@@ -761,6 +870,7 @@ async function editList(id){
   if(descriptionRaw===null)return;
   l.name=String(name).trim();
   l.description=String(descriptionRaw).trim();
+  l.lastModified=Date.now();
   if(typeof invalidateListVectorCache==='function')invalidateListVectorCache();
   renderLists();renderTaskList();saveState('user')
 }
@@ -770,6 +880,7 @@ async function removeList(id){
   const list=lists.find(l=>l.id===id);if(!list)return;
   const taskCount=tasks.filter(t=>t.listId===id).length;
   if(!(await showAppConfirm('Delete list "'+list.name+'"?'+(taskCount>0?' '+taskCount+' task(s) will be moved to the first remaining list.':''))))return;
+  if(typeof syncListDels==='object'&&syncListDels)syncListDels[id]=Date.now();
   lists=lists.filter(l=>l.id!==id);
   const fallbackId=lists[0].id;
   tasks.forEach(t=>{if(t.listId===id)t.listId=fallbackId});
@@ -825,6 +936,7 @@ function updateFiltersSummary(){
 }
 
 let _semanticSearchReqId=0;
+let _updateTaskFiltersDebounce=null;
 function updateTaskFilters(){
   taskFilters.search=gid('taskSearch').value.toLowerCase().trim();
   taskFilters.status=gid('filterStatus').value;
@@ -859,7 +971,11 @@ function updateTaskFilters(){
   }
   window._semanticScores = null;
   _semanticSearchReqId++;
-  renderTaskList();
+  if(_updateTaskFiltersDebounce) clearTimeout(_updateTaskFiltersDebounce);
+  _updateTaskFiltersDebounce=setTimeout(()=>{
+    _updateTaskFiltersDebounce=null;
+    renderTaskList();
+  },200);
 }
 function setTaskView(v){
   taskView=v;
@@ -1005,7 +1121,10 @@ function toggleFiltersPanel(){
   const btn=gid('filtersToggle');
   const isOpen=panel.style.display!=='none';
   panel.style.display=isOpen?'none':'';
-  if(btn)btn.classList.toggle('active',!isOpen);
+  if(btn){
+    btn.classList.toggle('active',!isOpen);
+    btn.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
+  }
 }
 
 function updateFiltersActiveBadge(){
@@ -1225,6 +1344,24 @@ function renderChecklist(taskId){
 
 // ========== TASK NOTES ==========
 let _noteIdCtr=0;
+/**
+ * After loading persisted tasks, set checklist/note id counters to max existing
+ * so new items never collide with persisted ids.
+ */
+function reseedChecklistAndNoteIdCtrs(){
+  let maxC = 0, maxN = 0;
+  for(const t of tasks || []){
+    for(const c of t.checklist || []){
+      if(typeof c.id === 'number' && c.id > maxC) maxC = c.id;
+    }
+    for(const n of t.notes || []){
+      const id = n && n.id;
+      if(typeof id === 'number' && id > 0 && id < 1e12) maxN = Math.max(maxN, id);
+    }
+  }
+  if(maxC > _clIdCtr) _clIdCtr = maxC;
+  if(maxN > _noteIdCtr) _noteIdCtr = maxN;
+}
 function addTaskNote(taskId,text){
   const t=findTask(taskId);if(!t||!text.trim())return;
   if(!t.notes)t.notes=[];

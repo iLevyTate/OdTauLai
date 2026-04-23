@@ -141,47 +141,140 @@ function _packState() {
     intervals, intIdCtr,
     cfg,
     theme,
+    syncTaskDels, syncListDels, syncGoalDels,
+    stateEpoch,
+    pomosInCycle, phase, logIdCtr,
   };
 }
 
-function _mergeState(remote) {
-  // Defensive: run incoming tasks through the repair function if available.
-  // Handles cross-version sync (device on v4 → device on v5) without breaking.
-  const repair = (typeof _repairTask === 'function') ? _repairTask : (t=>t);
-  const repairedRemoteTasks = (remote.tasks || []).map(repair).filter(Boolean);
+function _mergeDelMapPair(local, remote) {
+  const o = { ...(local || {}) };
+  if (!remote || typeof remote !== 'object' || Array.isArray(remote)) return o;
+  for (const [k, v] of Object.entries(remote)) {
+    const id = parseInt(k, 10);
+    if (!Number.isFinite(id)) continue;
+    const rv = _clampSyncTs(v);
+    if (o[id] == null) o[id] = rv;
+    else o[id] = Math.max(_clampSyncTs(o[id]), rv);
+  }
+  return o;
+}
 
-  // Merge tasks: last-write-wins using lastModified if present,
-  // falling back to completedAt, falling back to "keep local"
+function _listOrGoalLM(x) {
+  if (!x) return 0;
+  if (typeof x.lastModified === 'number' && x.lastModified > 0) return _clampSyncTs(x.lastModified);
+  return 0;
+}
+
+function _mergeState(remote) {
+  try {
+    if (!remote || typeof remote !== 'object' || Array.isArray(remote)) return;
+
+  const repair = (typeof _repairTask === 'function') ? _repairTask : (t=>t);
+
+  let mergedTaskDels = _mergeDelMapPair(
+    (typeof syncTaskDels === 'object' && syncTaskDels) ? syncTaskDels : {},
+    remote.syncTaskDels
+  );
+  let mergedListDels = _mergeDelMapPair(
+    (typeof syncListDels === 'object' && syncListDels) ? syncListDels : {},
+    remote.syncListDels
+  );
+  let mergedGoalDels = _mergeDelMapPair(
+    (typeof syncGoalDels === 'object' && syncGoalDels) ? syncGoalDels : {},
+    remote.syncGoalDels
+  );
+
+  const repairedRemoteTasks = (remote.tasks || []).map(repair).filter(Boolean);
   const localMap = new Map(tasks.map(t => [t.id, t]));
+
+  for (const [id, t] of [...localMap.entries()]) {
+    const d = mergedTaskDels[id];
+    if (d == null) continue;
+    const tLM = _clampSyncTs(t.lastModified || t.completedAt || 0);
+    if (_clampSyncTs(d) > tLM) localMap.delete(id);
+  }
+
   for (const rt of repairedRemoteTasks) {
+    if (!rt) continue;
+    const delT = mergedTaskDels[rt.id];
+    const rLM = _clampSyncTs(rt.lastModified || rt.completedAt || 0);
+    if (delT != null && _clampSyncTs(delT) > rLM) continue;
+
     const lt = localMap.get(rt.id);
     if (!lt) {
       localMap.set(rt.id, rt);
     } else {
       const lLM = _clampSyncTs(lt.lastModified || lt.completedAt || 0);
-      const rLM = _clampSyncTs(rt.lastModified || rt.completedAt || 0);
-      // Only overwrite if remote is strictly newer (tie goes to local)
       if (rLM > lLM) localMap.set(rt.id, rt);
     }
   }
+  for (const t of localMap.values()) {
+    if (mergedTaskDels[t.id] != null) {
+      const tLM = _clampSyncTs(t.lastModified || t.completedAt || 0);
+      if (tLM > _clampSyncTs(mergedTaskDels[t.id])) delete mergedTaskDels[t.id];
+    }
+  }
+  syncTaskDels = mergedTaskDels;
+
   tasks = Array.from(localMap.values());
   taskIdCtr = Math.max(taskIdCtr, remote.taskIdCtr || 0);
+  if (typeof rebuildTaskIdIndex === 'function') rebuildTaskIdIndex();
+  if (typeof repairOrphanedTaskParents === 'function') repairOrphanedTaskParents();
 
-  // Lists: merge by id (no conflict resolution needed — lists rarely change)
   const listMap = new Map(lists.map(l => [l.id, l]));
   for (const rl of (remote.lists || [])) {
-    if (!listMap.has(rl.id)) listMap.set(rl.id, rl);
+    if (!rl || rl.id == null) continue;
+    if (mergedListDels[rl.id] != null && _clampSyncTs(mergedListDels[rl.id]) > _listOrGoalLM(rl)) continue;
+    const ex = listMap.get(rl.id);
+    if (!ex) listMap.set(rl.id, rl);
+    else if (_listOrGoalLM(rl) > _listOrGoalLM(ex)) listMap.set(rl.id, rl);
+  }
+  for (const [id, l] of [...listMap.entries()]) {
+    if (mergedListDels[id] != null && _clampSyncTs(mergedListDels[id]) > _listOrGoalLM(l)) listMap.delete(id);
   }
   lists = Array.from(listMap.values());
   listIdCtr = Math.max(listIdCtr, remote.listIdCtr || 0);
+  syncListDels = mergedListDels;
 
-  // Goals: merge by id
   const goalMap = new Map(goals.map(g => [g.id, g]));
   for (const rg of (remote.goals || [])) {
-    if (!goalMap.has(rg.id)) goalMap.set(rg.id, rg);
+    if (!rg || rg.id == null) continue;
+    if (mergedGoalDels[rg.id] != null && _clampSyncTs(mergedGoalDels[rg.id]) > _listOrGoalLM(rg)) continue;
+    const ex = goalMap.get(rg.id);
+    if (!ex) goalMap.set(rg.id, rg);
+    else if (_listOrGoalLM(rg) > _listOrGoalLM(ex)) goalMap.set(rg.id, rg);
+  }
+  for (const [id, g] of [...goalMap.entries()]) {
+    if (mergedGoalDels[id] != null && _clampSyncTs(mergedGoalDels[id]) > _listOrGoalLM(g)) goalMap.delete(id);
   }
   goals = Array.from(goalMap.values());
   goalIdCtr = Math.max(goalIdCtr, remote.goalIdCtr || 0);
+  syncGoalDels = mergedGoalDels;
+
+  const re = _clampSyncTs(
+    remote.stateEpoch != null
+      ? remote.stateEpoch
+      : (typeof remote.sentAt === 'number' ? remote.sentAt : 0)
+  );
+  const le = _clampSyncTs(typeof stateEpoch !== 'undefined' ? stateEpoch : 0);
+  if (re > le) {
+    if (Array.isArray(remote.timeLog)) timeLog = remote.timeLog;
+    if (Array.isArray(remote.sessionHistory)) sessionHistory = remote.sessionHistory;
+    if (Array.isArray(remote.intervals)) intervals = remote.intervals;
+    if (remote.totalPomos != null) totalPomos = Math.max(0, parseInt(remote.totalPomos, 10) || 0);
+    if (remote.totalBreaks != null) totalBreaks = Math.max(0, parseInt(remote.totalBreaks, 10) || 0);
+    if (remote.totalFocusSec != null) totalFocusSec = Math.max(0, parseInt(remote.totalFocusSec, 10) || 0);
+    if (remote.intIdCtr != null) intIdCtr = Math.max(0, parseInt(remote.intIdCtr, 10) || 0);
+    if (remote.logIdCtr != null) logIdCtr = Math.max(0, parseInt(remote.logIdCtr, 10) || 0);
+    if (remote.pomosInCycle != null) pomosInCycle = Math.max(0, parseInt(remote.pomosInCycle, 10) || 0);
+    if (remote.phase && ['work', 'short', 'long'].includes(remote.phase)) phase = remote.phase;
+    if (remote.cfg && typeof remote.cfg === 'object') cfg = remote.cfg;
+    if (remote.theme && ['dark', 'light'].includes(remote.theme)) theme = remote.theme;
+  }
+  } catch (e) {
+    console.warn('[sync] mergeState failed', e);
+  }
 
   _lastSyncAt = Date.now();
   saveState('auto');

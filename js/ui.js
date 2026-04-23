@@ -87,12 +87,17 @@ function renderCalTasks(arr, isoDate){
   // Render external feed events (show up to 2)
   if(feedEvents.length){
     const showEvs = feedEvents.slice(0, 2);
-    html += showEvs.map(ev =>
-      `<div class="cal-task cal-feed-event" style="border-left-color:${sanitizeListColor(ev.feedColor)}" title="${esc(ev.feedLabel)}: ${esc(ev.title)}${ev.time?' at '+ev.time:''}${ev.location?' — '+esc(ev.location):''}">`
-      + (ev.time ? `<span class="cal-feed-time">${esc(ev.time)}</span> ` : '')
-      + esc(ev.title)
-      + '</div>'
-    ).join('');
+    html += showEvs.map(ev => {
+      const uid = String(ev.uid || '');
+      const mk = uid && typeof createTaskFromCalEvent === 'function'
+        ? `<button type="button" class="cal-ev-mk-task" title="Create task from this event" aria-label="Create task from event" onclick="event.stopPropagation();if(typeof createTaskFromCalEvent==='function')createTaskFromCalEvent(${JSON.stringify(String(ev.feedId))},${JSON.stringify(uid)})">+Task</button>`
+        : '';
+      return `<div class="cal-task cal-feed-event" style="border-left-color:${sanitizeListColor(ev.feedColor)}" title="${esc(ev.feedLabel)}: ${esc(ev.title)}${ev.time?' at '+esc(String(ev.time)):''}${ev.location?' — '+esc(ev.location):''}">`
+        + mk
+        + (ev.time ? `<span class="cal-feed-time">${esc(ev.time)}</span> ` : '')
+        + esc(ev.title)
+        + '</div>';
+    }).join('');
   }
   // "+N more" indicator if we truncated
   const totalCount = (arr ? arr.length : 0) + feedEvents.length;
@@ -117,8 +122,10 @@ let _cmdkAskCtl=null;
 let _cmdkAskHistoryIdx=-1;
 let _cmdkAskBusy=false;
 let _cmdkLastReply=null;
+let _cmdkPrevFocus=null;
 function openCmdK(){
   const ov=gid('cmdkOverlay');if(!ov)return;
+  _cmdkPrevFocus=document.activeElement;
   ov.classList.add('open');
   cmdkMode='find';_cmdkAskHistoryIdx=-1;_cmdkLastReply=null;_cmdkAskBusy=false;
   _applyCmdkMode();
@@ -128,6 +135,8 @@ function openCmdK(){
 function closeCmdK(){
   _cmdkAbortAsk();
   gid('cmdkOverlay').classList.remove('open');
+  if(_cmdkPrevFocus&&_cmdkPrevFocus.focus)try{_cmdkPrevFocus.focus()}catch(_){}
+  _cmdkPrevFocus=null;
 }
 function _cmdkAbortAsk(){
   if(_cmdkAskCtl){try{_cmdkAskCtl.abort()}catch(_){}_cmdkAskCtl=null}
@@ -230,6 +239,10 @@ async function cmdkAskSubmit(){
   try{
     const res=await askRun(q,{
       signal:_cmdkAskCtl.signal,
+      onReadRound:()=>{
+        const lbl=gid('cmdkAskLabel');
+        if(lbl)lbl.textContent='Running read-only tools on-device…';
+      },
       onToken:(t)=>{
         const el=gid('cmdkAskStream');
         if(el){el.textContent+=t;el.scrollTop=el.scrollHeight}
@@ -250,11 +263,12 @@ async function cmdkAskSubmit(){
       return;
     }
     if(typeof acceptProposedOps==='function'){
-      acceptProposedOps(res.ops,{source:'ask',destructiveLevel:res.destructiveLevel});
+      await acceptProposedOps(res.ops,{source:'ask',destructiveLevel:res.destructiveLevel});
     }
     const n=res.ops.length;
     const extra=res.rejected&&res.rejected.length?` (${res.rejected.length} rejected)`:'';
-    _renderAskStatus('done',`Proposed ${n} change${n!==1?'s':''}${extra}. Opened Tools — review before applying.`);
+    const rrd=res.readRounds>0?` ${res.readRounds} read step${res.readRounds!==1?'s':''} ·`:'';
+    _renderAskStatus('done',`Proposed ${n} change${n!==1?'s':''}${extra}.${rrd} Opened Tools — review before applying.`);
     setTimeout(closeCmdK,650);
   }catch(e){
     _renderAskStatus('error',(e&&e.message)||'Error');
@@ -399,9 +413,23 @@ function cmdkKeydown(e){
   else if(e.key==='ArrowUp'){e.preventDefault();cmdkActiveIdx=Math.max(cmdkActiveIdx-1,0);renderCmdK()}
   else if(e.key==='Enter'){e.preventDefault();cmdkRun(cmdkActiveIdx)}
 }
+function _blockingOverlaysForCmdK(){
+  const wno = document.getElementById('whatNextOverlay');
+  if(wno && wno.style.display !== 'none' && wno.style.display !== '') return true;
+  const tm = document.getElementById('taskModal');
+  if(tm && tm.classList.contains('open')) return true;
+  if(document.getElementById('bulkImportModal')?.classList.contains('open')) return true;
+  if(document.getElementById('appConfirmModal')?.classList.contains('open')) return true;
+  if(document.getElementById('appPromptModal')?.classList.contains('open')) return true;
+  return false;
+}
 // Keyboard shortcut: Cmd+K / Ctrl+K
 document.addEventListener('keydown',e=>{
-  if((e.ctrlKey||e.metaKey)&&e.key==='k'){e.preventDefault();openCmdK()}
+  if((e.ctrlKey||e.metaKey)&&e.key==='k'){
+    if(_blockingOverlaysForCmdK()) return;
+    e.preventDefault();
+    openCmdK();
+  }
 });
 
 // ========== THEME TOGGLE ==========
@@ -621,7 +649,17 @@ function renderSubtaskForm(parentId,depth){
     +'<button class="task-sub-btn task-sub-add" onclick="addSubtask('+parentId+')">Add</button>'
     +'<button class="task-sub-btn task-sub-cancel" onclick="cancelSubtaskPrompt()">×</button>'
     +'</div>';
-  list.appendChild(d)
+  list.appendChild(d);
+  const inp=d.querySelector('.task-sub-input');
+  if(inp){
+    if(typeof _subtaskFormDraftParent==='number'&&_subtaskFormDraftParent===parentId&&typeof _subtaskFormDraftText==='string'){
+      inp.value=_subtaskFormDraftText;
+    }
+    inp.addEventListener('input',()=>{
+      _subtaskFormDraftText=inp.value;
+      _subtaskFormDraftParent=parentId;
+    });
+  }
 }
 
 // Kanban Board View
@@ -769,6 +807,10 @@ function openTaskDetail(id){
     if(cdef&&cdef.color){
       b.style.borderColor='color-mix(in srgb, '+cdef.color+' 40%, var(--border))';
       b.style.color=cdef.color;
+    }
+    if(cdef){
+      const tip=((cdef.label||key)+(cdef.focus?': '+(cdef.focus):'')+((cdef.examples&&cdef.examples.length)?' · e.g. '+cdef.examples.slice(0,3).join(', '):'')).slice(0,280);
+      if(tip) b.setAttribute('title', tip);
     }
     b.onclick=function(){t.category=t.category===key?null:key;[...catChips.children].forEach(c=>c.classList.remove('active'));if(t.category)b.classList.add('active')};
     catChips.appendChild(b)

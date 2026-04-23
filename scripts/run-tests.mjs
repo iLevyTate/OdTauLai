@@ -12,12 +12,12 @@ const testsDir = join(root, 'tests');
 
 const names = await readdir(testsDir);
 const files = names
-  .filter((n) => n.endsWith('.mjs'))
+  .filter((n) => n.endsWith('.test.mjs'))
   .map((n) => join(testsDir, n))
   .sort();
 
 if (!files.length) {
-  console.error('No test files found in tests/ (*.mjs)');
+  console.error('No test files found in tests/ (*.test.mjs)');
   process.exit(1);
 }
 

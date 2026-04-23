@@ -65,6 +65,23 @@ self.addEventListener('fetch', e => {
   }
   if(url.origin !== self.location.origin) return;
 
+  const isNavigation = e.request.mode === 'navigate' || e.request.destination === 'document' ||
+    url.pathname === '/' || url.pathname.endsWith('/index.html') || url.pathname.endsWith('index.html');
+  if(isNavigation){
+    e.respondWith(
+      fetch(e.request)
+        .then(res => {
+          if(res && res.status === 200 && res.type === 'basic'){
+            const clone = res.clone();
+            caches.open(CACHE_NAME).then(c => c.put(e.request, clone).catch(() => {}));
+          }
+          return res;
+        })
+        .catch(() => caches.match('./index.html') || caches.match(e.request))
+    );
+    return;
+  }
+
   e.respondWith(
     caches.match(e.request).then(cached => {
       const net = fetch(e.request).then(res => {

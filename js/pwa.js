@@ -46,9 +46,12 @@
       window._swRegistered = true;
     }).catch((err)=>{
       console.warn('External sw.js failed, falling back to inline SW:', err);
-      // Fallback: inline SW via blob URL
+      // Fallback: inline SW via blob URL (cache name tracks js/version.js via ODTAULAI_RELEASE)
+      const swBase = (typeof window !== 'undefined' && window.ODTAULAI_RELEASE && window.ODTAULAI_RELEASE.swCache)
+        ? window.ODTAULAI_RELEASE.swCache
+        : 'odtaulai-v32';
       const swCode = `
-        const CACHE = 'odtaulai-v32-inline';
+        const CACHE = '${swBase}-inline';
         self.addEventListener('install', e => self.skipWaiting());
         self.addEventListener('activate', e => e.waitUntil(clients.claim()));
         self.addEventListener('fetch', e => {
@@ -76,7 +79,9 @@
       `;
       try {
         const swBlob = new Blob([swCode], {type: 'application/javascript'});
-        navigator.serviceWorker.register(URL.createObjectURL(swBlob)).then(()=>{
+        // Keep blob URL alive for the session — revoking can break the registered SW.
+        const swUrl = URL.createObjectURL(swBlob);
+        navigator.serviceWorker.register(swUrl).then(()=>{
           window._swRegistered = true;
         }).catch(()=>{ window._swRegistered = false; });
       } catch(e) { window._swRegistered = false; }

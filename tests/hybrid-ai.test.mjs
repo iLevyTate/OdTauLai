@@ -133,8 +133,24 @@ test('LLM json extractor: embedded object inside chatter still parses', () => {
   assert.deepEqual(out, { verdict: 'same', reason: 'both about taxes' });
 });
 
-test('LLM first-line extractor: trims prose and obeys length limit', () => {
+test('LLM first-line extractor: trims prose (no 220 cap — that lives in _formatGenTextCallOutput)', () => {
   const win = loadGen();
   const raw = '  This is the answer.  \n\nAnd here is extra commentary we do not want.';
   assert.equal(win._genExtractFirstLine(raw), 'This is the answer.');
+});
+
+test('_formatGenTextCallOutput: caps first line at 220 chars after strip+fences', () => {
+  const win = loadGen();
+  const long = 'x'.repeat(400);
+  const raw = '```\n' + long + '\n```';
+  const out = win._formatGenTextCallOutput(raw);
+  assert.ok(out);
+  assert.equal(out.length, 220);
+  assert.equal(out, 'x'.repeat(220));
+});
+
+test('_formatGenTextCallOutput: empty after strip yields null', () => {
+  const win = loadGen();
+  assert.strictEqual(win._formatGenTextCallOutput('   \n  \n'), null);
+  assert.strictEqual(win._formatGenTextCallOutput(''), null);
 });

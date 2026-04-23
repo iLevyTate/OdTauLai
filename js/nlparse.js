@@ -5,11 +5,13 @@
 const CHRONO_CDN = 'https://cdn.jsdelivr.net/npm/chrono-node@2.7.7/+esm';
 
 let _chronoMod = null;
+let _chronoLoad = null;
 
 async function loadChrono(){
   if(_chronoMod) return _chronoMod;
-  _chronoMod = await import(CHRONO_CDN);
-  return _chronoMod;
+  if(_chronoLoad) return _chronoLoad;
+  _chronoLoad = import(CHRONO_CDN).then(m => { _chronoMod = m; return m; });
+  return _chronoLoad;
 }
 
 function _isoDate(d){

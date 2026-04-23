@@ -71,7 +71,8 @@ function parseICS(text){
         if(p.startsWith('VALUE=')) valueType = p.slice(6);
       }
     }
-    current[keyPart] = value;
+    if(keyPart === 'EXDATE' && current.EXDATE) current.EXDATE = String(current.EXDATE) + ',' + value;
+    else current[keyPart] = value;
     if(keyPart === 'DTSTART' || keyPart === 'DTEND'){
       current[keyPart + '_TZID'] = tzid;
       current[keyPart + '_VALUE'] = valueType;
@@ -88,6 +89,7 @@ function normaliseEvent(ev){
   const start = parseICSDate(ev.DTSTART, ev.DTSTART_VALUE === 'DATE', ev.DTSTART_TZID);
   if(!start) return null;
   const end = ev.DTEND ? parseICSDate(ev.DTEND, ev.DTEND_VALUE === 'DATE', ev.DTEND_TZID) : null;
+  const exdateSet = ev.EXDATE ? parseExdateList(ev.EXDATE) : new Set();
   return {
     uid:         (ev.UID || '').slice(0, 200),
     title:       unescapeICS(ev.SUMMARY || '(no title)'),
@@ -99,6 +101,7 @@ function normaliseEvent(ev){
     endTime:     end ? end.time : null,
     allDay:      ev.DTSTART_VALUE === 'DATE',
     rrule:       ev.RRULE || null,
+    exdateList:  Array.from(exdateSet), // array so JSON in localStorage round-trips
   };
 }
 
@@ -178,6 +181,19 @@ function getTzOffsetMinutes(tzid, Y, M, D, hh, mm){
 // Unescape iCal text (RFC 5545 section 3.3.11)
 // IMPORTANT: order matters — \\ must be processed first, otherwise "\\n"
 // (literal backslash followed by n) would be misread as newline.
+/** EXDATE can be 20240420,20240421Z or 2024-04-20 — normalize to YYYY-MM-DD in local parse */
+function parseExdateList(raw){
+  if(!raw) return new Set();
+  const out = new Set();
+  for(const part of String(raw).split(',')){
+    const p = part.replace(/^TZID=[^:]*:/i, '').trim();
+    if(!p) continue;
+    const d = p.replace(/[^\d]/g, '');
+    if(d.length >= 8) out.add(d.slice(0, 4) + '-' + d.slice(4, 6) + '-' + d.slice(6, 8));
+  }
+  return out;
+}
+
 function unescapeICS(s){
   if(!s) return '';
   // Use a placeholder to avoid double-processing
@@ -193,7 +209,7 @@ function unescapeICS(s){
 
 // ── Expand RRULE (minimal — handles DAILY/WEEKLY/MONTHLY/YEARLY) ──
 // Supports: FREQ, INTERVAL, COUNT, UNTIL, BYDAY (weekly only, most common)
-// Skipped: BYMONTHDAY, BYMONTH, BYSETPOS, EXDATE (rare, would need more code)
+// Skipped: BYMONTHDAY, BYMONTH, BYSETPOS (less common; EXDATE is handled)
 // Expands only within ±windowDays around today so caches stay small.
 function expandEventToDateRange(event, windowDays = 180){
   const today = new Date();
@@ -250,6 +266,7 @@ function expandEventToDateRange(event, windowDays = 180){
                     String(occ.getMonth()+1).padStart(2,'0') + '-' +
                     String(occ.getDate()).padStart(2,'0');
         if(until && iso > until.iso) continue;
+        if(event.exdateList && event.exdateList.includes && event.exdateList.includes(iso)) continue;
         results.push({ ...event, dateISO: iso });
         if(countActive && results.length >= count) break;
       }
@@ -262,7 +279,8 @@ function expandEventToDateRange(event, windowDays = 180){
                     String(current.getMonth()+1).padStart(2,'0') + '-' +
                     String(current.getDate()).padStart(2,'0');
         if(until && iso > until.iso) break;
-        results.push({ ...event, dateISO: iso });
+        if(event.exdateList && event.exdateList.includes && event.exdateList.includes(iso)) { /* skip */ }
+        else { results.push({ ...event, dateISO: iso }); }
         if(countActive && results.length >= count) break;
       }
       if(freq === 'DAILY')        current.setDate(current.getDate() + interval);
@@ -392,13 +410,25 @@ function toggleCalFeedVisibility(feedId){
 }
 
 // ── Query: get events for a specific date (used by calendar view) ──────────
+function _alldayRangeCovers(ev, isoDate){
+  if(!ev || !ev.allDay || !ev.endDateISO || ev.rrule) return false;
+  try{
+    const t = new Date(isoDate + 'T12:00:00').getTime();
+    const s = new Date(ev.dateISO + 'T00:00:00').getTime();
+    const e = new Date(ev.endDateISO + 'T00:00:00').getTime();
+    // iCalendar: DTEND;VALUE=DATE is exclusive
+    return t >= s && t < e;
+  }catch(e){ return false; }
+}
+
 function getCalFeedEventsForDate(isoDate){
   _loadCalFeeds();
   const out = [];
   _calFeeds.feeds.forEach(feed => {
     if(!feed.visible) return;
     (feed.events || []).forEach(ev => {
-      if(ev.dateISO === isoDate){
+      if(ev.exdateList && ev.exdateList.includes && ev.exdateList.includes(isoDate)) return;
+      if(ev.dateISO === isoDate || _alldayRangeCovers(ev, isoDate)){
         out.push({ ...ev, feedId: feed.id, feedLabel: feed.label, feedColor: feed.color });
       }
     });
@@ -417,6 +447,154 @@ function getAllCalFeedEvents(){
     });
   });
   return out;
+}
+
+function _calEventStartMs(ev){
+  try{
+    if(!ev || !ev.dateISO) return 0;
+    if(ev.allDay) return new Date(ev.dateISO + 'T12:00:00').getTime();
+    const tm = (ev.time && String(ev.time).length >= 4) ? String(ev.time).slice(0, 5) : '09:00';
+    return new Date(ev.dateISO + 'T' + tm + ':00').getTime();
+  }catch(e){ return 0; }
+}
+
+function _calEventEndMs(ev){
+  const s = _calEventStartMs(ev);
+  if(!s) return 0;
+  if(ev && ev.endDateISO && ev.endTime){
+    try{
+      const t = String(ev.endTime).slice(0, 5);
+      return new Date(ev.endDateISO + 'T' + t + ':00').getTime();
+    }catch(e){}
+  }
+  if(ev && ev.endTime && ev.dateISO){
+    try{
+      return new Date(ev.dateISO + 'T' + String(ev.endTime).slice(0, 5) + ':00').getTime();
+    }catch(e){}
+  }
+  return s + 30 * 60 * 1000;
+}
+
+/**
+ * Upcoming events across visible feeds, sorted by start, within a rolling window of days.
+ * @param {number} [windowDays=7]
+ * @param {number} [max=200]
+ * @param {{ strictFuture?: boolean }} [opts] - If omitted, strictFuture defaults to true (timed events that already started today are excluded). Pass `{ strictFuture: false }` for full-day / historical context (e.g. Ask brain, calendar read op).
+ * @returns {Array<object & {_startMs:number,_endMs:number}>}
+ */
+function getUpcomingEvents(windowDays, max, opts){
+  const o = opts || {};
+  const strictFuture = o.strictFuture !== false;
+  const wd = windowDays == null ? 7 : +windowDays;
+  const lim = max == null ? 200 : +max;
+  const todayK = (typeof todayKey === 'function') ? todayKey() : new Date().toISOString().slice(0, 10);
+  const t0 = new Date(todayK + 'T00:00:00');
+  const t1 = new Date(t0);
+  t1.setDate(t1.getDate() + Math.max(1, wd));
+  const t1ms = t1.getTime();
+  const all = getAllCalFeedEvents();
+  const out = [];
+  const now = Date.now();
+  for(const ev of all){
+    if(!ev.dateISO) continue;
+    const d = new Date(ev.dateISO + 'T00:00:00');
+    if(d.getTime() < t0.getTime() - 86400000 || d.getTime() > t1ms) continue;
+    const _startMs = _calEventStartMs(ev);
+    const _endMs = _calEventEndMs(ev);
+    out.push({ ...ev, _startMs, _endMs });
+  }
+  out.sort((a, b) => a._startMs - b._startMs);
+  let sliced = out.slice(0, lim);
+  if(strictFuture){
+    sliced = sliced.filter(ev => {
+      if(!ev || ev.allDay) return true;
+      const s = ev._startMs;
+      return typeof s === 'number' && Number.isFinite(s) && s >= now;
+    });
+  }
+  return sliced;
+}
+
+/**
+ * One-line hint when a focus block would overlap a calendar event (What-next).
+ * @param {{ timeMin?: number }} [opts]
+ * @returns {string}
+ */
+function getWhatNextCalConflictHint(opts){
+  const o = opts || {};
+  if(typeof getUpcomingEvents !== 'function') return '';
+  const workMin = o.timeMin > 0 ? o.timeMin : 25;
+  const workMs = workMin * 60 * 1000;
+  const now = Date.now();
+  const evs = getUpcomingEvents(2, 48);
+  for(const ev of evs){
+    if(!ev || ev.allDay) continue;
+    const s = ev._startMs, e2 = ev._endMs;
+    if(!s) continue;
+    if(s < now + workMs && e2 > now){
+      const t = (ev.time || '').toString() || '—';
+      return `${ev.title || 'Event'} (${t}) overlaps a ${workMin}m focus block — start after, or a shorter time budget.`;
+    }
+  }
+  return '';
+}
+
+/**
+ * Create a local task from a synced VEVENT — no save/render/modal (for batch apply from Brain).
+ * @param {string} feedId
+ * @param {string} eventUid
+ * @returns {number|undefined} new task id
+ */
+function createTaskFromCalEventCore(feedId, eventUid){
+  _loadCalFeeds();
+  const feed = _calFeeds.feeds.find(f => f.id === feedId);
+  if(!feed) return;
+  const ev = (feed.events || []).find(e => (e.uid || '') === (eventUid || ''));
+  if(!ev) return;
+  if(typeof taskIdCtr === 'undefined' || !Array.isArray(tasks) || typeof defaultTaskProps !== 'function') return;
+  const fid = String(feedId), uid = String(eventUid || '');
+  for(const x of tasks){
+    const ex = x && x._ext;
+    if(ex && String(ex.calFeedId) === fid && String(ex.calEventUid) === uid) return x.id;
+  }
+  const descParts = [];
+  if(ev.description) descParts.push(String(ev.description));
+  if(ev.location) descParts.push('Location: ' + String(ev.location));
+  const t = Object.assign({
+    id: ++taskIdCtr,
+    name: (ev.title || 'Calendar event').slice(0, 500),
+    totalSec: 0,
+    sessions: 0,
+    created: (typeof timeNowFull === 'function' ? timeNowFull() : ''),
+    parentId: null,
+    collapsed: false,
+  }, defaultTaskProps(), {
+    dueDate: ev.dateISO || null,
+    startDate: null,
+    description: descParts.join('\n\n').slice(0, 8000),
+    tags: ['calendar', 'feed'],
+  });
+  if(Array.isArray(t.tags) && feed.label){
+    t.tags[1] = String(feed.label).toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '').slice(0, 32) || 'feed';
+  }
+  t._ext = Object.assign({}, t._ext || {}, { calFeedId: fid, calEventUid: uid });
+  tasks.push(t);
+  if(typeof _taskIndexRegister === 'function') _taskIndexRegister(t);
+  return t.id;
+}
+
+/**
+ * Create a local task from a synced VEVENT (calendar panel) — includes save, list render, and detail open.
+ * @param {string} feedId
+ * @param {string} eventUid
+ */
+function createTaskFromCalEvent(feedId, eventUid){
+  const id = createTaskFromCalEventCore(feedId, eventUid);
+  if(id == null) return;
+  if(typeof saveState === 'function') saveState('user');
+  if(typeof renderTaskList === 'function') renderTaskList();
+  if(typeof openTaskDetail === 'function') openTaskDetail(id);
+  return id;
 }
 
 // ── UI: render the Settings panel section for managing feeds ───────────────
@@ -499,7 +677,7 @@ function renderCalFeedsPanel(){
       <button class="btn-ghost btn-sm" onclick="document.getElementById('workerInstructions').style.display='none'" style="float:right">×</button>
       <h4 style="margin-top:0">Deploy a personal CORS proxy (free, 15 min)</h4>
       <ol style="font-size:11px;line-height:1.6;padding-left:18px;color:var(--text-3)">
-        <li>Sign up at <a href="https://dash.cloudflare.com" target="_blank">dash.cloudflare.com</a> (free)</li>
+        <li>Sign up at <a href="https://dash.cloudflare.com" target="_blank" rel="noopener noreferrer">dash.cloudflare.com</a> (free)</li>
         <li>Go to <strong>Workers & Pages</strong> → <strong>Create</strong> → <strong>Create Worker</strong></li>
         <li>Name it (e.g. "ical-proxy"), click <strong>Deploy</strong></li>
         <li>Click <strong>Edit code</strong>, replace the default with this:</li>
@@ -554,6 +732,10 @@ async function submitAddCalFeed(){
   let feed;
   if(pasteActive){
     const content = document.getElementById('cfPasteContent').value.trim();
+    if(content.length > CAL_FETCH_MAX_BYTES){
+      alert('Calendar paste is too large (max ' + (CAL_FETCH_MAX_BYTES / 1_000_000) + ' MB).');
+      return;
+    }
     if(!content.includes('BEGIN:VCALENDAR')){
       alert('That doesn\'t look like an .ics file. It should start with BEGIN:VCALENDAR.');
       return;

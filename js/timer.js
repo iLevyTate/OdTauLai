@@ -35,6 +35,8 @@ let totalDuration=0,remaining=0,running=false,finished=false;
 let startedAt=0,pausedRemaining=0,tickId=null;
 let sessionHistory=[],intervals=[],intIdCtr=0,fireCounts={},lastFlash=null,lastTickSec=-1;
 let tasks=[],taskIdCtr=0,activeTaskId=null,taskStartedAt=null,subtaskPromptParent=null;
+/** Preserved across renderTaskList when filters change while adding a subtask */
+let _subtaskFormDraftText='',_subtaskFormDraftParent=null;
 let lists=[],listIdCtr=0,activeListId=null;
 let taskFilters={search:'',status:'all',priority:'all',category:'all'};
 let taskSortBy='smart',taskView='list',editingTaskId=null,smartView='all';
@@ -42,7 +44,7 @@ let taskGroupBy='none',calMonth=null,theme='dark';
 let collapsedSections={};
 let timeLog=[],goals=[],goalIdCtr=0,logIdCtr=0;
 let swRunning=false,swStartTime=0,swElapsed=0,swPausedEl=0,swTickId=null,swLapList=[];
-let quickTimers=[],qtIdCtr=0,qtGlobalTick=null;
+let quickTimers=[],qtIdCtr=0,qtGlobalTick=null,qtUiRefreshId=null;
 let activeTab='tasks';
 
 // ========== PHASE ==========
@@ -120,14 +122,14 @@ function onPhaseComplete(){
   else if(phase!=='work'&&cfg.autoWork)setTimeout(()=>{if(finished)advancePhase()},1500)
 }
 function advancePhase(){if(phase==='work')phase=pomosInCycle>=cfg.cycle?'long':'short';else{if(phase==='long')pomosInCycle=0;phase='work'}finished=false;fireCounts={};setPhaseTime();renderAll();if((phase!=='work'&&cfg.autoBreak)||(phase==='work'&&cfg.autoWork))setTimeout(startTimer,300)}
-function skipPhase(){running=false;clearInterval(tickId);cancelScheduledAudio();const el=Math.floor((Date.now()-startedAt)/1000);remaining=Math.max(0,pausedRemaining-el);const worked=totalDuration-remaining;if(phase==='work'){if(worked>30)totalFocusSec+=worked;if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000);t.sessions++;taskStartedAt=null;addLog(t.name,worked,'work')}}else if(worked>30){addLog('Focus (partial)',worked,'work')}if(worked>30){pomosInCycle++;totalPomos++;sessionHistory.push({type:'work'});const pips=gid('pips').children;if(pips[pomosInCycle-1])pips[pomosInCycle-1].classList.add('done','pop')}}else{totalBreaks++;sessionHistory.push({type:phase});addLog(getPL(phase),worked||getPS(phase),phase)}if(cfg.sound)(phase==='work'?playTransition:playBreakEnd)();notify(getPL(phase)+' Skipped','Moving to next phase.');finished=true;gid('display').className='ring-time done';gid('display').textContent='00:00';gid('phaseLabel').textContent=getPL(phase)+' Complete';renderStats();renderCtrls();renderTaskList();updateTitle();saveState('user');if(phase==='work'&&cfg.autoBreak)setTimeout(()=>{if(finished)advancePhase()},1500);else if(phase!=='work'&&cfg.autoWork)setTimeout(()=>{if(finished)advancePhase()},1500)}
+function skipPhase(){const wasRunning=running;running=false;clearInterval(tickId);cancelScheduledAudio();const el=wasRunning?Math.floor((Date.now()-startedAt)/1000):0;remaining=Math.max(0,pausedRemaining-el);const worked=totalDuration-remaining;if(phase==='work'){if(worked>30)totalFocusSec+=worked;if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000);t.sessions++;taskStartedAt=null;addLog(t.name,worked,'work')}}else if(worked>30){addLog('Focus (partial)',worked,'work')}if(worked>30){pomosInCycle++;totalPomos++;sessionHistory.push({type:'work'});const pips=gid('pips').children;if(pips[pomosInCycle-1])pips[pomosInCycle-1].classList.add('done','pop')}}else{totalBreaks++;sessionHistory.push({type:phase});addLog(getPL(phase),worked||getPS(phase),phase)}if(cfg.sound)(phase==='work'?playTransition:playBreakEnd)();notify(getPL(phase)+' Skipped','Moving to next phase.');finished=true;gid('display').className='ring-time done';gid('display').textContent='00:00';gid('phaseLabel').textContent=getPL(phase)+' Complete';renderStats();renderCtrls();renderTaskList();updateTitle();saveState('user');if(phase==='work'&&cfg.autoBreak)setTimeout(()=>{if(finished)advancePhase()},1500);else if(phase!=='work'&&cfg.autoWork)setTimeout(()=>{if(finished)advancePhase()},1500)}
 function resetAll(){running=false;finished=false;clearInterval(tickId);cancelScheduledAudio();phase='work';pomosInCycle=0;fireCounts={};if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000);taskStartedAt=null}}setPhaseTime();renderAll();saveState('user')}
 
 // ========== STOPWATCH ==========
 function swToggle(){if(swRunning){swRunning=false;swPausedEl+=Date.now()-swStartTime;gid('swStartBtn').textContent='Resume';gid('swStartBtn').className='btn btn-primary';maybeStopKeepalive()}else{swRunning=true;swStartTime=Date.now();clearInterval(swTickId);swTickId=setInterval(swTick,100);gid('swStartBtn').textContent='Pause';gid('swStartBtn').className='btn btn-pause';startKeepalive()}}
 function swTick(){if(!swRunning)return;swElapsed=swPausedEl+Date.now()-swStartTime;gid('swDisplay').textContent=fmtHMS(Math.floor(swElapsed/1000))}
 function swLap(){if(swElapsed<=0)return;const s=Math.floor(swElapsed/1000),d=document.createElement('div');d.className='sw-lap';d.innerHTML='<span>Lap '+(swLapList.length+1)+'</span><span>'+fmtHMS(s)+'</span>';gid('swLaps').prepend(d);swLapList.push(s)}
-function swReset(){swRunning=false;swElapsed=0;swPausedEl=0;swLapList=[];clearInterval(swTickId);gid('swDisplay').textContent='00:00:00';gid('swStartBtn').textContent='Start';gid('swStartBtn').className='btn btn-primary';gid('swLaps').innerHTML=''}
+function swReset(){swRunning=false;swElapsed=0;swPausedEl=0;swLapList=[];clearInterval(swTickId);gid('swDisplay').textContent='00:00:00';gid('swStartBtn').textContent='Start';gid('swStartBtn').className='btn btn-primary';gid('swLaps').innerHTML='';maybeStopKeepalive()}
 
 // ========== QUICK TIMERS ==========
 function addQuickTimer(){
@@ -209,9 +211,21 @@ function cancelQtAudio(qt){
   qt._audioScheduled=false;
 }
 
+function ensureQuickUiRefresh(){
+  if(qtUiRefreshId!=null)return;
+  qtUiRefreshId=setInterval(()=>{
+    if(quickTimers.some(qt=>qt.running))renderQuickTimers();
+    if(!quickTimers.some(qt=>qt.running)){
+      clearInterval(qtUiRefreshId);
+      qtUiRefreshId=null;
+    }
+  },1000);
+}
+
 function ensureQuickTick(){
-  if(qtGlobalTick)return;
   if(!quickTimers.some(qt=>qt.running))return;
+  ensureQuickUiRefresh();
+  if(qtGlobalTick)return;
   qtGlobalTick=setInterval(()=>{
     let anyRunning=false,needsRender=false;
     quickTimers.forEach(qt=>{
@@ -265,8 +279,6 @@ function renderQuickTimers(){
     list.appendChild(d)
   })
 }
-// Keep quick timer display fresh every second even if render isn't triggered by tick
-setInterval(()=>{if(quickTimers.some(qt=>qt.running))renderQuickTimers()},1000);
 
 // ========== INTERVALS ==========
 function addInterval(){const m=parseInt(gid('intMin').value)||0,s=parseInt(gid('intSec').value)||0,sec=m*60+s;if(sec<=0)return;intervals.push({id:++intIdCtr,intervalSec:sec,label:gid('intLabel').value||'Every '+fmt(sec),chime:gid('intChime').value});gid('intLabel').value='';gid('intMin').value='5';gid('intSec').value='0';renderIntList();if(running)schedulePhaseAudio();saveState('user')}
