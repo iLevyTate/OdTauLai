@@ -289,11 +289,12 @@
   .priority-low{color:#7f8c8d}
   .priority-none{color:#2a3a4a}
 
-  /* Due date chip */
-  .due-chip{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:10px;font-size:9px;font-weight:600;letter-spacing:.5px;background:rgba(138,155,174,.1);color:#8a9bae;border:1px solid #1e2838;white-space:nowrap}
-  .due-chip.today{background:rgba(232,168,56,.15);color:#e8a838;border-color:#5a4a1a}
-  .due-chip.overdue{background:rgba(192,57,43,.2);color:#e06050;border-color:#5a2a1a;animation:pulse 2s infinite}
-  .due-chip.soon{background:rgba(61,139,204,.12);color:#5ab0e0;border-color:#2a4a6a}
+  /* Date chip (single component — list, board, palette) */
+  .date-chip{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:600;letter-spacing:.02em;white-space:nowrap;background:var(--bg-2);color:var(--text-2);border:1px solid var(--border)}
+  .date-chip--overdue{background:var(--danger-bg);color:var(--danger);border-color:var(--danger-border);animation:pulse 2.5s ease-in-out infinite}
+  .date-chip--today{background:var(--warning-bg);color:var(--warning);border-color:var(--warning-border)}
+  .date-chip--soon{background:var(--accent-bg);color:var(--accent);border-color:var(--accent-border)}
+  .date-chip--future{background:var(--bg-2);color:var(--text-3);border-color:var(--border);font-weight:500}
 
   /* Tag chips */
   .tag-chip{display:inline-flex;align-items:center;padding:1px 6px;border-radius:8px;font-size:8px;font-weight:700;letter-spacing:1px;text-transform:uppercase;background:rgba(61,139,204,.15);color:#5ab0e0;border:1px solid #2a4a6a}
@@ -722,12 +723,6 @@
   .priority-normal{color:var(--accent)}
   .priority-low{color:var(--text-3)}
 
-  /* Due chip */
-  .due-chip{font-size:11px;padding:3px 9px;font-weight:500;letter-spacing:0;background:var(--bg-2);color:var(--text-2);border-color:var(--border)}
-  .due-chip.today{background:var(--warning-bg);color:var(--warning);border-color:var(--warning-border)}
-  .due-chip.overdue{background:var(--danger-bg);color:var(--danger);border-color:var(--danger-border)}
-  .due-chip.soon{background:var(--accent-bg);color:var(--accent);border-color:var(--accent-border)}
-
   /* Tags */
   .tag-chip{font-size:11px;padding:2px 8px;letter-spacing:0;text-transform:none;font-weight:500;background:var(--bg-3);color:var(--text-2);border-radius:999px;border:none}
 
@@ -1141,10 +1136,6 @@
 
   .task-signals{display:flex;align-items:center;gap:6px;flex-shrink:0}
   .task-sig{font-size:11px;font-weight:500;padding:2px 8px;border-radius:999px;white-space:nowrap;background:var(--bg-3);color:var(--text-3)}
-  .task-sig.due-overdue{background:var(--danger-bg);color:var(--danger);font-weight:600}
-  .task-sig.due-today{background:var(--warning-bg);color:var(--warning);font-weight:600}
-  .task-sig.due-soon{background:var(--accent-bg);color:var(--accent)}
-  .task-sig.due-future{background:transparent;color:var(--text-3);padding-left:0;padding-right:0}
   .task-sig.sig-subs{font-family:var(--font-mono);font-size:10px;padding:2px 7px}
   .task-sig.sig-recur{background:var(--purple-bg);color:var(--purple);padding:2px 6px;font-size:10px}
   .task-sig.sig-active{background:var(--accent-bg);color:var(--accent);font-weight:600;font-family:var(--font-mono)}
@@ -1179,9 +1170,29 @@
   .task-item.active-task .task-row-actions .ta-play,
   .task-item.starred-task .task-row-actions .ta-star{opacity:1!important;pointer-events:auto!important}
 
+  .task-cat-stripe{box-shadow:inset 3px 0 0 0 var(--cat-stripe, transparent)}
+  .task-item--pareto{box-shadow:0 0 0 1px rgba(255,159,10,.35),var(--shadow-1)}
+  .task-item--tracking .task-name::before{
+    content:'';display:inline-block;width:6px;height:6px;margin-right:6px;vertical-align:middle;
+    border-radius:50%;background:var(--accent);box-shadow:0 0 6px var(--accent);
+  }
+  .habits-hidden-notice{
+    font-size:11px;color:var(--text-3);padding:6px 4px 10px;
+    text-align:center;
+  }
+  .habits-hidden-notice .habits-hidden-link,
+  .habits-hidden-notice .btn-habits-link{
+    background:none;border:none;color:var(--accent);text-decoration:underline;cursor:pointer;font:inherit;padding:0;
+  }
+  .task-list--comfortable .task-row-primary{padding:14px 16px;min-height:56px}
   .task-row-secondary{
-    display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+    display:none;align-items:center;gap:8px;flex-wrap:wrap;
     padding:0 14px 10px 52px;font-size:12px;color:var(--text-3);
+  }
+  .task-item:hover .task-row-secondary,
+  .task-item:focus-within .task-row-secondary{display:flex}
+  @media (hover:none){
+    .task-item .task-row-secondary{display:flex}
   }
   .task-row-secondary:empty{display:none}
   .task-row-secondary .status-badge{font-size:10px;padding:2px 8px;min-height:auto}
@@ -1293,7 +1304,7 @@
     .task-rm{width:30px;height:30px;min-width:30px;font-size:15px}
     .status-badge{padding:4px 10px;font-size:11px;min-height:24px}
     .priority-flag{font-size:12px;padding:2px 4px;min-height:20px}
-    .due-chip{padding:4px 10px;font-size:11px;min-height:24px}
+    .date-chip{padding:4px 10px;font-size:11px;min-height:24px}
     .tag-chip{padding:3px 10px;font-size:11px;min-height:22px}
     .recur-badge{padding:3px 9px;font-size:11px;min-height:22px}
 

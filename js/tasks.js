@@ -458,25 +458,51 @@ function todayISO(){
   const d = new Date();
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 }
-function getDueClass(dateStr){
-  if(!dateStr)return null;
-  const today=todayISO();
-  if(dateStr<today)return 'overdue';
-  if(dateStr===today)return 'today';
-  const now=new Date(today+'T00:00:00'),due=new Date(dateStr+'T00:00:00');
-  const days=Math.round((due-now)/(1000*60*60*24));
-  if(days<=3)return 'soon';
-  return null;
+/**
+ * @returns {{ label: string, cls: 'overdue'|'today'|'soon'|'future'|null, relDays: number|null }}
+ */
+function describeDue(dateStr){
+  if(!dateStr) return { label: '', cls: null, relDays: null };
+  const today = todayISO();
+  const t0 = new Date(today + 'T00:00:00');
+  const due = new Date(String(dateStr) + 'T00:00:00');
+  if (isNaN(due.getTime())) return { label: String(dateStr), cls: null, relDays: null };
+  const relDays = Math.round((due - t0) / 86400000);
+  const y0 = t0.getFullYear();
+  const yDue = due.getFullYear();
+
+  if (relDays < 0) {
+    const a = Math.abs(relDays);
+    const label = a === 1 ? 'Yesterday' : 'Overdue ' + a + 'd';
+    return { label, cls: 'overdue', relDays };
+  }
+  if (relDays === 0) return { label: 'Today', cls: 'today', relDays: 0 };
+
+  const tNext = new Date(t0);
+  tNext.setDate(tNext.getDate() + 1);
+  const tNextISO = tNext.getFullYear() + '-' + String(tNext.getMonth() + 1).padStart(2, '0') + '-' + String(tNext.getDate()).padStart(2, '0');
+  if (String(dateStr) === tNextISO) return { label: 'Tomorrow', cls: 'soon', relDays: 1 };
+
+  if (relDays >= 2 && relDays <= 6) {
+    return { label: due.toLocaleDateString(undefined, { weekday: 'short' }), cls: 'soon', relDays };
+  }
+  if (relDays === 7) {
+    return { label: due.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), cls: 'soon', relDays };
+  }
+
+  const label = yDue === y0
+    ? due.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    : due.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  return { label, cls: 'future', relDays };
 }
-function fmtDue(dateStr){
-  if(!dateStr)return '';
-  const today=todayISO();
-  if(dateStr===today)return 'Today';
-  const tmr=new Date();tmr.setDate(tmr.getDate()+1);
-  const tmrISO=tmr.getFullYear()+'-'+String(tmr.getMonth()+1).padStart(2,'0')+'-'+String(tmr.getDate()).padStart(2,'0');
-  if(dateStr===tmrISO)return 'Tomorrow';
-  const d=new Date(dateStr+'T00:00:00');
-  return d.toLocaleDateString(undefined,{month:'short',day:'numeric'});
+
+function getDueClass(dateStr) {
+  if (!dateStr) return null;
+  return describeDue(dateStr).cls;
+}
+function fmtDue(dateStr) {
+  if (!dateStr) return '';
+  return describeDue(dateStr).label;
 }
 
 // Subtask UI (nested)
@@ -1015,6 +1041,7 @@ function matchesFilters(t){
   else if(smartView==='starred'){if(!t.starred||t.status==='done')return false}
   else if(smartView==='impact'){if(t.status==='done'||!_paretoTopSet.has(t.id))return false}
   else if(smartView==='completed'){if(t.status!=='done')return false}
+  else if(smartView==='habits'){if(!t.recur||t.archived||t.status==='done')return false}
   if(smartView==='all'){
     const sd=gid('showCompletedAll');
     if((!sd||!sd.checked)&&t.status==='done')return false;
@@ -1036,7 +1063,47 @@ function matchesFilters(t){
   if(taskFilters.priority!=='all'&&t.priority!==taskFilters.priority)return false;
   // Category filter
   if(taskFilters.category&&taskFilters.category!=='all'&&t.category!==taskFilters.category)return false;
+  if(!habitVisibilityOk(t))return false;
   return true;
+}
+/** Recurring tasks optional hide from main smart views (not Overdue / Done / Archive / Week …). */
+function habitVisibilityOk(t){
+  if(smartView==='habits') return true;
+  if(typeof cfg!=='object'||!cfg||cfg.hideHabitsInMainViews===false) return true;
+  const mainHide=['all','today','week','unscheduled','starred','impact'];
+  if(mainHide.includes(smartView)&&t.recur) return false;
+  return true;
+}
+/** How many recurring tasks are hidden by "hide habits" in the current smart view (for footer link). */
+function countHabitsHiddenInView(){
+  if(typeof cfg!=='object'||!cfg||cfg.hideHabitsInMainViews===false) return 0;
+  const mainHide=['all','today','week','unscheduled','starred','impact'];
+  if(!mainHide.includes(smartView)) return 0;
+  const was=cfg.hideHabitsInMainViews;
+  cfg.hideHabitsInMainViews=false;
+  const open=tasks.filter(matchesFilters).filter(t=>t.recur);
+  cfg.hideHabitsInMainViews=true;
+  const hid=tasks.filter(matchesFilters);
+  cfg.hideHabitsInMainViews=was;
+  const idH=new Set(hid.map(t=>t.id));
+  return open.filter(t=>!idH.has(t.id)).length;
+}
+function updateHabitsHiddenNotice(){
+  const el=gid('habitsHiddenNotice');
+  if(!el) return;
+  const n=countHabitsHiddenInView();
+  if(n>0 && typeof cfg==='object' && cfg && cfg.hideHabitsInMainViews!==false){
+    el.style.display='';
+    el.innerHTML=''+n+' recurring hidden — <button type="button" class="habits-hidden-link" onclick="setSmartView(&quot;habits&quot;)">View Habits</button>';
+  }else{ el.style.display='none'; el.textContent=''; }
+}
+function onHideHabitsToggle(){
+  const h=gid('hideHabitsInMain');
+  if(!h||typeof cfg!=='object'||!cfg) return;
+  cfg.hideHabitsInMainViews=!!h.checked;
+  saveState('user');
+  if(typeof updateFiltersActiveBadge==='function') updateFiltersActiveBadge();
+  renderTaskList();
 }
 function sortTasks(arr){
   const sorted=arr.slice();
@@ -1133,7 +1200,7 @@ function updateFiltersActiveBadge(){
   let count=0;
   const s=gid('taskSearch'),st=gid('filterStatus'),pr=gid('filterPriority'),so=gid('taskSortSel'),gr=gid('groupBySel');
   if(s&&s.value.trim())count++;
-  const sem=gid('taskSearchSemantic');if(sem&&sem.checked)count++;
+  const sem=gid('taskSearchSemantic');  if(sem&&sem.checked)count++;
   if(st&&st.value!=='all')count++;
   if(pr&&pr.value!=='all')count++;
   if(so&&so.value!=='manual'&&so.value!=='smart')count++;
@@ -1141,6 +1208,7 @@ function updateFiltersActiveBadge(){
   const cat=gid('filterCategory');if(cat&&cat.value!=='all')count++;
   const sc=gid('showCompletedAll');if(sc&&sc.checked)count++;
   const cd=gid('cardDensityDetailed');if(cd&&cd.checked)count++;
+  const hh=gid('hideHabitsInMain');if(hh&&!hh.checked)count++;
   if(count>0){badge.textContent=count;badge.style.display='';}
   else{badge.style.display='none';}
 }
@@ -1160,6 +1228,7 @@ function renderSmartViewCounts(){
   set('svcUnscheduled',activeNotDone.filter(t=>!t.dueDate).length);
   set('svcStarred',activeNotDone.filter(t=>t.starred).length);
   set('svcImpact',activeNotDone.filter(t=>_paretoTopSet.has(t.id)&&inList(t)).length);
+  set('svcHabits',activeNotDone.filter(t=>t.recur&&inList(t)).length);
   set('svcCompleted',active.filter(t=>t.status==='done').length);
   set('svcArchived',tasks.filter(t=>t.archived&&inList(t)).length);
 }
@@ -1168,6 +1237,7 @@ function renderSmartViewCounts(){
 function renderTaskList(){
   const list=gid('taskList');
   if(!list)return;
+  if(list) list.classList.toggle('task-list--comfortable', typeof getCardDensity==='function' && getCardDensity()==='detailed');
   // H2: compute the "lists that own open tasks" set once per render so
   // renderTaskItem doesn't rebuild it for every row (was O(N²)).
   if(typeof _computeListsWithTasks==='function') _computeListsWithTasks();
@@ -1175,6 +1245,7 @@ function renderTaskList(){
   refreshParetoTopSet();
   renderTodayBanner();
   renderSmartViewCounts();
+  if(typeof updateHabitsHiddenNotice==='function') updateHabitsHiddenNotice();
   if(typeof updateFiltersSummary==='function') updateFiltersSummary();
   const visibleTasks=tasks.filter(matchesFilters);
   const activeCount=visibleTasks.filter(t=>t.status!=='done'&&!t.parentId).length;
@@ -1457,12 +1528,19 @@ function restoreTaskToolbarPrefs(){
   if(cd){
     try{ cd.checked = localStorage.getItem('stupind_card_density') === 'detailed'; }catch(e){}
   }
+  const hh = gid('hideHabitsInMain');
+  if(hh && typeof cfg === 'object' && cfg && typeof cfg.hideHabitsInMainViews === 'boolean'){
+    hh.checked = cfg.hideHabitsInMainViews;
+  }
 }
 
 window.getCardDensity = getCardDensity;
 window.onCardDensityToggle = onCardDensityToggle;
 window.onShowCompletedToggle = onShowCompletedToggle;
 window.restoreTaskToolbarPrefs = restoreTaskToolbarPrefs;
+window.describeDue = describeDue;
+window.onHideHabitsToggle = onHideHabitsToggle;
+window.updateHabitsHiddenNotice = updateHabitsHiddenNotice;
 window.completeHabitCycle = completeHabitCycle;
 window.getHabitStreak = getHabitStreak;
 window.getHabitLoggedSecTotal = getHabitLoggedSecTotal;

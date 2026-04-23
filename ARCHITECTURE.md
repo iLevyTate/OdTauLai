@@ -83,6 +83,10 @@ Two separate Transformers.js pipelines, loaded independently:
 
 Both use **WebGPU when available, WASM fallback everywhere else**. Weights are cached by the browser's HTTP cache (the service worker explicitly does **not** precache CDN model URLs, to avoid exhausting the PWA cache quota on mobile).
 
+### Gen auto‑rehydrate (Ask LLM)
+
+[`js/ai.js`](js/ai.js) defines `genAutoRehydrateIfCached()`: on DOMContentLoaded (after a short delay + `requestIdleCallback` when available), if generative Ask is **enabled**, weights for the selected model are recorded as **downloaded** (`isGenDownloaded`), and the pipeline is not already **ready** for that model, it calls `genLoad()` once. That turns `isGenReady()` true after a full page reload without requiring Settings → **Load** again, as long as the browser HTTP cache still holds the weights. Failures are silent (user can still load manually).
+
 ### Cognitask / Ask flow (retrieval‑augmented, multi‑turn)
 
 `cognitaskRun` lives in [`js/ask.js`](js/ask.js) (same script order as the browser; `askRun` is the stable entry point). Read‑only ops (`QUERY_TASKS`, `GET_TASK_DETAIL`, `GET_CALENDAR_EVENTS`, `LIST_CATEGORIES`, `LIST_LISTS` — see `readOnly` in [`js/tool-schema.js`](js/tool-schema.js)) execute immediately; the loop allows up to three read rounds plus a final write turn (enforced by `COGNITASK_MAX_READ_ROUNDS` / `COGNITASK_MAX_TURNS`), then returns write ops for preview.

@@ -189,6 +189,7 @@
       <button class="sv-chip" data-view="unscheduled" onclick="setSmartView('unscheduled')"><span class="sv-icon" data-icon="circleDashed"></span>Unscheduled<span class="sv-count" id="svcUnscheduled">0</span></button>
       <button class="sv-chip" data-view="starred" onclick="setSmartView('starred')"><span class="sv-icon" data-icon="star"></span>Starred<span class="sv-count" id="svcStarred">0</span></button>
       <button class="sv-chip" data-view="impact" onclick="setSmartView('impact')" title="Top ~20% by leverage — derived from priority, due, effort, unblocks, values, star"><span class="sv-icon" data-icon="zap"></span>Impact<span class="sv-count" id="svcImpact">0</span></button>
+      <button class="sv-chip" data-view="habits" onclick="setSmartView('habits')" title="Recurring &amp; habits"><span class="sv-icon" data-icon="refresh"></span>Habits<span class="sv-count" id="svcHabits">0</span></button>
       <button class="sv-chip" data-view="completed" onclick="setSmartView('completed')"><span class="sv-icon" data-icon="checkCircle"></span>Done<span class="sv-count" id="svcCompleted">0</span></button>
       <button class="sv-chip" data-view="archived" onclick="setSmartView('archived')"><span class="sv-icon" data-icon="archive"></span>Archive<span class="sv-count" id="svcArchived">0</span></button>
     </div>
@@ -260,8 +261,11 @@
       </div>
       <div class="task-toolbar-row task-toolbar-display">
         <span class="filter-display-lbl">Display</span>
-        <label class="task-tb-check" title="Show more chips on each row (category, values, duplicates)">
-          <input type="checkbox" id="cardDensityDetailed" onchange="onCardDensityToggle()"> Detailed
+        <label class="task-tb-check" title="Slightly more padding per row">
+          <input type="checkbox" id="cardDensityDetailed" onchange="onCardDensityToggle()"> Comfortable spacing
+        </label>
+        <label class="task-tb-check" title="When on, recurring tasks only appear in the Habits view">
+          <input type="checkbox" id="hideHabitsInMain" checked onchange="onHideHabitsToggle()"> Hide recurring from main
         </label>
         <label class="task-tb-check" title="Include completed tasks in the All view">
           <input type="checkbox" id="showCompletedAll" onchange="onShowCompletedToggle()"> Show completed
@@ -296,6 +300,7 @@
     </div>
 
     <!-- List view (default) -->
+    <div id="habitsHiddenNotice" class="habits-hidden-notice" style="display:none" role="status" aria-live="polite"></div>
     <div class="task-list" id="taskList"><div class="task-empty" id="taskEmpty"></div></div>
 
     <!-- Board view (kanban) -->

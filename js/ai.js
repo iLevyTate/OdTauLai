@@ -2332,6 +2332,41 @@ window.openGenSettingsFromAsk = openGenSettingsFromAsk;
 window.genClearAskHistory = genClearAskHistory;
 window.genClearCache = genClearCache;
 
+/**
+ * After reload, re-load LLM weights from HTTP cache if the user had enabled
+ * gen + previously downloaded (so Ask shows "ready" without a manual click).
+ * Failures are silent — Settings → Load still works.
+ */
+async function genAutoRehydrateIfCached(){
+  if(typeof getGenCfg !== 'function' || typeof genLoad !== 'function') return;
+  if(typeof isGenDownloaded !== 'function' || typeof isGenReady !== 'function') return;
+  const cfg = getGenCfg();
+  if(!cfg || !cfg.enabled) return;
+  if(!isGenDownloaded(cfg.modelId)) return;
+  if(isGenReady() && typeof getGenModel === 'function' && getGenModel() === cfg.modelId) return;
+  try{
+    if(typeof syncGenChip === 'function') syncGenChip('loading', 'Rehydrating LLM…');
+    const dtype = cfg.dtype || 'q4';
+    await genLoad(cfg.modelId, dtype, () => {});
+    if(typeof syncGenChip === 'function') syncGenChip('ready', 'LLM ready');
+    if(typeof syncAskPromoChip === 'function') syncAskPromoChip();
+    if(typeof maybeShowEnhanceBtn === 'function') maybeShowEnhanceBtn();
+  }catch(e){
+    if(typeof syncGenChip === 'function') syncGenChip('idle', '');
+  }
+}
+
+function _scheduleGenAutoRehydrate(){
+  const run=()=>{ genAutoRehydrateIfCached().catch(function(){}); };
+  if(typeof requestIdleCallback==='function') requestIdleCallback(run,{timeout:4000});
+  else setTimeout(run, 500);
+}
+if(typeof document!=='undefined'){
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',()=>{ setTimeout(_scheduleGenAutoRehydrate, 500); });
+  else setTimeout(_scheduleGenAutoRehydrate, 500);
+}
+window.genAutoRehydrateIfCached = genAutoRehydrateIfCached;
+
 document.addEventListener('click', function _smartAddTagDelegate(e){
   const prev = document.getElementById('smartAddPreview');
   if(!prev || !prev.contains(e.target)) return;

@@ -115,7 +115,8 @@ A derived impact score ranks every active task from signals you already have —
 ### Views & navigation
 
 - **List / Board (kanban) / Calendar** — all three, switchable, keyboard‑accessible.
-- **Smart views**: All, Today, Week, Overdue, Unscheduled, Starred, **Impact (Pareto)**, Completed, Archive.
+- **Smart views**: All, Today, Week, Overdue, Unscheduled, Starred, **Impact (Pareto)**, **Habits** (recurring / `~daily` etc.), Completed, Archive.
+- **Hide recurring from main lists** — optional (on by default): daily/weekly habits stay out of All/Today/Week/etc. and show in **Habits**; open **Filters** → **Display** → uncheck **Hide recurring from main** to mix them into main views.
 - **Group by** priority, status, due date, or list.
 - **Command palette** (Cmd / Ctrl + K) — fuzzy over tasks, actions, views, lists, AI commands, theme, sort, sync, everything.
 - **Dark and light themes** with a one‑key toggle.

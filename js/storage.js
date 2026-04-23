@@ -379,7 +379,9 @@ function _applyState(s){
     if(s.cfg && typeof s.cfg==='object'){
       cfg = s.cfg;
       if(!cfg.timerSub) cfg.timerSub='pomo';
+      if(typeof cfg.hideHabitsInMainViews!=='boolean') cfg.hideHabitsInMainViews=true;
       if(typeof ensureClassificationConfig === 'function') ensureClassificationConfig(cfg);
+      const hh=gid('hideHabitsInMain'); if(hh) hh.checked=!!cfg.hideHabitsInMainViews;
       const cw=gid('cfgWork'); if(cw) cw.value = _int(cfg.work,25);
       const cs=gid('cfgShort');if(cs) cs.value = _int(cfg.short,5);
       const cl=gid('cfgLong'); if(cl) cl.value = _int(cfg.long,15);
@@ -442,7 +444,7 @@ function _applyState(s){
     let groupIn = s.taskGroupBy;
     if(groupIn === 'dueDate') groupIn = 'due';
     const validSorts = ['smart','manual','priority','due','name','created','time','impact'];
-    const validSmart = ['all','today','week','overdue','unscheduled','starred','impact','completed','archived'];
+    const validSmart = ['all','today','week','overdue','unscheduled','starred','impact','habits','completed','archived'];
     const validGroup = ['none','priority','status','due','list'];
     if(s.taskView   && validViews.includes(s.taskView))  taskView   = s.taskView;
     if(sortIn && validSorts.includes(sortIn)) taskSortBy = sortIn;

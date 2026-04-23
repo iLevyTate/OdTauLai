@@ -29,7 +29,7 @@ window.addEventListener('resize',_reflowSettingsIfOpen);
 window.addEventListener('orientationchange',_reflowSettingsIfOpen);
 
 // ========== STATE ==========
-let cfg={work:25,short:5,long:15,cycle:4,autoBreak:true,autoWork:false,sound:true,linkTask:true,notif:true,timerSub:'pomo'};
+let cfg={work:25,short:5,long:15,cycle:4,autoBreak:true,autoWork:false,sound:true,linkTask:true,notif:true,timerSub:'pomo',hideHabitsInMainViews:true};
 let phase='work',pomosInCycle=0,totalPomos=0,totalBreaks=0,totalFocusSec=0;
 let totalDuration=0,remaining=0,running=false,finished=false;
 let startedAt=0,pausedRemaining=0,tickId=null;

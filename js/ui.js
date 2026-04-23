@@ -363,6 +363,7 @@ function renderCmdK(){
     {type:'action',label:'Today view',icon:ic('calendar'),run:()=>{showTab('tasks');setSmartView('today')}},
     {type:'action',label:'Overdue view',icon:ic('alertTriangle'),run:()=>{showTab('tasks');setSmartView('overdue')}},
     {type:'action',label:'Starred view',icon:ic('star'),run:()=>{showTab('tasks');setSmartView('starred')}},
+    {type:'action',label:'Habits view (recurring tasks)',icon:ic('refresh'),run:()=>{showTab('tasks');setSmartView('habits')}},
     {type:'action',label:'Impact view (Pareto 80/20)',icon:ic('zap'),run:()=>{showTab('tasks');setSmartView('impact')}},
     {type:'action',label:'Sort by Impact (Pareto)',icon:ic('zap'),run:()=>{showTab('tasks');const s=gid('taskSortSel');if(s){s.value='impact';if(typeof updateTaskFilters==='function')updateTaskFilters()}}},
     {type:'action',label:'Archive view',icon:ic('archive'),run:()=>{showTab('tasks');setSmartView('archived')}},
@@ -497,17 +498,25 @@ function renderTaskItem(t,depth){
   const dueCls=getDueClass(t.dueDate);
   const d=document.createElement('div');
   d.className='task-item clickable'
-    +(isActive?' active-task':'')
+    +(isActive?' active-task task-item--tracking':'')
     +(kids?' has-children':'')
     +(depth>0?' depth-'+Math.min(depth,4):'')
     +(isDone?' completed':'')
     +(t.archived?' archived':'')
     +(dueCls==='overdue'&&!isDone?' overdue':'')
     +(t.starred?' starred-task':'');
+  if(smartView==='impact'&&typeof isParetoTop==='function'&&isParetoTop(t.id))d.classList.add('task-item--pareto');
   d.dataset.priority=(!t.starred&&t.priority&&t.priority!=='none')?t.priority:'';
   d.style.marginLeft=(depth*18)+'px';
   d.setAttribute('draggable','true');
   d.dataset.taskId=t.id;
+  if(t.category&&dueCls!=='overdue'&&typeof getCategoryDef==='function'){
+    const cdef=getCategoryDef(t.category);
+    if(cdef&&cdef.color){
+      d.classList.add('task-cat-stripe');
+      d.style.setProperty('--cat-stripe',cdef.color);
+    }
+  }
   d.ondragstart=function(e){e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',t.id);d.classList.add('dragging')};
   d.ondragend=function(){d.classList.remove('dragging');document.querySelectorAll('.task-item').forEach(el=>el.classList.remove('drop-above','drop-below'))};
   d.ondragover=function(e){
@@ -557,82 +566,35 @@ function renderTaskItem(t,depth){
     touchStartX=0;touchCurrentX=0;swiping=false;
   },{passive:true});
 
-  // ========== COGNITIVE-LOAD-OPTIMIZED RENDER ==========
-  // PRINCIPLE: Only 2-3 things visible at rest. Everything else on hover.
-  // Row = PRIMARY (checkbox + name) + at-a-glance SIGNAL (priority stripe on left border, due date chip if relevant)
-  // Actions like star/play/sub/delete appear on hover. Status/tags/description appear on hover.
-  // Subtask counter shown compactly only if parent has children.
-
+  // At rest: due chip (overdue / today / soon only) + subtask progress. Habits view: ↻ + streak. Rest on hover.
   const chevron=kids
     ?'<button class="task-chevron'+(t.collapsed?' collapsed':'')+'" onclick="toggleCollapse('+t.id+')" title="'+(t.collapsed?'Expand':'Collapse')+'">▸</button>'
     :'<span class="task-chevron-spacer"></span>';
   const checkbox='<button class="task-checkbox'+(isDone?' checked':'')+'" onclick="toggleTaskDoneQuick('+t.id+')" title="Mark done" aria-label="Mark task done">'+(isDone?'✓':'')+'</button>';
 
-  const dense=(typeof getCardDensity==='function'?getCardDensity():'compact')==='compact';
-  // Signal chips: ONLY show due date if meaningful (today/overdue/soon), and inline hidden otherwise
   let signalChips='';
-  // List indicator dot — only show if viewing All and >1 list has tasks (otherwise pure noise)
-  // H2: the "which lists currently have tasks" set is O(N) over all tasks.
-  // Computing it once per render (in renderTaskList) avoids O(N²) work on long lists.
-  const taskOwnerList=lists.find(l=>l.id===t.listId);
-  const listsWithTasks=window._listsWithTasksCache || _computeListsWithTasks();
-  if(taskOwnerList&&activeListId==='all'&&listsWithTasks.size>1){
-    signalChips+='<span class="task-sig sig-list" style="background:transparent;padding:0" title="List: '+escAttr(taskOwnerList.name)+'"><span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:'+sanitizeListColor(taskOwnerList.color)+'"></span></span>';
-  }
   if(t.dueDate&&!isDone){
-    const dueLabel=fmtDue(t.dueDate);
-    if(dueCls==='overdue'||dueCls==='today'||dueCls==='soon'){
-      signalChips+='<span class="task-sig due-'+dueCls+'">'+dueLabel+'</span>';
-    }else{
-      signalChips+='<span class="task-sig due-future">'+dueLabel+'</span>';
+    const du=typeof describeDue==='function'?describeDue(t.dueDate):{label:fmtDue(t.dueDate),cls:dueCls};
+    if(du&&du.cls&&(du.cls==='overdue'||du.cls==='today'||du.cls==='soon')){
+      signalChips+='<span class="date-chip date-chip--'+du.cls+'">'+esc(du.label)+'</span>';
     }
   }
-  // Subtask progress (compact)
   const prog=getSubtaskProgress(t.id);
-  if(prog){
-    signalChips+='<span class="task-sig sig-subs" title="'+prog.done+' of '+prog.total+' subtasks done">'+prog.done+'/'+prog.total+'</span>';
-  }
-  // Recurring + habit streak
-  if(t.recur){
-    signalChips+='<span class="task-sig sig-recur" title="Repeats '+t.recur+'">↻</span>';
+  if(prog) signalChips+='<span class="task-sig sig-subs" title="'+prog.done+' of '+prog.total+' subtasks done">'+prog.done+'/'+prog.total+'</span>';
+  if(smartView==='habits'&&t.recur){
+    signalChips+='<span class="task-sig sig-recur" title="Repeats '+escAttr(String(t.recur))+'">↻</span>';
     if(typeof getHabitStreak==='function'){
       const st=getHabitStreak(t);
-      if(st>0)signalChips+='<span class="task-sig sig-streak" title="Consecutive days with a logged completion">'+st+'d</span>';
+      if(st>0) signalChips+='<span class="task-sig sig-streak" title="Consecutive days with a logged completion">'+st+'d</span>';
     }
   }
-  // Active timer indicator
-  if(isActive){
-    signalChips+='<span class="task-sig sig-active" title="Tracking time">● '+fmtHMS(rolledTime)+'</span>';
-  }
-  // Category, values, dup — detailed density only
-  if(!dense && t.category){
-    const cdef=(typeof getCategoryDef==='function')?getCategoryDef(t.category):null;
-    const catLbl=cdef?cdef.label:t.category;
-    const catSvg=(typeof window.categoryIcon==='function')?window.categoryIcon(t.category):'';
-    const catColor=cdef&&cdef.color?cdef.color:'var(--cat-general)';
-    signalChips+='<span class="task-sig sig-cat" style="--cat-color:'+escAttr(catColor)+'" title="'+escAttr(t.valuesNote||catLbl)+'"><span class="sig-cat-ic">'+catSvg+'</span>'+esc(catLbl)+'</span>';
-  }
-  if(!dense && t.valuesAlignment&&t.valuesAlignment.length){
-    signalChips+='<span class="task-sig sig-values" title="Serves: '+escAttr(t.valuesAlignment.join(', '))+'">◈</span>';
-  }
-  if(!dense && window._dupSimMap && window._dupSimMap.get(t.id) >= 0.9){
-    signalChips+='<span class="task-sig task-dup-badge" title="Very similar to another task">⧉ dup</span>';
-  }
-  if(smartView==='impact' && typeof isParetoTop==='function' && isParetoTop(t.id)){
-    const sc=(typeof getImpactScore==='function'?getImpactScore(t.id):0);
-    const zapIc=(typeof window.icon==='function')?window.icon('zap',{size:11}):'';
-    signalChips+='<span class="task-sig sig-pareto" title="High-leverage task (top ~20% by impact'+(sc?' · score '+sc.toFixed(1):'')+')"><span class="sig-cat-ic">'+zapIc+'</span>impact</span>';
-  }
 
-  // Hover-only metadata (status badge + tags + description preview) — hidden by default, reveal on hover
   const status=STATUSES[t.status||'open'];
   const showStatusOnHover=(t.status&&t.status!=='open')?'':'hidden-status';
   const statusBadge='<span class="status-badge '+status.cls+' '+showStatusOnHover+'" onclick="event.stopPropagation();cycleStatus('+t.id+')" title="Click to cycle status">'+status.label+'</span>';
-
   const tagsVisible=(t.tags||[]).slice(0,3).map(tg=>'<span class="tag-chip">'+esc(tg)+'</span>').join('');
   const descPrev=(t.description&&t.description.length>0)?'<span class="task-desc-inline">'+esc(t.description.slice(0,50))+(t.description.length>50?'…':'')+'</span>':'';
 
-  // Hover actions — pushed right, compact, appear only on hover
   const actions=t.archived
     ?'<button class="ta-btn ta-restore" onclick="event.stopPropagation();restoreTask('+t.id+')" title="Restore">↺</button>'
      +'<button class="ta-btn ta-del" onclick="event.stopPropagation();removeTask('+t.id+')" title="Delete permanently">×</button>'
@@ -658,12 +620,11 @@ function renderTaskItem(t,depth){
       +'</div>'
       +'<div class="task-row-actions">'+actions+'</div>'
     +'</div>'
-    +(descPrev||tagsVisible||statusBadge.indexOf('hidden-status')===-1?
-      '<div class="task-row-secondary">'
-        +statusBadge
-        +(tagsVisible?'<span class="task-tags-inline">'+tagsVisible+'</span>':'')
-        +descPrev
-      +'</div>':'');
+    +'<div class="task-row-secondary">'
+      +statusBadge
+      +(tagsVisible?'<span class="task-tags-inline">'+tagsVisible+'</span>':'')
+      +descPrev
+    +'</div>';
   list.appendChild(d)
 }
 
@@ -729,7 +690,9 @@ function renderBoard(visibleTasks){
       const path=getTaskPath(t.id);
       const breadcrumb=path.length>1?'<div style="font-size:10px;color:var(--text-3);margin-bottom:4px">'+esc(path.slice(0,-1).join(' › '))+'</div>':'';
       const dueIc=(typeof window.icon==='function')?window.icon('calendar',{size:12}):'';
-      const due=t.dueDate?'<span class="due-chip'+(getDueClass(t.dueDate)?' '+getDueClass(t.dueDate):'')+'">'+dueIc+' '+fmtDue(t.dueDate)+'</span>':'';
+      const ddc=t.dueDate&&typeof describeDue==='function'?describeDue(t.dueDate):{cls:getDueClass(t.dueDate),label:fmtDue(t.dueDate)};
+      const dueMod=ddc&&ddc.cls?' date-chip--'+ddc.cls:'';
+      const due=t.dueDate?'<span class="date-chip'+dueMod+'">'+dueIc+' '+esc(String(ddc.label||fmtDue(t.dueDate)||''))+'</span>':'';
       const tags=(t.tags||[]).slice(0,2).map(tg=>'<span class="tag-chip">'+esc(tg)+'</span>').join('');
       const time=getRolledUpTime(t.id)>0?'<span class="task-elapsed" style="font-size:10px">'+fmtHMS(getRolledUpTime(t.id))+'</span>':'';
       card.innerHTML=breadcrumb
