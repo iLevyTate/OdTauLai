@@ -4,6 +4,15 @@ const STORE_KEY     = 'stupind_state';
 const ARCHIVE_KEY   = 'stupind_archive';
 const SCHEMA_VERSION = 6;
 
+/** P2P sync: permanent task deletion tombstones id → deleted-at (ms). Merged with max(ts). */
+var syncTaskDels = {};
+/** P2P sync: deleted list ids */
+var syncListDels = {};
+/** P2P sync: deleted goal ids */
+var syncGoalDels = {};
+/** Bump every save; used to merge session/config fields from remote when newer */
+var stateEpoch = 0;
+
 // Main nav tabs — single source for persisted activeTab + ?tab= deep links (see app.js)
 const VALID_MAIN_TABS = ['tasks','focus','tools','data','settings'];
 
@@ -200,6 +209,19 @@ function _validateState(s){
   return true;
 }
 
+/** Load id→ms tombstone maps from persisted state */
+function _loadDelMap(obj){
+  const out = {};
+  if(!obj || typeof obj !== 'object' || Array.isArray(obj)) return out;
+  for(const [k, v] of Object.entries(obj)){
+    const id = parseInt(k, 10);
+    if(!Number.isFinite(id)) continue;
+    const n = typeof v === 'number' ? v : NaN;
+    if(Number.isFinite(n) && n > 0) out[id] = n;
+  }
+  return out;
+}
+
 // Save — captures task mutations with per-task lastModified stamp for sync
 let _prevTaskSnapshot = null; // used to detect which tasks changed since last save
 /** @param {'auto'|'unload'|'user'} [reason] — only 'user' shows the save pill (throttled) */
@@ -248,6 +270,7 @@ function saveState(reason){
     const t = taskSnap.find(x=>x.id===activeTaskId);
     if(t) t.totalSec += Math.floor((Date.now()-taskStartedAt)/1000);
   }
+  stateEpoch = Date.now();
   const state = {
     v:SCHEMA_VERSION, date:todayKey(),
     cfg, goals, goalIdCtr,
@@ -260,6 +283,20 @@ function saveState(reason){
     activeTab,
     lists, listIdCtr, activeListId,
     taskView, taskSortBy, smartView, taskGroupBy, theme, collapsedSections,
+    taskFiltersSnapshot: (function(){
+      const ts = gid('taskSearch'), st = gid('filterStatus'), pr = gid('filterPriority'), cat = gid('filterCategory'), sem = gid('taskSearchSemantic');
+      return {
+        search: ts ? ts.value : '',
+        status: st ? st.value : 'all',
+        priority: pr ? pr.value : 'all',
+        category: cat ? cat.value : 'all',
+        taskSearchSemantic: sem ? !!sem.checked : false,
+      };
+    })(),
+    syncTaskDels: { ...syncTaskDels },
+    syncListDels: { ...syncListDels },
+    syncGoalDels: { ...syncGoalDels },
+    stateEpoch,
   };
   const serialized = JSON.stringify(state);
   try{
@@ -358,7 +395,10 @@ function _applyState(s){
 
     // Goals
     if(Array.isArray(s.goals)){
-      goals     = s.goals.filter(g=>g&&typeof g==='object'&&g.text);
+      goals     = s.goals.filter(g=>g&&typeof g==='object'&&g.text).map(g=>({
+        ...g,
+        lastModified: typeof g.lastModified === 'number' && g.lastModified > 0 ? g.lastModified : 0,
+      }));
       goalIdCtr = _int(s.goalIdCtr, goals.length);
     }
 
@@ -375,6 +415,9 @@ function _applyState(s){
       // semantic search on every page refresh.
       _prevTaskSnapshot = {};
       tasks.forEach(t => { _prevTaskSnapshot[t.id] = {...t}; });
+      if(typeof rebuildTaskIdIndex === 'function') rebuildTaskIdIndex();
+      if(typeof repairOrphanedTaskParents === 'function') repairOrphanedTaskParents();
+      if(typeof reseedChecklistAndNoteIdCtrs === 'function') reseedChecklistAndNoteIdCtrs();
     }
 
     // Lists
@@ -384,6 +427,7 @@ function _applyState(s){
         name: l.name,
         color: l.color || '#3d8bcc',
         description: typeof l.description==='string' ? l.description : '',
+        lastModified: typeof l.lastModified === 'number' && l.lastModified > 0 ? l.lastModified : 0,
       }));
       listIdCtr   = _int(s.listIdCtr, 0);
       activeListId = s.activeListId ?? null;
@@ -407,6 +451,24 @@ function _applyState(s){
     if(s.theme      && ['dark','light'].includes(s.theme)) theme = s.theme;
     if(s.collapsedSections && typeof s.collapsedSections==='object') collapsedSections = s.collapsedSections;
 
+    if(s.taskFiltersSnapshot && typeof s.taskFiltersSnapshot === 'object'){
+      const fs = s.taskFiltersSnapshot;
+      const vis = gid('taskSearch');
+      if(vis && fs.search != null) vis.value = String(fs.search);
+      const st = gid('filterStatus');
+      if(st && fs.status && ['all','active','open','progress','review','blocked','done'].includes(fs.status)) st.value = fs.status;
+      const pr = gid('filterPriority');
+      if(pr && fs.priority && ['all','urgent','high','normal','low','none'].includes(fs.priority)) pr.value = fs.priority;
+      const cat = gid('filterCategory');
+      if(cat && fs.category) cat.value = fs.category;
+      const sem = gid('taskSearchSemantic');
+      if(sem && typeof fs.taskSearchSemantic === 'boolean') sem.checked = fs.taskSearchSemantic;
+      taskFilters.search = (vis && vis.value ? vis.value : '').toLowerCase().trim();
+      if(st) taskFilters.status = st.value;
+      if(pr) taskFilters.priority = pr.value;
+      if(cat) taskFilters.category = cat.value;
+    }
+
     // Numerics
     if(Array.isArray(s.timeLog))     timeLog       = s.timeLog;
     if(s.totalPomos   !=null)        totalPomos    = _int(s.totalPomos,0);
@@ -426,11 +488,18 @@ function _applyState(s){
           const rem     = Math.max(0, _int(qt.pausedRem,0)-elapsed);
           if(rem<=0){ qt.running=false; qt.finished=true; qt.remaining=0; qt.pausedRem=0; }
           else qt.remaining = rem;
+        } else if(qt.running && !qt.startedAt){
+          qt.running = false;
         }
       });
     }
 
     if(s.activeTab && VALID_MAIN_TABS.includes(s.activeTab)) activeTab = s.activeTab;
+
+    syncTaskDels = _loadDelMap(s.syncTaskDels);
+    syncListDels = _loadDelMap(s.syncListDels);
+    syncGoalDels = _loadDelMap(s.syncGoalDels);
+    if(typeof s.stateEpoch === 'number' && s.stateEpoch > 0) stateEpoch = s.stateEpoch;
 
     return true;
   }catch(e){
@@ -495,7 +564,6 @@ function _isStatePristine(){
     if(Array.isArray(tasks)      && tasks.length)      return false;
     if(Array.isArray(goals)      && goals.length)      return false;
     if(Array.isArray(timeLog)    && timeLog.length)    return false;
-    if(Array.isArray(intentions) && intentions.length) return false;
     if(Array.isArray(quickTimers)&& quickTimers.length)return false;
     return true;
   }catch(e){ return false; }
@@ -919,6 +987,7 @@ function _applyIncomingTask(incoming, report){
       const newTask = _csvRowToTask(incoming, null);
       newTask.id = incomingId;
       tasks.push(newTask);
+      if(typeof _taskIndexRegister === 'function') _taskIndexRegister(newTask);
       if(incomingId > taskIdCtr) taskIdCtr = incomingId;
       report.added++;
     }
@@ -928,6 +997,7 @@ function _applyIncomingTask(incoming, report){
     newTask.id = ++taskIdCtr;
     newTask.created = newTask.created || (typeof timeNowFull === 'function' ? timeNowFull() : new Date().toISOString());
     tasks.push(newTask);
+    if(typeof _taskIndexRegister === 'function') _taskIndexRegister(newTask);
     report.added++;
   }
 }
@@ -942,7 +1012,12 @@ const _ARCHIVE_MAX_SESSION_HISTORY = 400;
 
 function archiveDay(state){
   try{
-    const archives = JSON.parse(localStorage.getItem(ARCHIVE_KEY)||'[]');
+    let archives = [];
+    try{
+      archives = JSON.parse(localStorage.getItem(ARCHIVE_KEY)||'[]');
+    }catch(_){
+      archives = [];
+    }
     if(archives.find(a=>a.date===state.date)) return;
     const tl = _arr(state.timeLog);
     const sh = _arr(state.sessionHistory);
