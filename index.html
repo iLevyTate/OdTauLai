@@ -131,7 +131,11 @@
       <span id="aiChipLive" class="ai-chip-sr" aria-live="polite"></span>
     </button>
     <button type="button" id="themeToggleBtn" class="header-icon-btn" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">🌙</button>
-    <button type="button" id="cmdKBtn" class="header-icon-btn header-icon-btn--kbd" onclick="openCmdK()" title="Command palette" aria-label="Command palette">⌘K</button>
+    <button type="button" id="cmdKBtn" class="header-icon-btn header-icon-btn--cmdk" onclick="openCmdK()" title="Search, quick actions, and Ask" aria-label="Open menu: search, quick actions, and Ask">
+      <span class="cmdk-btn-ic" data-icon="sparkSearch" data-icon-size="16" aria-hidden="true"></span>
+      <span class="cmdk-btn-txt">Menu</span>
+      <span class="cmdk-btn-kbd" aria-hidden="true">⌘K</span>
+    </button>
     </div>
   </div>
 
@@ -158,9 +162,10 @@
     <div id="smartAddPreview" class="smart-add-preview" style="display:none"></div>
     <div class="qa-hint" id="qa-hint">QUICK ADD: <code>today</code> / <code>tomorrow</code> / weekdays · natural dates (e.g. next Friday, in 3 days) · <code>@urgent</code> <code>@high</code> <code>@low</code> · <code>#tag</code> · <code>!star</code> · <code>~daily</code> <code>~weekly</code></div>
     <button type="button" class="qa-hint-reveal" id="qa-hint-reveal" style="display:none" onclick="showQaHint()">Show quick-add syntax</button>
-    <button type="button" id="askPromoChip" class="ask-promo-chip" style="display:none" onclick="openAskMode()" aria-label="Ask a natural-language question about your tasks (keyboard: Control or Command plus K, then question mark)" title="Ask mode (Ctrl/⌘+K then ?)">
-      <span aria-hidden="true">✨</span>
-      <span>Ask · <kbd>Ctrl/⌘+K</kbd> then <kbd>?</kbd></span>
+    <button type="button" id="askPromoChip" class="ask-promo-chip" style="display:none" onclick="openAskMode()" aria-label="Ask the on-device AI about your tasks" title="Ask the on-device AI">
+      <span class="ask-promo-ic" data-icon="spark" data-icon-size="14" aria-hidden="true"></span>
+      <span class="ask-promo-label ask-promo-label--kbd">Ask · <kbd>Ctrl/⌘+K</kbd> then <kbd>?</kbd></span>
+      <span class="ask-promo-label ask-promo-label--touch">Ask the on-device AI</span>
     </button>
 
     <div class="task-search-bar">
@@ -582,6 +587,7 @@
       <input class="cmdk-input" id="cmdkInput" placeholder="Search tasks, actions, views… (? for Ask)" oninput="renderCmdK()" onkeydown="cmdkKeydown(event)">
       <button type="button" id="cmdkAskToggle" class="cmdk-ask-toggle" onclick="cmdkToggleAsk()" title="Toggle Ask mode (prefix with ?)" aria-pressed="false">Ask</button>
     </div>
+    <p class="cmdk-find-hint" id="cmdkFindHint" hidden>Quick actions &amp; search below · tap <strong>Ask</strong> or type <kbd>?</kbd> for the on-device AI</p>
     <div class="cmdk-ask-reply" id="cmdkAskReply" hidden></div>
     <div class="cmdk-results" id="cmdkResults"></div>
     <div class="cmdk-foot" id="cmdkFoot"></div>

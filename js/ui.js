@@ -123,14 +123,20 @@ let _cmdkAskHistoryIdx=-1;
 let _cmdkAskBusy=false;
 let _cmdkLastReply=null;
 let _cmdkPrevFocus=null;
-function openCmdK(){
+function openCmdK(opts){
+  const openAsk = opts && opts.ask === true;
   const ov=gid('cmdkOverlay');if(!ov)return;
   _cmdkPrevFocus=document.activeElement;
   ov.classList.add('open');
-  cmdkMode='find';_cmdkAskHistoryIdx=-1;_cmdkLastReply=null;_cmdkAskBusy=false;
+  cmdkMode=openAsk?'ask':'find';
+  _cmdkAskHistoryIdx=-1;_cmdkLastReply=null;_cmdkAskBusy=false;
   _applyCmdkMode();
-  gid('cmdkInput').value='';cmdkActiveIdx=0;renderCmdK();
-  setTimeout(()=>gid('cmdkInput').focus(),30);
+  const inp=gid('cmdkInput');
+  if(inp)inp.value='';
+  cmdkActiveIdx=0;renderCmdK();
+  if(inp){
+    try{inp.focus({preventScroll:true})}catch(_){inp.focus()}
+  }
 }
 function closeCmdK(){
   _cmdkAbortAsk();
@@ -153,6 +159,15 @@ function cmdkSetAskMode(on){
   renderCmdK();
 }
 function cmdkToggleAsk(){cmdkSetAskMode(cmdkMode!=='ask')}
+function _cmdkTouchOrNarrowUI(){
+  return typeof matchMedia==='function' && (matchMedia('(max-width: 640px)').matches || matchMedia('(pointer: coarse)').matches);
+}
+function _syncCmdkFindHint(){
+  const h=gid('cmdkFindHint');
+  if(!h)return;
+  if(cmdkMode!=='find'){h.hidden=true;return}
+  h.hidden=!_cmdkTouchOrNarrowUI();
+}
 function _applyCmdkMode(){
   const panel=gid('cmdkOverlay')?.querySelector('.cmdk-panel');
   const input=gid('cmdkInput');
@@ -174,6 +189,26 @@ function _applyCmdkMode(){
     else{reply.hidden=true;reply.innerHTML=''}
   }
   if(results)results.style.display=cmdkMode==='ask'?'none':'';
+  _syncCmdkFindHint();
+}
+function _cmdkFootFindText(){
+  const foot=gid('cmdkFoot');if(!foot)return;
+  if(_cmdkTouchOrNarrowUI()){
+    foot.textContent='Tap a row to run · Ask = on-device AI · outside = close';
+  }else{
+    const mod=/(Mac|iPhone|iPod|iPad)/i.test(navigator.platform||'')?'⌘':'Ctrl';
+    foot.textContent=mod+'/Ctrl+K · ↑↓ · Enter · Esc';
+  }
+}
+function _cmdkFootAskText(){
+  const foot=gid('cmdkFoot');if(!foot)return;
+  const mod=/(Mac|iPhone|iPod|iPad)/i.test(navigator.platform||'')?'⌘':'Ctrl';
+  const genReady=typeof isGenReady==='function'&&isGenReady();
+  if(_cmdkTouchOrNarrowUI()){
+    foot.textContent='Enter = run on-device · toggle Ask to browse actions · '+(genReady?'Model ready':'Model not loaded');
+  }else{
+    foot.textContent=mod+'/Ctrl+K · Enter = ask · Esc · '+(genReady?'Model ready':'Model not loaded');
+  }
 }
 function _renderAskStatus(state,msg){
   const reply=gid('cmdkAskReply');if(!reply)return;
@@ -284,8 +319,7 @@ function cmdkAskStop(){
 
 /** Open the palette pre-switched to Ask mode (used by the promo chip). */
 function openAskMode(){
-  openCmdK();
-  setTimeout(()=>cmdkSetAskMode(true),40);
+  openCmdK({ask:true});
 }
 
 /** Show the task-input promo chip only when the LLM is ready. */
@@ -313,19 +347,14 @@ function renderCmdK(){
   if(cmdkMode==='ask'){
     const results=gid('cmdkResults');
     if(results)results.style.display='none';
-    const foot=gid('cmdkFoot');
-    if(foot){
-      const mod=/(Mac|iPhone|iPod|iPad)/i.test(navigator.platform||'')?'⌘':'Ctrl';
-      const genReady=typeof isGenReady==='function'&&isGenReady();
-      foot.textContent=mod+'/Ctrl+K · Enter = ask · Esc · '+(genReady?'Model ready':'Model not loaded');
-    }
+    _cmdkFootAskText();
     return;
   }
   const q=rawVal.toLowerCase().trim();
   const results=gid('cmdkResults');
   const ic=(n)=>(typeof window.icon==='function'?window.icon(n):'');
-  // Build items: actions + tasks + views
-  const actions=[
+  const askAction={type:'action',label:'Ask the AI (natural language)',icon:ic('spark'),kbd:'?',run:()=>{openCmdK({ask:true})}};
+  const navActions=[
     {type:'action',label:'Go to Tasks',icon:ic('list'),kbd:'1',run:()=>showTab('tasks')},
     {type:'action',label:'Go to Timer',icon:ic('timer'),kbd:'2',run:()=>showTab('focus')},
     {type:'action',label:'Go to Tools',icon:ic('toolSparkle'),kbd:'3',run:()=>showTab('tools')},
@@ -343,15 +372,18 @@ function renderCmdK(){
     {type:'action',label:'Toggle theme',icon:ic('moon'),run:()=>toggleTheme()},
     {type:'action',label:'Start focus timer',icon:ic('play'),run:()=>{showTab('focus');if(!running)startTimer()}},
     {type:'action',label:'Add new list',icon:ic('plus'),run:()=>{showTab('tasks');addList()}},
-    {type:'action',label:'Ask Intelligence (natural language)',icon:ic('spark'),kbd:'?',run:()=>{openCmdK();setTimeout(()=>cmdkSetAskMode(true),40)}},
     {type:'action',label:'Harmonize all fields (embeddings)',icon:ic('harmonize'),run:()=>{showTab('tools');if(typeof intelHarmonizeFields==='function')intelHarmonizeFields()}},
     {type:'action',label:'Find duplicate tasks',icon:ic('copy'),run:()=>{showTab('tools');if(typeof intelFindDuplicatesUI==='function')intelFindDuplicatesUI()}},
     {type:'action',label:'Toggle semantic search',icon:ic('search'),run:()=>{showTab('tasks');if(typeof isIntelReady !== 'function' || !isIntelReady()){if(typeof syncHeaderAIChip === 'function') syncHeaderAIChip('error', 'Load model first — open Tools');showTab('tools');return}const cb=gid('taskSearchSemantic');if(cb){cb.checked=!cb.checked;if(typeof toggleTaskSearchSemantic==='function')toggleTaskSearchSemantic()}}},
   ];
   const items=[];
-  // Match actions
-  const matchedActions=q?actions.filter(a=>a.label.toLowerCase().includes(q)):actions;
-  if(matchedActions.length){items.push({section:'Actions'});matchedActions.forEach(a=>items.push(a))}
+  const askMatches=!q||askAction.label.toLowerCase().includes(q);
+  if(askMatches){
+    items.push({section:'Ask'});
+    items.push(askAction);
+  }
+  const matchedNav=q?navActions.filter(a=>a.label.toLowerCase().includes(q)):navActions;
+  if(matchedNav.length){items.push({section:'Actions'});matchedNav.forEach(a=>items.push(a))}
   // Match tasks
   const matchedTasks=tasks.filter(t=>!t.archived&&(t.name.toLowerCase().includes(q)||(t.description||'').toLowerCase().includes(q))).slice(0,12);
   if(q&&matchedTasks.length){
@@ -360,11 +392,7 @@ function renderCmdK(){
   }
   cmdkFilteredItems=items.filter(i=>!i.section);
   if(cmdkActiveIdx>=cmdkFilteredItems.length)cmdkActiveIdx=Math.max(0,cmdkFilteredItems.length-1);
-  const foot=gid('cmdkFoot');
-  if(foot){
-    const mod=/(Mac|iPhone|iPod|iPad)/i.test(navigator.platform||'')?'⌘':'Ctrl';
-    foot.textContent=mod+'/Ctrl+K · ↑↓ · Enter · Esc';
-  }
+  _cmdkFootFindText();
   if(!items.length){results.innerHTML='<div class="cmdk-empty">No matches</div>';return}
   let itemIdx=0;
   results.innerHTML=items.map(i=>{
@@ -425,7 +453,7 @@ function _blockingOverlaysForCmdK(){
 }
 // Keyboard shortcut: Cmd+K / Ctrl+K
 document.addEventListener('keydown',e=>{
-  if((e.ctrlKey||e.metaKey)&&e.key==='k'){
+  if((e.ctrlKey||e.metaKey)&&(e.key==='k'||e.key==='K')){
     if(_blockingOverlaysForCmdK()) return;
     e.preventDefault();
     openCmdK();
@@ -490,7 +518,8 @@ function renderTaskItem(t,depth){
   d.ondragleave=function(){d.classList.remove('drop-above','drop-below')};
   d.ondrop=function(e){
     e.preventDefault();e.stopPropagation();
-    const srcId=parseInt(e.dataTransfer.getData('text/plain'));if(!srcId||srcId===t.id)return;
+    const srcId=parseInt(e.dataTransfer.getData('text/plain'),10);
+    if(!Number.isFinite(srcId)||srcId<=0||srcId===t.id)return;
     const r=d.getBoundingClientRect();const above=e.clientY-r.top<r.height/2;
     handleTaskDrop(srcId,t.id,above?'before':'after');
     d.classList.remove('drop-above','drop-below');
@@ -511,7 +540,7 @@ function renderTaskItem(t,depth){
     const dx=touchCurrentX-touchStartX,dy=e.touches[0].clientY-touchStartY;
     if(!swiping&&Math.abs(dx)>12&&Math.abs(dx)>Math.abs(dy)*1.5)swiping=true;
     if(swiping){
-      e.preventDefault&&e.preventDefault();
+      if(e.cancelable)e.preventDefault();
       d.style.transform='translateX('+dx+'px)';
       d.style.transition='none';
       d.style.background=dx>0?'linear-gradient(90deg,var(--success-bg),var(--bg-1) 80%)':'linear-gradient(90deg,var(--bg-1) 20%,var(--danger-bg))';
@@ -677,7 +706,8 @@ function renderBoard(visibleTasks){
     col.ondragleave=function(){col.classList.remove('drop-target')};
     col.ondrop=function(e){
       e.preventDefault();col.classList.remove('drop-target');
-      const srcId=parseInt(e.dataTransfer.getData('text/plain'));
+      const srcId=parseInt(e.dataTransfer.getData('text/plain'),10);
+      if(!Number.isFinite(srcId)||srcId<=0)return;
       const src=findTask(srcId);if(!src)return;
       src.status=st;
       if(st==='done'){

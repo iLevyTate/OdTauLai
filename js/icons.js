@@ -60,6 +60,8 @@
     rotateCcw:     '<path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>',
     // AI / tools
     search:        '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+    /** Search + small sparkle (command palette / Ask) */
+    sparkSearch:   '<circle cx="9" cy="9" r="5.5"/><path d="M16 16l4 4"/><g transform="translate(12.2 0.2) scale(0.4)"><path d="M12 3c.5 2.5 2 4 4.5 4.5-2.5.5-4 2-4.5 4.5-.5-2.5-2-4-4.5-4.5 2.5-.5 4-2 4.5-4.5z"/></g>',
     folder:        '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
     copy:          '<rect x="8" y="8" width="13" height="13" rx="2" ry="2"/><path d="M4 16H3a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h11a2 2 0 0 1 2 2v1"/>',
     harmonize:     '<path d="M12 3v3M12 18v3M3 12h3M18 12h3"/><path d="M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/><circle cx="12" cy="12" r="3"/>',

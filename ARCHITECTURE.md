@@ -26,7 +26,7 @@ flowchart LR
     embedstore[js/embed-store.js]
     intelFeat[js/intel-features.js]
     gen[js/gen.js<br/>LLM]
-    ask[js/ask.js<br/>Brain + Ask]
+    ask[js/ask.js<br/>Cognitask + Ask]
     toolschema[js/tool-schema.js]
     ai[js/ai.js<br/>UI glue]
   end
@@ -36,7 +36,12 @@ flowchart LR
   end
   index --> version --> utils --> icons --> timer --> storage --> nlparse --> audio --> tasks --> ui
   index --> intel --> embedstore --> intelFeat
-  index --> gen --> ask --> toolschema --> ai
+  index --> toolschema
+  index --> gen
+  toolschema --> ask
+  gen --> ask
+  ask --> ui
+  ui --> ai
   index --> sync
   index --> cal
   index --> pwa
@@ -74,13 +79,13 @@ Two separate Transformers.js pipelines, loaded independently:
 | Pipeline | File | Model | Purpose | When it loads |
 |---|---|---|---|---|
 | Embedding | [`js/intel.js`](js/intel.js) | WebGPU: `Xenova/gte-base-en-v1.5` (768‑dim, ~110 MB). WASM: `Xenova/bge-small-en-v1.5` (384‑dim) | Semantic search, smart‑add, harmonize, auto‑organize, duplicates, category centroids | First AI feature used |
-| Generative (optional, opt‑in) | [`js/gen.js`](js/gen.js) | `HuggingFaceTB/SmolLM2-360M-Instruct` q4 by default (~230 MB); presets include Qwen2.5 0.5B/1.5B | Natural‑language **Ask** (Cmd/Ctrl+K, `?`) — multi‑turn Brain loop in [`js/ask.js`](js/ask.js) turns requests into validated JSON ops | Only after Settings → Integrations → Generative AI is enabled AND the user clicks *Download* |
+| Generative (optional, opt‑in) | [`js/gen.js`](js/gen.js) | `HuggingFaceTB/SmolLM2-360M-Instruct` q4 by default (~230 MB); presets include Qwen2.5 0.5B/1.5B | Natural‑language **Ask** (Cmd/Ctrl+K, `?`) — multi‑turn **Cognitask** loop in [`js/ask.js`](js/ask.js) turns requests into validated JSON ops | Only after Settings → Integrations → Generative AI is enabled AND the user clicks *Download* |
 
 Both use **WebGPU when available, WASM fallback everywhere else**. Weights are cached by the browser's HTTP cache (the service worker explicitly does **not** precache CDN model URLs, to avoid exhausting the PWA cache quota on mobile).
 
-### Brain / Ask flow (retrieval‑augmented, multi‑turn)
+### Cognitask / Ask flow (retrieval‑augmented, multi‑turn)
 
-`brainRun` lives in [`js/ask.js`](js/ask.js) (same script order as the browser; `askRun` is an alias). Read‑only ops (`QUERY_TASKS`, `GET_TASK_DETAIL`, `GET_CALENDAR_EVENTS`, `LIST_CATEGORIES`, `LIST_LISTS` — see `readOnly` in [`js/tool-schema.js`](js/tool-schema.js)) execute immediately; the model may run up to four short turns, then returns write ops for preview.
+`cognitaskRun` lives in [`js/ask.js`](js/ask.js) (same script order as the browser; `askRun` is the stable entry point). Read‑only ops (`QUERY_TASKS`, `GET_TASK_DETAIL`, `GET_CALENDAR_EVENTS`, `LIST_CATEGORIES`, `LIST_LISTS` — see `readOnly` in [`js/tool-schema.js`](js/tool-schema.js)) execute immediately; the loop allows up to three read rounds plus a final write turn (enforced by `COGNITASK_MAX_READ_ROUNDS` / `COGNITASK_MAX_TURNS`), then returns write ops for preview.
 
 ```
 user query
@@ -94,7 +99,7 @@ user query
 [ system prompt: TOOL_SCHEMA + few‑shot ]            [ user prompt: lists + calendar + context + request ]
                           │
                           ▼
-                 genGenerate() — streaming (per turn; max 4 turns). **Qwen2.5‑1.5B‑Instruct** passes `tools` from `buildOpenAIToolsFromToolSchema()` into `apply_chat_template`; the model replies with `<tool_call>` JSON, parsed by `parseQwen25ToolCallBlocks` (falls back to JSON-array `parseOpsJson` if no tags). Other presets use the all-in-prompt JSON array only.
+                 genGenerate() — streaming (per turn; up to three read rounds plus a final write turn). **Qwen2.5‑1.5B‑Instruct** passes `tools` from `buildOpenAIToolsFromToolSchema()` into `apply_chat_template`; the model replies with `<tool_call>` JSON, parsed by `parseQwen25ToolCallBlocks` (falls back to JSON-array `parseOpsJson` if no tags). Other presets use the all-in-prompt JSON array only.
                           │
             read-only JSON? ──yes──► runReadOp() ──► append tool result; next turn
                           │

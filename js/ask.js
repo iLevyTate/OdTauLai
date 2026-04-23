@@ -168,9 +168,9 @@ function _askCtx(){
   return { tasksById, listsById };
 }
 
-// ---- Brain: multi-turn read then write (same module so tests can load ask.js alone) ----
-const BRAIN_MAX_READ_ROUNDS = 3;
-const BRAIN_MAX_TURNS = BRAIN_MAX_READ_ROUNDS + 1;
+// ---- Cognitask: multi-turn read then write (same module so tests can load ask.js alone) ----
+const COGNITASK_MAX_READ_ROUNDS = 3;
+const COGNITASK_MAX_TURNS = COGNITASK_MAX_READ_ROUNDS + 1;
 
 function _readArgCtx(){
   if(typeof _askCtx === 'function') return _askCtx();
@@ -186,7 +186,7 @@ function _coerceReadKey(key, raw){
     const n = (typeof raw === 'number' && Number.isFinite(raw)) ? Math.trunc(raw) : parseInt(String(raw), 10);
     return Number.isFinite(n) ? n : null;
   }
-  if(key === 'limit') return Math.min(100, Math.max(1, _coerceBrainInt(raw, 20)));
+  if(key === 'limit') return Math.min(100, Math.max(1, _coerceCognitaskInt(raw, 20)));
   if(key === 'fromDate' || key === 'toDate' || key === 'untilDate') return raw == null ? null : String(raw).slice(0, 10);
   if(key === 'filter') return raw == null ? null : String(raw).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '').trim().slice(0, 200) || null;
   return raw;
@@ -288,7 +288,7 @@ function runReadOp(op){
   return { error: 'unknown_read' };
 }
 
-function _coerceBrainInt(v, d){
+function _coerceCognitaskInt(v, d){
   const n = (typeof v === 'number' && Number.isFinite(v)) ? v : parseInt(String(v), 10);
   if(!Number.isFinite(n)) return d;
   return Math.trunc(n);
@@ -304,7 +304,7 @@ function _schemaReadOnly(name){
  * @param {{ onToken?:(t:string)=>void, onReadRound?:(summary:object)=>void, signal?:AbortSignal }} [opts]
  * @returns {Promise<{ ok:boolean, ops:Array, rejected:Array, destructiveLevel:string, rawText:string, truncated:boolean, readRounds?:number, reason?:string }>}
  */
-async function brainRun(query, opts){
+async function cognitaskRun(query, opts){
   opts = opts || {};
   const q = String(query || '').trim();
   if(!q) return { ok: false, ops: [], rejected: [], destructiveLevel: 'none', rawText: '', truncated: false, readRounds: 0, reason: 'EMPTY_QUERY' };
@@ -321,7 +321,7 @@ async function brainRun(query, opts){
   const contextLines = await _askBuildContext(q);
   const useNativeQwenTools = typeof isGenModelNativeQwen25Tools === 'function' && isGenModelNativeQwen25Tools()
     && typeof buildOpenAIToolsFromToolSchema === 'function';
-  const brainOpenAITools = useNativeQwenTools ? buildOpenAIToolsFromToolSchema() : null;
+  const cognitaskOpenAITools = useNativeQwenTools ? buildOpenAIToolsFromToolSchema() : null;
 
   const systemJson = _askSystemPrompt() + '\n\nIf you use read-only ops, output ONLY them first; the system will return results, then you output write ops. Do not include prose outside the JSON array.';
   const systemNativeQwen = 'You are a local task assistant. Use only the provided function tools. '
@@ -352,7 +352,7 @@ async function brainRun(query, opts){
   let readRounds = 0;
   let lastFinal = null;
   let gotParse = false;
-  let brainTerminalInjected = false;
+  let cognitaskTerminalInjected = false;
 
   const runOnce = async (temp) => {
     let rawText = '';
@@ -360,7 +360,7 @@ async function brainRun(query, opts){
       messages,
       maxTokens: 512,
       temperature: temp,
-      tools: brainOpenAITools || undefined,
+      tools: cognitaskOpenAITools || undefined,
       onToken: (t) => {
         rawText += t;
         if(typeof opts.onToken === 'function'){ try{ opts.onToken(t); }catch(e){} }
@@ -372,11 +372,11 @@ async function brainRun(query, opts){
   };
 
   try{
-    for(let turn = 0; turn < BRAIN_MAX_TURNS; turn++){
+    for(let turn = 0; turn < COGNITASK_MAX_TURNS; turn++){
       if(mergedSignal && mergedSignal.aborted) break;
-      if(readRounds >= BRAIN_MAX_READ_ROUNDS && !brainTerminalInjected){
+      if(readRounds >= COGNITASK_MAX_READ_ROUNDS && !cognitaskTerminalInjected){
         messages.push({ role: 'user', content: 'This is your last turn — return only a JSON array of write operations or []. Do not call read-only tools.' });
-        brainTerminalInjected = true;
+        cognitaskTerminalInjected = true;
       }
       const temp = turn === 0 ? 0.2 : 0.1;
       const raw = await runOnce(temp);
@@ -401,7 +401,7 @@ async function brainRun(query, opts){
       }
 
       if(reads.length && !writes.length){
-        if(readRounds >= BRAIN_MAX_READ_ROUNDS){
+        if(readRounds >= COGNITASK_MAX_READ_ROUNDS){
           lastFinal = [];
           gotParse = true;
           break;
@@ -462,12 +462,12 @@ async function brainRun(query, opts){
  * @param {{ onToken?:(t:string)=>void, onReadRound?:(o:object)=>void, signal?:AbortSignal }} [opts]
  */
 async function askRun(query, opts){
-  return brainRun(query, opts);
+  return cognitaskRun(query, opts);
 }
 
 if(typeof window !== 'undefined'){
   window.askRun = askRun;
-  window.brainRun = brainRun;
+  window.cognitaskRun = cognitaskRun;
   window.runReadOp = runReadOp;
   window.ASK_CONTEXT_MAX_TASKS = ASK_CONTEXT_MAX_TASKS;
   window._askBuildContext = _askBuildContext;

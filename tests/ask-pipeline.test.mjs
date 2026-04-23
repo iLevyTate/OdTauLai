@@ -44,7 +44,7 @@ function mkSandbox({ tasks = [], lists = [], genResponse = '[]', intelReady = tr
     findTask: (id) => tasks.find(t => t.id === id) || null,
   };
   new Function(...Object.keys(ctx), schemaSrc)(...Object.values(ctx));
-  // `const TOOL_SCHEMA` in tool-schema is not a global; brainRun needs the table
+  // `const TOOL_SCHEMA` in tool-schema is not a global; cognitaskRun needs the table
   // to classify read vs write ops (same as the shared browser script scope).
   ctx.TOOL_SCHEMA = win.TOOL_SCHEMA;
   new Function(...Object.keys(ctx), askSrc)(...Object.values(ctx));
@@ -159,7 +159,7 @@ test('askRun: destructive batch (5 archives) bubbles destructiveLevel=hard', asy
   assert.equal(res.destructiveLevel, 'hard');
 });
 
-test('askRun: read-only round then write — multi-turn brain path', async () => {
+test('askRun: read-only round then write — multi-turn cognitask path', async () => {
   const tasks = [
     { id: 1, name: 'Pay rent', status: 'open', priority: 'normal', archived: false, lastModified: 1 },
   ];

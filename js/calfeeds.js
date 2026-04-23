@@ -479,7 +479,7 @@ function _calEventEndMs(ev){
  * Upcoming events across visible feeds, sorted by start, within a rolling window of days.
  * @param {number} [windowDays=7]
  * @param {number} [max=200]
- * @param {{ strictFuture?: boolean }} [opts] - If omitted, strictFuture defaults to true (timed events that already started today are excluded). Pass `{ strictFuture: false }` for full-day / historical context (e.g. Ask brain, calendar read op).
+ * @param {{ strictFuture?: boolean }} [opts] - If omitted, strictFuture defaults to true (timed events that already started today are excluded). Pass `{ strictFuture: false }` for full-day / historical context (e.g. Ask / Cognitask, calendar read op).
  * @returns {Array<object & {_startMs:number,_endMs:number}>}
  */
 function getUpcomingEvents(windowDays, max, opts){
@@ -540,7 +540,7 @@ function getWhatNextCalConflictHint(opts){
 }
 
 /**
- * Create a local task from a synced VEVENT — no save/render/modal (for batch apply from Brain).
+ * Create a local task from a synced VEVENT — no save/render/modal (for batch apply from Cognitask).
  * @param {string} feedId
  * @param {string} eventUid
  * @returns {number|undefined} new task id
