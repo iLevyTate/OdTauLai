@@ -2537,7 +2537,4 @@ button.hist-day{display:block;width:100%;font:inherit;cursor:pointer;background:
 .app-dlg{max-width:420px}
 .app-dlg-msg{color:var(--text-1)}
 .app-dlg-overlay{z-index:1100}
-@media (max-width:640px){
-  .header-icon-btn--kbd{display:none}
-}
 

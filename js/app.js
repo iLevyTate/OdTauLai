@@ -454,9 +454,31 @@ setTimeout(() => {
 (function syncCmdKGlyph(){
   const b=document.getElementById('cmdKBtn');
   if(!b) return;
-  if(!/(Mac|iPhone|iPod|iPad)/i.test(navigator.platform||'')){
-    b.textContent='Ctrl+K';
-    b.style.fontSize='10px';
-    b.style.lineHeight='1.1';
+  const apply=()=>{
+    if(typeof matchMedia==='function' && matchMedia('(max-width: 640px)').matches){
+      b.textContent='\u22EF';
+      b.title='Command palette — search, jump, Ask';
+      b.style.fontSize='18px';
+      b.style.lineHeight='1';
+      b.style.letterSpacing='0';
+      return;
+    }
+    b.style.lineHeight='';
+    b.style.letterSpacing='';
+    b.title='Command palette';
+    if(!/(Mac|iPhone|iPod|iPad)/i.test(navigator.platform||'')){
+      b.textContent='Ctrl+K';
+      b.style.fontSize='10px';
+      b.style.lineHeight='1.1';
+    }else{
+      b.textContent='⌘K';
+      b.style.fontSize='';
+    }
+  };
+  apply();
+  if(typeof matchMedia==='function'){
+    const mq=matchMedia('(max-width: 640px)');
+    if(mq.addEventListener) mq.addEventListener('change', apply);
+    else if(mq.addListener) mq.addListener(apply);
   }
 })();
