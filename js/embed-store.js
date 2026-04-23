@@ -17,6 +17,8 @@ const EMBED_SCHEMA_VER = 'gte-base-en-v1.5-migration-v1';
 
 /** Canonical Map from last IDB read; updated incrementally on put/purge for fast embedStore.all() */
 let _embedAllCache = null;
+/** Serialize IndexedDB puts per taskId so concurrent put()s cannot leave the cache on a stale write. */
+const _embedPutByTask = new Map();
 
 function _openDb(){
   return new Promise((resolve, reject) => {
@@ -47,6 +49,13 @@ function hashTaskText(name, description){
 
 const embedStore = {
   async put(taskId, textHash, vec){
+    const prev = _embedPutByTask.get(taskId) || Promise.resolve();
+    const p = prev.catch(() => {}).then(() => this._putNow(taskId, textHash, vec));
+    _embedPutByTask.set(taskId, p);
+    return p;
+  },
+
+  async _putNow(taskId, textHash, vec){
     const f32 = vec instanceof Float32Array ? vec : new Float32Array(vec);
     const db = await _openDb();
     await new Promise((resolve, reject) => {

@@ -166,9 +166,50 @@ function _listOrGoalLM(x) {
   return 0;
 }
 
+const _SYNC_MAX_MSG_CHARS = 2_500_000;
+const _SYNC_MAX_TASKS = 100_000;
+const _SYNC_MAX_LISTS = 20_000;
+const _SYNC_MAX_GOALS = 50_000;
+const _SYNC_MAX_SH_MERGE = 500;
+
+function _syncIncomingPayloadInvalid(remote) {
+  if (!remote || typeof remote !== 'object' || Array.isArray(remote)) return true;
+  let n = 0;
+  try { n = JSON.stringify(remote).length; } catch (e) { return true; }
+  if (n > _SYNC_MAX_MSG_CHARS) return true;
+  if (remote.syncV != null && remote.syncV !== SYNC_VERSION) return true;
+  if (Array.isArray(remote.tasks) && remote.tasks.length > _SYNC_MAX_TASKS) return true;
+  if (Array.isArray(remote.lists) && remote.lists.length > _SYNC_MAX_LISTS) return true;
+  if (Array.isArray(remote.goals) && remote.goals.length > _SYNC_MAX_GOALS) return true;
+  return false;
+}
+
+function _syncMergeTimeLogsById(a, b) {
+  const m = new Map();
+  for (const l of a || []) { if (l && l.id != null) m.set(l.id, l); }
+  for (const l of b || []) { if (l && l.id != null) m.set(l.id, l); }
+  return Array.from(m.values());
+}
+
+function _syncMergeIntervalsById(a, b) {
+  const m = new Map();
+  for (const x of a || []) { if (x && x.id != null) m.set(x.id, x); }
+  for (const x of b || []) { if (x && x.id != null) m.set(x.id, x); }
+  return Array.from(m.values());
+}
+
+function _syncMergeSessionHist(a, b) {
+  const out = [...(a || []), ...(b || [])];
+  return out.length > _SYNC_MAX_SH_MERGE ? out.slice(-_SYNC_MAX_SH_MERGE) : out;
+}
+
 function _mergeState(remote) {
   try {
     if (!remote || typeof remote !== 'object' || Array.isArray(remote)) return;
+    if (_syncIncomingPayloadInvalid(remote)) {
+      console.warn('[sync] rejected oversized or invalid sync payload');
+      return;
+    }
 
   const repair = (typeof _repairTask === 'function') ? _repairTask : (t=>t);
 
@@ -271,6 +312,16 @@ function _mergeState(remote) {
     if (remote.phase && ['work', 'short', 'long'].includes(remote.phase)) phase = remote.phase;
     if (remote.cfg && typeof remote.cfg === 'object') cfg = remote.cfg;
     if (remote.theme && ['dark', 'light'].includes(remote.theme)) theme = remote.theme;
+  } else if (re === le && re > 0) {
+    if (Array.isArray(remote.timeLog)) timeLog = _syncMergeTimeLogsById(timeLog, remote.timeLog);
+    if (Array.isArray(remote.sessionHistory)) sessionHistory = _syncMergeSessionHist(sessionHistory, remote.sessionHistory);
+    if (Array.isArray(remote.intervals)) intervals = _syncMergeIntervalsById(intervals, remote.intervals);
+    if (remote.totalPomos != null) totalPomos = Math.max(totalPomos, Math.max(0, parseInt(remote.totalPomos, 10) || 0));
+    if (remote.totalBreaks != null) totalBreaks = Math.max(totalBreaks, Math.max(0, parseInt(remote.totalBreaks, 10) || 0));
+    if (remote.totalFocusSec != null) totalFocusSec = Math.max(totalFocusSec, Math.max(0, parseInt(remote.totalFocusSec, 10) || 0));
+    if (remote.intIdCtr != null) intIdCtr = Math.max(intIdCtr, Math.max(0, parseInt(remote.intIdCtr, 10) || 0));
+    if (remote.logIdCtr != null) logIdCtr = Math.max(logIdCtr, Math.max(0, parseInt(remote.logIdCtr, 10) || 0));
+    if (remote.pomosInCycle != null) pomosInCycle = Math.max(pomosInCycle, Math.max(0, parseInt(remote.pomosInCycle, 10) || 0));
   }
   } catch (e) {
     console.warn('[sync] mergeState failed', e);

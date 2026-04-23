@@ -22,6 +22,7 @@ function makeMergeRun() {
   const mergeBlock = src.slice(iMergeDel, iConn);
 
   return new Function(`
+    var SYNC_VERSION = 1;
     var _lastSyncAt = 0;
     var tasks, lists, goals, taskIdCtr, listIdCtr, goalIdCtr, activeListId;
     var timeLog, sessionHistory, intervals, intIdCtr, totalPomos, totalBreaks, totalFocusSec;
@@ -128,4 +129,27 @@ test('merge: stateEpoch remote newer applies timeLog and cfg', () => {
   assert.equal(o.timeLog.length, 1);
   assert.equal(o.cfg.x, 2);
   assert.equal(o.totalPomos, 2);
+});
+
+test('merge: equal stateEpoch unions timeLog by id and maxes pomo count', () => {
+  const run = makeMergeRun();
+  const o = run(
+    { timeLog: [{ id: 1, name: 'a', durSec: 1, time: 't' }], stateEpoch: 5000, totalPomos: 1 },
+    {
+      stateEpoch: 5000,
+      timeLog: [{ id: 2, name: 'b', durSec: 2, time: 't' }],
+      totalPomos: 3,
+    },
+  );
+  assert.equal(o.timeLog.length, 2);
+  assert.equal(o.totalPomos, 3);
+});
+
+test('merge: invalid syncV is rejected without mutating tasks', () => {
+  const run = makeMergeRun();
+  const bad = { syncV: 999, tasks: [{ id: 2, name: 'x', lastModified: 9 }], stateEpoch: 1 };
+  const t0 = [{ id: 1, name: 'keep', lastModified: 1 }];
+  const o = run({ tasks: t0, taskIdCtr: 1, stateEpoch: 0 }, bad);
+  assert.equal(o.tasks.length, 1);
+  assert.equal(o.tasks[0].name, 'keep');
 });

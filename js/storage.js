@@ -508,6 +508,162 @@ function _applyState(s){
   }
 }
 
+function _taskImportRelevanceMs(task){
+  if(!task) return 0;
+  if(typeof task.lastModified === 'number' && task.lastModified > 0) return task.lastModified;
+  const c = task.created;
+  if(!c) return 0;
+  const p = Date.parse(String(c));
+  return Number.isFinite(p) ? p : 0;
+}
+
+function _taskLwwMs(t){
+  if(!t) return 0;
+  if(typeof t.lastModified === 'number' && t.lastModified > 0) return t.lastModified;
+  const ca = t.completedAt ? Date.parse(String(t.completedAt)) : NaN;
+  if(Number.isFinite(ca)) return ca;
+  return _taskImportRelevanceMs(t);
+}
+
+function _mergeTimeLogById(a, b){
+  const m = new Map();
+  for(const l of a || []){ if(l && l.id != null) m.set(l.id, l); }
+  for(const l of b || []){ if(l && l.id != null) m.set(l.id, l); }
+  return Array.from(m.values());
+}
+
+function _mergeIntervalsById(a, b){
+  const m = new Map();
+  for(const x of a || []){ if(x && x.id != null) m.set(x.id, x); }
+  for(const x of b || []){ if(x && x.id != null) m.set(x.id, x); }
+  return Array.from(m.values());
+}
+
+function _mergeSessionHistTail(a, b, maxLen){
+  const cap = typeof maxLen === 'number' && maxLen > 0 ? maxLen : 400;
+  const out = [...(a || []), ...(b || [])];
+  return out.length > cap ? out.slice(-cap) : out;
+}
+
+function _mergeDelPair(loc, rem){
+  const o = { ...loc };
+  if(!rem || typeof rem !== 'object' || Array.isArray(rem)) return o;
+  for(const [k, v] of Object.entries(rem)){
+    const id = parseInt(k, 10);
+    if(!Number.isFinite(id)) continue;
+    const rv = typeof v === 'number' && v > 0 ? v : 0;
+    if(o[id] == null) o[id] = rv;
+    else o[id] = Math.max(o[id], rv);
+  }
+  return o;
+}
+
+/**
+ * When another tab persists newer state and this tab has unsaved user edits,
+ * merge by last-write-wins on entities (tasks/lists/goals) and union logs.
+ */
+function _mergeRemoteStateLww(raw){
+  try{
+    const r = migrateState(JSON.parse(JSON.stringify(raw)));
+    if(!_validateState(r)) return false;
+    const taskMap = new Map(tasks.map(t => [t.id, t]));
+    for(const rt of (r.tasks || [])){
+      if(!rt) continue;
+      const lt = taskMap.get(rt.id);
+      if(!lt) taskMap.set(rt.id, rt);
+      else if(_taskLwwMs(rt) > _taskLwwMs(lt)) taskMap.set(rt.id, rt);
+    }
+    tasks = Array.from(taskMap.values());
+    taskIdCtr = Math.max(taskIdCtr, _int(r.taskIdCtr, 0));
+
+    const listMap = new Map(lists.map(l => [l.id, l]));
+    for(const rl of (r.lists || [])){
+      if(!rl || rl.id == null) continue;
+      const ex = listMap.get(rl.id);
+      if(!ex) listMap.set(rl.id, rl);
+      else if((rl.lastModified || 0) > (ex.lastModified || 0)) listMap.set(rl.id, rl);
+    }
+    lists = Array.from(listMap.values());
+    listIdCtr = Math.max(listIdCtr, _int(r.listIdCtr, 0));
+
+    const goalMap = new Map(goals.map(g => [g.id, g]));
+    for(const rg of (r.goals || [])){
+      if(!rg || rg.id == null) continue;
+      const ex = goalMap.get(rg.id);
+      if(!ex) goalMap.set(rg.id, rg);
+      else if((rg.lastModified || 0) > (ex.lastModified || 0)) goalMap.set(rg.id, rg);
+    }
+    goals = Array.from(goalMap.values());
+    goalIdCtr = Math.max(goalIdCtr, _int(r.goalIdCtr, 0));
+
+    timeLog = _mergeTimeLogById(timeLog, r.timeLog);
+    sessionHistory = _mergeSessionHistTail(sessionHistory, r.sessionHistory, 400);
+    intervals = _mergeIntervalsById(intervals, r.intervals);
+
+    syncTaskDels = _mergeDelPair(typeof syncTaskDels === 'object' && syncTaskDels ? syncTaskDels : {}, r.syncTaskDels);
+    syncListDels = _mergeDelPair(typeof syncListDels === 'object' && syncListDels ? syncListDels : {}, r.syncListDels);
+    syncGoalDels = _mergeDelPair(typeof syncGoalDels === 'object' && syncGoalDels ? syncGoalDels : {}, r.syncGoalDels);
+
+    totalPomos     = Math.max(totalPomos, _int(r.totalPomos, 0));
+    totalBreaks    = Math.max(totalBreaks, _int(r.totalBreaks, 0));
+    totalFocusSec  = Math.max(totalFocusSec, _int(r.totalFocusSec, 0));
+    pomosInCycle   = Math.max(pomosInCycle, _int(r.pomosInCycle, 0));
+    logIdCtr       = Math.max(logIdCtr, _int(r.logIdCtr, 0));
+    intIdCtr       = Math.max(intIdCtr, _int(r.intIdCtr, 0));
+    if(typeof r.stateEpoch === 'number' && r.stateEpoch > 0)
+      stateEpoch = Math.max(typeof stateEpoch === 'number' ? stateEpoch : 0, r.stateEpoch);
+    if(typeof rebuildTaskIdIndex === 'function') rebuildTaskIdIndex();
+    if(typeof repairOrphanedTaskParents === 'function') repairOrphanedTaskParents();
+    if(activeTaskId && typeof findTask === 'function' && !findTask(activeTaskId)) activeTaskId = null;
+    return true;
+  }catch(e){
+    console.warn('[storage] _mergeRemoteStateLww', e);
+    return false;
+  }
+}
+
+function _onStorageFromOtherTab(e){
+  if(e.key !== STORE_KEY || typeof e.newValue !== 'string') return;
+  if(!e.newValue) return;
+  let remote;
+  try{ remote = JSON.parse(e.newValue); }
+  catch(err){ return; }
+  if(!remote || typeof remote !== 'object') return;
+  const re = typeof remote.stateEpoch === 'number' && remote.stateEpoch > 0 ? remote.stateEpoch : 0;
+  const le = typeof stateEpoch === 'number' && stateEpoch > 0 ? stateEpoch : 0;
+  const dirty = !!window._stateDirty;
+  if(!dirty && re <= le) return;
+  if(dirty && re <= 0) return;
+  let ok;
+  if(dirty) ok = _mergeRemoteStateLww(remote);
+  else ok = _applyState(remote);
+  if(!ok) return;
+  if(typeof queueAutoSave === 'function') queueAutoSave();
+  if(dirty && typeof showExportToast === 'function'){
+    const now = Date.now();
+    if(now - (window._lastCrossTabMergeToast | 0) > 20_000){
+      window._lastCrossTabMergeToast = now;
+      showExportToast('Merged updates from another tab');
+    }
+  }
+  _prevTaskSnapshot = {};
+  tasks.forEach(t => { _prevTaskSnapshot[t.id] = { ...t }; });
+  if(typeof requestAnimationFrame === 'function'){
+    requestAnimationFrame(() => {
+      if(typeof renderAll === 'function') renderAll();
+      if(typeof renderLog === 'function') renderLog();
+      if(typeof renderStats === 'function') renderStats();
+      if(typeof renderArchive === 'function') renderArchive();
+      if(typeof renderGoalList === 'function') renderGoalList();
+      if(typeof updateMiniTimer === 'function') updateMiniTimer();
+    });
+  } else {
+    if(typeof renderAll === 'function') renderAll();
+    if(typeof renderLog === 'function') renderLog();
+    if(typeof renderStats === 'function') renderStats();
+  }
+}
+
 // ── Load — with multi-layer fallback ─────────────────────────────────────────
 // Priority: localStorage → IDB → clean start (never crashes)
 function loadState(){
@@ -972,11 +1128,20 @@ function _applyIncomingTask(incoming, report){
   if(!isNaN(incomingId) && incomingId > 0){
     const existing = tasks.find(t => t.id === incomingId);
     if(existing){
-      // Update existing — respect lastModified if both present (older loses)
+      // Update existing — lastModified wins when both present; else fall back to
+      // created parse. If still indeterminate, keep local (avoid stale CSV clobber).
       const newTask = _csvRowToTask(incoming, existing);
-      const exLM = existing.lastModified || 0;
-      const inLM = newTask.lastModified || 0;
-      if(inLM && exLM && inLM < exLM){
+      const exRel = _taskImportRelevanceMs(existing);
+      const inRel = _taskImportRelevanceMs(newTask);
+      if(exRel > 0 && inRel > 0 && inRel < exRel){
+        report.skipped++;
+        return;
+      }
+      if(exRel === 0 && inRel === 0){
+        report.skipped++;
+        return;
+      }
+      if(exRel > 0 && inRel === 0){
         report.skipped++;
         return;
       }
@@ -1012,17 +1177,26 @@ const _ARCHIVE_MAX_SESSION_HISTORY = 400;
 
 function archiveDay(state){
   try{
+    const day = state && state.date;
+    if(!day) return;
+    const claimKey = 'stupind_archived_' + day;
+    try{
+      if(localStorage.getItem(claimKey) === '1') return;
+    }catch(_){}
     let archives = [];
     try{
       archives = JSON.parse(localStorage.getItem(ARCHIVE_KEY)||'[]');
     }catch(_){
       archives = [];
     }
-    if(archives.find(a=>a.date===state.date)) return;
+    if(archives.find(a=>a.date===day)) {
+      try{ localStorage.setItem(claimKey, '1'); }catch(_){}
+      return;
+    }
     const tl = _arr(state.timeLog);
     const sh = _arr(state.sessionHistory);
     archives.push({
-      date:          state.date,
+      date:          day,
       totalPomos:    _int(state.totalPomos,0),
       totalBreaks:   _int(state.totalBreaks,0),
       totalFocusSec: _int(state.totalFocusSec,0),
@@ -1044,8 +1218,16 @@ function archiveDay(state){
       timeLog:        tl.length > _ARCHIVE_MAX_TIME_LOG ? tl.slice(-_ARCHIVE_MAX_TIME_LOG) : tl,
       sessionHistory: sh.length > _ARCHIVE_MAX_SESSION_HISTORY ? sh.slice(-_ARCHIVE_MAX_SESSION_HISTORY) : sh,
     });
+    const seen = new Set();
+    archives = archives.filter(a => {
+      if(!a || !a.date) return false;
+      if(seen.has(a.date)) return false;
+      seen.add(a.date);
+      return true;
+    });
     while(archives.length>90) archives.shift();
     localStorage.setItem(ARCHIVE_KEY, JSON.stringify(archives));
+    try{ localStorage.setItem(claimKey, '1'); }catch(_){}
   }catch(e){ console.warn('[storage] archiveDay failed', e); }
 }
 
@@ -1073,3 +1255,6 @@ function showSaveIndicator(){
 setInterval(() => queueAutoSave(), 10000);
 document.addEventListener('visibilitychange', ()=>{ if(document.hidden) queueAutoSave(); });
 window.addEventListener('beforeunload', () => saveState('unload'));
+if(typeof window !== 'undefined' && window.addEventListener){
+  window.addEventListener('storage', _onStorageFromOtherTab);
+}
