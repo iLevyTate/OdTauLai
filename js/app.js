@@ -279,7 +279,8 @@ function _handleDayRollover(){
     const today = (typeof todayKey === 'function') ? todayKey() : null;
     if(!today || !_lastKnownDate || today === _lastKnownDate) return;
     // Build a yesterday-stamped snapshot from the live in-memory state and
-    // archive it. archiveDay dedupes by date so running twice is harmless.
+    // archive it. storage.js also sets stupind_archived_<date> so other tabs
+    // skip duplicate archive entries for the same calendar day.
     const yesterday = {
       date:           _lastKnownDate,
       totalPomos:     totalPomos,
@@ -290,7 +291,12 @@ function _handleDayRollover(){
       timeLog:        timeLog,
       sessionHistory: sessionHistory,
     };
-    try{ archiveDay(yesterday); }catch(e){ console.warn('[app] archiveDay at rollover', e); }
+    try{
+      const k = 'stupind_archived_' + _lastKnownDate;
+      if(typeof localStorage === 'undefined' || localStorage.getItem(k) !== '1'){
+        archiveDay(yesterday);
+      }
+    }catch(e){ console.warn('[app] archiveDay at rollover', e); }
     totalPomos=0; totalBreaks=0; totalFocusSec=0; pomosInCycle=0;
     sessionHistory=[]; timeLog=[];
     _lastKnownDate = today;
@@ -451,34 +457,13 @@ setTimeout(() => {
   });
 }, 2500);
 
-(function syncCmdKGlyph(){
-  const b=document.getElementById('cmdKBtn');
-  if(!b) return;
-  const apply=()=>{
-    if(typeof matchMedia==='function' && matchMedia('(max-width: 640px)').matches){
-      b.textContent='\u22EF';
-      b.title='Command palette — search, jump, Ask';
-      b.style.fontSize='18px';
-      b.style.lineHeight='1';
-      b.style.letterSpacing='0';
-      return;
-    }
-    b.style.lineHeight='';
-    b.style.letterSpacing='';
-    b.title='Command palette';
-    if(!/(Mac|iPhone|iPod|iPad)/i.test(navigator.platform||'')){
-      b.textContent='Ctrl+K';
-      b.style.fontSize='10px';
-      b.style.lineHeight='1.1';
-    }else{
-      b.textContent='⌘K';
-      b.style.fontSize='';
-    }
-  };
-  apply();
-  if(typeof matchMedia==='function'){
-    const mq=matchMedia('(max-width: 640px)');
-    if(mq.addEventListener) mq.addEventListener('change', apply);
-    else if(mq.addListener) mq.addListener(apply);
+/** Desktop palette shortcut label only — mobile shows icon + "Ask" via CSS. */
+(function syncCmdKKbdText(){
+  const kbd = document.querySelector('#cmdKBtn .cmdk-btn-kbd');
+  if (!kbd) return;
+  if (!/(Mac|iPhone|iPod|iPad)/i.test(navigator.platform || '')) {
+    kbd.textContent = 'Ctrl+K';
+  } else {
+    kbd.textContent = '⌘K';
   }
 })();

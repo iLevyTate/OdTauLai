@@ -929,7 +929,7 @@
   /* Command Palette (Cmd+K) */
   .cmdk-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(6px);z-index:1500;display:none;align-items:flex-start;justify-content:center;padding:80px 16px 16px}
   .cmdk-overlay.open{display:flex;animation:fadeIn .15s}
-  .cmdk-panel{background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-lg);width:100%;max-width:560px;box-shadow:var(--shadow-3);overflow:hidden}
+  .cmdk-panel{background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-lg);width:100%;max-width:560px;box-shadow:var(--shadow-3);overflow:hidden;max-height:min(90vh, 90dvh)}
   .cmdk-input{width:100%;padding:16px 18px;background:transparent;border:none;color:var(--text-1);font-size:15px;font-family:inherit;outline:0;border-bottom:1px solid var(--border)}
   .cmdk-input::placeholder{color:var(--text-4)}
   .cmdk-results{max-height:420px;overflow-y:auto;padding:6px}
@@ -1233,8 +1233,9 @@
     .nav-tab{padding:8px 2px;min-height:48px;font-size:10px;gap:2px}
     .nav-tab-icon{font-size:16px}
     .nav-tab span:last-child{font-size:10px;letter-spacing:0}
-    /* Theme + Cmd+K buttons */
-    #themeToggleBtn,button[onclick="openCmdK()"]{width:40px!important;height:40px!important;min-width:40px}
+    /* Theme + Ask / palette button */
+    #themeToggleBtn{width:40px!important;height:40px!important;min-width:40px}
+    #cmdKBtn.header-icon-btn--cmdk{width:auto!important;height:auto!important;min-width:56px!important;min-height:44px!important;padding:0 10px!important}
     .ai-chip{height:36px;padding:0 6px;min-width:36px;justify-content:center}
     .ai-chip-label{font-size:10px}
     body:has(.mini-timer.visible){padding-bottom:calc(88px + env(safe-area-inset-bottom,0px))!important}
@@ -1379,9 +1380,9 @@
 
     /* Cmd+K - bottom sheet on mobile */
     .cmdk-overlay{padding:0!important;align-items:flex-end}
-    .cmdk-panel{width:100%;max-width:100%;border-radius:16px 16px 0 0;max-height:80vh}
+    .cmdk-panel{width:100%;max-width:100%;border-radius:16px 16px 0 0;max-height:min(80vh, 80dvh)}
     .cmdk-input{font-size:16px!important;padding:16px;min-height:56px}
-    .cmdk-results{max-height:60vh}
+    .cmdk-results{max-height:min(60vh, 55dvh)}
     .cmdk-item{padding:12px;min-height:44px;font-size:14px}
 
     /* Settings - stacked rows */
@@ -1437,7 +1438,8 @@
     .nav-tabs{padding:2px;gap:0;margin-right:6px}
     .nav-tab{padding:6px 2px;min-height:44px;font-size:9px}
     .nav-tab-icon{font-size:15px;margin-bottom:1px}
-    #themeToggleBtn,button[onclick="openCmdK()"]{width:36px!important;height:36px!important;min-width:36px;font-size:14px}
+    #themeToggleBtn{width:36px!important;height:36px!important;min-width:36px;font-size:14px}
+    #cmdKBtn.header-icon-btn--cmdk{width:auto!important;height:auto!important;min-width:56px!important;min-height:44px!important;padding:0 10px!important;font-size:12px!important}
     .ai-chip{height:36px;min-width:36px;padding:0 6px}
     .ai-chip-label{font-size:9px}
 
@@ -2379,6 +2381,15 @@ body:has(.offline-indicator:not([style*="display:none"])){ padding-top:30px; }
 /* ══════════════════════════════════════════════════════════════════════════ */
 .cmdk-input-row{display:flex;align-items:center;gap:0;border-bottom:1px solid var(--border)}
 .cmdk-input-row .cmdk-input{border-bottom:none;flex:1}
+.cmdk-find-hint{
+  margin:0;padding:8px 14px;font-size:12px;line-height:1.45;color:var(--text-3);
+  border-bottom:1px solid var(--border);background:var(--bg-2);
+}
+.cmdk-find-hint kbd{
+  font-family:var(--font-mono);font-size:10px;background:var(--bg-1);border:1px solid var(--border);
+  padding:1px 5px;border-radius:3px;color:var(--text-2);
+}
+.cmdk-find-hint strong{color:var(--text-2);font-weight:600}
 .cmdk-ask-toggle{
   margin-right:10px;padding:6px 12px;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
   background:var(--bg-2);color:var(--text-3);border:1px solid var(--border);border-radius:999px;cursor:pointer;font-family:inherit;flex-shrink:0;
@@ -2453,14 +2464,20 @@ body:has(.offline-indicator:not([style*="display:none"])){ padding-top:30px; }
 
 /* Ask promo chip (discoverability outside Cmd+K) */
 .ask-promo-chip{
-  margin:6px 0 0;display:inline-flex;align-items:center;gap:8px;padding:5px 10px;
+  margin:6px 0 0;display:inline-flex;align-items:center;gap:6px;padding:5px 10px;
   background:var(--bg-2);border:1px solid var(--border);color:var(--text-3);
   border-radius:999px;font-size:11px;font-family:inherit;cursor:pointer;
 }
+.ask-promo-chip .ask-promo-ic{display:inline-flex;align-items:center;flex-shrink:0}
 .ask-promo-chip:hover{color:var(--accent);border-color:var(--accent)}
 .ask-promo-chip kbd{
   font-family:var(--font-mono);font-size:10px;background:var(--bg-1);border:1px solid var(--border);
   padding:1px 5px;border-radius:3px;color:var(--text-2);
+}
+.ask-promo-label--touch{display:none}
+@media (max-width:640px),(pointer:coarse){
+  .ask-promo-label--kbd{display:none}
+  .ask-promo-label--touch{display:inline}
 }
 
 @media (max-width:640px){
@@ -2486,7 +2503,20 @@ body:has(.offline-indicator:not([style*="display:none"])){ padding-top:30px; }
   font-size:12px;font-weight:600;transition:background .15s,border-color .15s;
 }
 .header-icon-btn:hover{background:var(--bg-3);color:var(--text-1)}
-.header-icon-btn--kbd{font-size:10px;line-height:1.15;letter-spacing:.02em}
+.header-icon-btn--cmdk{
+  display:inline-flex;align-items:center;justify-content:center;gap:5px;
+  padding:0 8px;min-width:36px;
+}
+.header-icon-btn--cmdk .cmdk-btn-ic{display:inline-flex;align-items:center;flex-shrink:0}
+.header-icon-btn--cmdk .cmdk-btn-txt{display:none;font-size:12px;font-weight:600;letter-spacing:0.02em}
+.header-icon-btn--cmdk .cmdk-btn-kbd{
+  font-family:var(--font-mono);font-size:10px;line-height:1.15;letter-spacing:.02em;
+}
+@media (max-width:640px){
+  .header-icon-btn--cmdk{min-height:44px;padding:0 10px}
+  .header-icon-btn--cmdk .cmdk-btn-txt{display:inline}
+  .header-icon-btn--cmdk .cmdk-btn-kbd{display:none}
+}
 .track-banner{
   width:100%;max-width:720px;margin:-4px 0 12px;padding:8px 12px;
   background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-md);
