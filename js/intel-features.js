@@ -25,28 +25,83 @@ window.CAT_ICON = CAT_ICON;
 window.SCHWARTZ = SCHWARTZ;
 window.VALUE_KEYS = VALUE_KEYS;
 
+/**
+ * @typedef {{ key: string, def: string }} CoreValueDef
+ * Life areas — `general` is manual-only; never auto-assigned by kNN/centroid.
+ */
 const DEFAULT_CATEGORY_DEFS = [
   { id: 'bodyMindSpirit', label: 'Body, Mind & Spirit', icon: 'leaf', color: 'var(--cat-bodyMindSpirit)',
+    focus: 'Physical health, mental wellness, and spirituality',
     description: 'Physical health, mental wellness, spirituality',
-    coreValues: ['health', 'strength', 'spirituality', 'peace'] },
+    coreValues: [
+      { key: 'health', def: 'Physical and mental well-being' },
+      { key: 'strength', def: 'Physical and mental resilience' },
+      { key: 'spirituality', def: 'Connection to something greater' },
+      { key: 'peace', def: 'Inner calm and tranquility' },
+    ],
+    examples: ['Exercise routines', 'Meditation', 'Therapy', 'Yoga', 'Doctor appointments', 'Spiritual practices'],
+  },
   { id: 'relationships', label: 'Relationships', icon: 'heart', color: 'var(--cat-relationships)',
+    focus: 'Family, friends, romantic partnerships',
     description: 'Family, friends, romantic partnerships',
-    coreValues: ['family', 'connection', 'loyalty', 'trust'] },
+    coreValues: [
+      { key: 'family', def: 'Nurturing family relationships and bonds' },
+      { key: 'connection', def: 'Deep relationships with others' },
+      { key: 'loyalty', def: 'Faithfulness to people and commitments' },
+      { key: 'trust', def: 'Reliability and dependability' },
+    ],
+    examples: ['Date nights', 'Family calls', 'Friend meetups', 'Relationship check-ins', 'Gift planning'],
+  },
   { id: 'community', label: 'Community', icon: 'users', color: 'var(--cat-community)',
+    focus: 'Social groups, volunteering, civic engagement',
     description: 'Social groups, volunteering, civic engagement',
-    coreValues: ['service', 'justice', 'compassion'] },
+    coreValues: [
+      { key: 'service', def: 'Helping others and giving back' },
+      { key: 'justice', def: 'Fairness and equality for all' },
+      { key: 'compassion', def: 'Caring for others and showing empathy' },
+    ],
+    examples: ['Volunteer work', 'Donations', 'Neighborhood events', 'Advocacy', 'Mentoring'],
+  },
   { id: 'jobLearningFinances', label: 'Job, Learning & Finances', icon: 'briefcase', color: 'var(--cat-jobLearningFinances)',
+    focus: 'Career, education, financial stability',
     description: 'Career, education, financial stability',
-    coreValues: ['achievement', 'growth', 'knowledge', 'leadership', 'security'] },
+    coreValues: [
+      { key: 'achievement', def: 'Accomplishing meaningful goals' },
+      { key: 'growth', def: 'Continuous learning and self-improvement' },
+      { key: 'knowledge', def: 'Understanding and wisdom' },
+      { key: 'leadership', def: 'Guiding and inspiring others' },
+      { key: 'security', def: 'Financial and emotional stability' },
+    ],
+    examples: ['Work projects', 'Courses', 'Certifications', 'Budgeting', 'Investments', 'Skill development'],
+  },
   { id: 'interests', label: 'Interests', icon: 'sparkles', color: 'var(--cat-interests)',
+    focus: 'Hobbies, creative pursuits, leisure activities',
     description: 'Hobbies, creative pursuits, leisure activities',
-    coreValues: ['creativity', 'adventure', 'joy', 'humor'] },
+    coreValues: [
+      { key: 'creativity', def: 'Expressing yourself through creative work' },
+      { key: 'adventure', def: 'New experiences and exploration' },
+      { key: 'joy', def: 'Happiness and contentment' },
+      { key: 'humor', def: 'Finding joy and laughter in life' },
+    ],
+    examples: ['Art projects', 'Music', 'Travel planning', 'Sports', 'Gaming', 'Reading'],
+  },
   { id: 'personalCare', label: 'Personal Care', icon: 'home', color: 'var(--cat-personalCare)',
+    focus: 'Self-maintenance, routines, life management',
     description: 'Self-maintenance, routines, life management',
-    coreValues: ['balance', 'simplicity', 'patience', 'responsibility'] },
+    coreValues: [
+      { key: 'balance', def: 'Harmony between different life areas' },
+      { key: 'simplicity', def: 'Living with less complexity' },
+      { key: 'patience', def: 'Acceptance and perseverance' },
+      { key: 'responsibility', def: 'Accountability for your actions' },
+    ],
+    examples: ['Sleep hygiene', 'Skincare', 'Meal prep', 'Home organization', 'Errands', 'Self-reflection'],
+  },
   { id: 'general', label: 'General', icon: 'pin', color: 'var(--cat-general)',
-    description: 'Uncategorized or cross-domain tasks',
-    coreValues: [] },
+    focus: 'Uncategorized or cross-domain tasks',
+    description: 'Uncategorized or cross-domain tasks; use for work that does not fit a single life area or spans many domains',
+    coreValues: [],
+    examples: [],
+  },
 ];
 
 /** Preset accent colors (CSS variables) for the classification manager & chips */
@@ -60,36 +115,83 @@ const CLASSIFICATION_COLOR_PRESETS = [
   { value: 'var(--cat-general)', label: 'Gray — General' },
 ];
 
+function _normalizeRowCoreValues(coreRaw, base){
+  if(Array.isArray(coreRaw) && coreRaw.length){
+    const first = coreRaw[0];
+    if(first && typeof first === 'object' && first.key != null){
+      return coreRaw.map(x => ({
+        key: String(x && x.key != null ? x.key : '').trim(),
+        def: String(x && x.def != null ? x.def : '').trim(),
+      })).filter(x => x.key).slice(0, 32);
+    }
+    return coreRaw.map(v => String(v).trim()).filter(Boolean).map(k => {
+      const b = (base && Array.isArray(base.coreValues)) ? base.coreValues.find(c => c && c.key === k) : null;
+      return { key: k, def: b && b.def ? b.def : '' };
+    }).slice(0, 32);
+  }
+  if(base && Array.isArray(base.coreValues) && base.coreValues.length)
+    return base.coreValues.map(x => (x && x.key
+      ? { key: x.key, def: x.def != null ? String(x.def) : '' }
+      : { key: String(x), def: '' }
+    ));
+  return [];
+}
+
+function _normalizeRowExamples(exRaw, base){
+  if(Array.isArray(exRaw) && exRaw.length)
+    return exRaw.map(x => String(x).trim()).filter(Boolean).slice(0, 32);
+  if(base && Array.isArray(base.examples)) return base.examples.slice();
+  return [];
+}
+
 function ensureClassificationConfig(c){
   if(!c || typeof c !== 'object') return;
   if(!Array.isArray(c.categories) || !c.categories.length){
-    c.categories = DEFAULT_CATEGORY_DEFS.map(x => ({ ...x, hidden: false }));
+    c.categories = DEFAULT_CATEGORY_DEFS.map(x => {
+      const { hidden, ...rest } = { ...x, hidden: false };
+      return { ...rest, coreValues: (x.coreValues || []).map(cv => ({ ...cv })), examples: (x.examples || []).slice(), hidden: false };
+    });
   } else {
     c.categories = c.categories.map(row => {
       const id = String(row.id || '').trim().slice(0, 64) || null;
       const base = id ? DEFAULT_CATEGORY_DEFS.find(d => d.id === id) : null;
-      const coreRaw = row.coreValues;
-      const coreValues = Array.isArray(coreRaw)
-        ? coreRaw.map(v => String(v).trim()).filter(Boolean).slice(0, 32)
-        : (base && Array.isArray(base.coreValues) ? [...base.coreValues] : []);
+      const coreValues = _normalizeRowCoreValues(row.coreValues, base);
+      const examples = _normalizeRowExamples(row.examples, base);
       let color = String(row.color || '').trim().slice(0, 80);
       if(!color) color = base ? base.color : 'var(--cat-general)';
       const desc = String(row.description != null ? row.description : (base ? base.description : '')).trim().slice(0, 500);
+      const focus = String(row.focus != null ? row.focus : (base && base.focus != null ? base.focus : (base ? base.description : ''))).trim().slice(0, 500);
       return {
         id,
         label: String(row.label || row.id || '').trim().slice(0, 80) || '',
         icon: String(row.icon || 'pin').trim() || 'pin',
         color,
         description: desc,
+        focus,
         coreValues,
+        examples,
         hidden: !!row.hidden,
       };
     }).filter(r => r.id);
     if(!c.categories.length){
-      c.categories = DEFAULT_CATEGORY_DEFS.map(x => ({ ...x, hidden: false }));
+      c.categories = DEFAULT_CATEGORY_DEFS.map(x => {
+        return {
+          ...x,
+          coreValues: (x.coreValues || []).map(cv => ({ ...cv })),
+          examples: (x.examples || []).slice(),
+          hidden: false,
+        };
+      });
     }
   }
   if('contexts' in c) delete c.contexts;
+
+  const validCat = new Set((c.categories || []).map(r => r.id).filter(Boolean));
+  if(typeof tasks !== 'undefined' && Array.isArray(tasks) && validCat.size){
+    for(const t of tasks){
+      if(t && t.category && !validCat.has(t.category)) t.category = null;
+    }
+  }
 }
 
 function hasClassificationCategory(cat){
@@ -106,13 +208,17 @@ function getCategoryDef(id){
   const row = (typeof cfg !== 'undefined' && cfg && Array.isArray(cfg.categories))
     ? cfg.categories.find(x => x.id === id) : null;
   if(row){
+    const cv = _normalizeRowCoreValues(row.coreValues, DEFAULT_CATEGORY_DEFS.find(d => d.id === id));
+    const ex = _normalizeRowExamples(row.examples, DEFAULT_CATEGORY_DEFS.find(d => d.id === id));
     return {
       id: row.id,
       label: row.label || row.id,
       icon: row.icon || 'pin',
       color: row.color || 'var(--cat-general)',
       description: row.description || '',
-      coreValues: Array.isArray(row.coreValues) ? row.coreValues : [],
+      focus: row.focus != null ? String(row.focus) : (row.description || ''),
+      coreValues: cv,
+      examples: ex,
     };
   }
   const base = DEFAULT_CATEGORY_DEFS.find(x => x.id === id);
@@ -123,11 +229,13 @@ function getCategoryDef(id){
       icon: base.icon,
       color: base.color,
       description: base.description,
-      coreValues: base.coreValues ? [...base.coreValues] : [],
+      focus: base.focus || base.description || '',
+      coreValues: base.coreValues ? base.coreValues.map(c => ({ ...c })) : [],
+      examples: base.examples ? base.examples.slice() : [],
     };
   }
   const ic = CAT_ICON[id];
-  return { id, label: id, icon: ic || 'pin', color: 'var(--cat-general)', description: '', coreValues: [] };
+  return { id, label: id, icon: ic || 'pin', color: 'var(--cat-general)', description: '', focus: '', coreValues: [], examples: [] };
 }
 
 function getActiveCategories(){
@@ -152,6 +260,7 @@ function classificationMove(idx, dir){
   arr[j] = tmp;
   renderClassificationSettings();
   refreshClassificationUi();
+  invalidateCategoryCentroids();
   if(typeof saveState === 'function') saveState('user');
 }
 
@@ -163,6 +272,7 @@ function classificationToggleHidden(idx){
   arr[idx].hidden = !arr[idx].hidden;
   renderClassificationSettings();
   refreshClassificationUi();
+  invalidateCategoryCentroids();
   if(typeof renderTaskList === 'function') renderTaskList();
   if(typeof saveState === 'function') saveState('user');
 }
@@ -173,6 +283,7 @@ function classificationSetLabel(idx, label){
   const arr = cfg.categories;
   if(!arr[idx]) return;
   arr[idx].label = String(label || '').trim().slice(0, 80) || arr[idx].id;
+  invalidateCategoryCentroids();
   refreshClassificationUi();
   if(typeof renderTaskList === 'function') renderTaskList();
   if(typeof saveState === 'function') saveState('user');
@@ -185,6 +296,18 @@ function classificationSetIcon(idx, iconName){
   if(!arr[idx]) return;
   arr[idx].icon = String(iconName || 'pin').trim() || 'pin';
   renderClassificationSettings();
+  invalidateCategoryCentroids();
+  if(typeof saveState === 'function') saveState('user');
+}
+
+function classificationSetColor(idx, colorVal){
+  if(typeof cfg === 'undefined' || !cfg) return;
+  ensureClassificationConfig(cfg);
+  const arr = cfg.categories;
+  if(!arr[idx]) return;
+  arr[idx].color = String(colorVal || '').trim().slice(0, 80) || 'var(--cat-general)';
+  renderClassificationSettings();
+  invalidateCategoryCentroids();
   if(typeof saveState === 'function') saveState('user');
 }
 
@@ -203,10 +326,11 @@ async function classificationAdd(kind){
     id = id + '-' + Math.random().toString(36).slice(2, 5);
   }
   arr.push({
-    id, label, icon: 'pin', color: 'var(--cat-general)', description: '', coreValues: [], hidden: false,
+    id, label, icon: 'pin', color: 'var(--cat-general)', description: '', focus: '', coreValues: [], examples: [], hidden: false,
   });
   renderClassificationSettings();
   refreshClassificationUi();
+  invalidateCategoryCentroids();
   if(typeof saveState === 'function') saveState('user');
 }
 
@@ -220,6 +344,16 @@ function renderClassificationSettings(){
 
   let h = '<div class="class-mgr-block"><div class="class-mgr-hdr">Life areas</div>';
   cfg.categories.forEach((obj, idx) => {
+    const def = (typeof getCategoryDef === 'function' ? getCategoryDef(obj.id) : null) || obj;
+    const focusLine = esc((def && def.focus) ? def.focus : '');
+    const cv = (def && Array.isArray(def.coreValues)) ? def.coreValues : [];
+    const cvHtml = cv.slice(0, 20).map(c => {
+      if(c && typeof c === 'object' && c.key) return '<li><strong>' + esc(String(c.key)) + '</strong> — ' + esc(String(c.def || '')) + '</li>';
+      return '<li>' + esc(String(c)) + '</li>';
+    }).join('');
+    const ex = (def && Array.isArray(def.examples)) ? def.examples : [];
+    const exHtml = ex.length ? ex.map(x => esc(String(x))).join(', ') : '—';
+
     const opt = iconKeys.map(k => '<option value="' + esc(k) + '"' + (k === obj.icon ? ' selected' : '') + '>' + esc(k) + '</option>').join('');
     let colOpts = '';
     if(obj.color && !presetVals.has(obj.color)){
@@ -228,7 +362,8 @@ function renderClassificationSettings(){
     colOpts += CLASSIFICATION_COLOR_PRESETS.map(p =>
       '<option value="' + esc(p.value) + '"' + (p.value === obj.color ? ' selected' : '') + '>' + esc(p.label) + '</option>',
     ).join('');
-    h += '<div class="class-mgr-row' + (obj.hidden ? ' class-mgr-row--hidden' : '') + '">'
+    h += '<div class="class-mgr-cat' + (obj.hidden ? ' class-mgr-cat--hidden' : '') + '">'
+      + '<div class="class-mgr-row">'
       + '<input type="text" class="class-mgr-in" value="' + esc(obj.label) + '" '
       + 'onchange="classificationSetLabel(' + idx + ',this.value)" aria-label="Label"/>'
       + '<select class="class-mgr-sel" onchange="classificationSetIcon(' + idx + ',this.value)" aria-label="Icon">' + opt + '</select>'
@@ -237,9 +372,17 @@ function renderClassificationSettings(){
       + '<button type="button" class="class-mgr-btn" onclick="classificationMove(' + idx + ',-1)">↑</button>'
       + '<button type="button" class="class-mgr-btn" onclick="classificationMove(' + idx + ',1)">↓</button>'
       + '<code class="class-mgr-id" title="Stable id stored on tasks">' + esc(obj.id) + '</code>'
-      + '</div>';
+      + '</div>'
+      + '<details class="class-mgr-details"><summary>Life area details</summary>'
+      + (focusLine ? '<p class="class-mgr-focus-p"><strong>Focus</strong> — ' + focusLine + '</p>' : '')
+      + (cvHtml ? '<ul class="class-mgr-cv">' + cvHtml + '</ul>' : '')
+      + '<p class="class-mgr-ex"><strong>Example tasks</strong> — ' + exHtml + '</p>'
+      + '</details></div>';
   });
-  h += '<button type="button" class="btn-ghost btn-sm class-mgr-add" onclick="classificationAdd()">+ Add life area</button></div>';
+  h += '<div class="class-mgr-reclass">'
+    + '<button type="button" class="btn-ghost btn-sm" onclick="intelReclassifyUncategorized()">Re-classify uncategorized tasks</button>'
+    + '<span class="class-mgr-hint">Uses embeddings to suggest a life area — review in the preview below.</span></div>'
+    + '<button type="button" class="btn-ghost btn-sm class-mgr-add" onclick="classificationAdd()">+ Add life area</button></div>';
 
   root.innerHTML = h;
 }
@@ -319,8 +462,94 @@ async function ensureSchwartzEmbeddings(){
 const KNN_MIN_SIM = 0.55;
 const KNN_CAT_MIN_CONF = 0.55;
 const KNN_CAT_MIN_MARGIN = 0.15;
+/** Life-area prototype vs task vector */
+const CAT_CENTROID_MIN_SIM = 0.28;
+const CAT_CENTROID_MIN_MARGIN = 0.04;
 const KNN_PRIO_EFF_EN_MIN_CONF = 0.5;
 const KNN_TAG_TOP_FRAC = 0.6;
+
+function _categoryEmbedTextFromDef(def){
+  if(!def || !def.id || def.id === 'general') return '';
+  const lines = [];
+  lines.push(String(def.label || def.id));
+  if(def.focus) lines.push(String(def.focus));
+  else if(def.description) lines.push(String(def.description));
+  const cv = def.coreValues;
+  if(Array.isArray(cv) && cv.length){
+    lines.push('Values: ' + cv.map(c => (c && c.key ? `${c.key}: ${c.def || ''}` : String(c))).join('; '));
+  }
+  if(Array.isArray(def.examples) && def.examples.length){
+    lines.push('Examples: ' + def.examples.join(', '));
+  }
+  return lines.join('\n').trim().slice(0, 8000);
+}
+
+let _categoryCentroidsPromise = null;
+
+/**
+ * Embeds each life-area (except General) for centroid classification. Invalidated on embed model change (meta) or invalidateCategoryCentroids().
+ * @returns {Promise<Record<string, Float32Array>>}
+ */
+async function ensureCategoryCentroids(){
+  if(typeof embedStore === 'undefined' || !isIntelReady() || typeof embedText !== 'function') return null;
+  if(_categoryCentroidsPromise) return _categoryCentroidsPromise;
+
+  _categoryCentroidsPromise = (async () => {
+    const key = typeof embedStore.getCatCentroidsKey === 'function' ? embedStore.getCatCentroidsKey() : 'cat_centroids_v1';
+    const schemaVer = (typeof window !== 'undefined' && window.INTEL_EMBED_MODEL_VER) || 'v1';
+    const dim = (typeof getEmbedDim === 'function') ? getEmbedDim() : 768;
+    const prev = await embedStore.getMeta(key);
+    if(prev && prev.schemaVer === schemaVer && prev.dim === dim && prev.vecs && typeof prev.vecs === 'object'){
+      const out = {};
+      for(const [id, buf] of Object.entries(prev.vecs)){
+        if(buf && buf.length === dim) out[id] = buf instanceof Float32Array ? buf : new Float32Array(buf);
+      }
+      if(Object.keys(out).length){
+        if(typeof cfg !== 'undefined' && cfg) ensureClassificationConfig(cfg);
+        const need = (typeof cfg !== 'undefined' && cfg && Array.isArray(cfg.categories))
+          ? cfg.categories.map(c => c.id).filter(id => id && id !== 'general')
+          : LIFE_CATS.filter(x => x !== 'general');
+        const complete = !need.length || need.every(id => out[id] && (out[id].length === dim));
+        if(complete) return out;
+      }
+    }
+
+    if(typeof cfg !== 'undefined' && cfg) ensureClassificationConfig(cfg);
+    const ids = (typeof cfg !== 'undefined' && cfg && Array.isArray(cfg.categories) && cfg.categories.length)
+      ? cfg.categories.map(c => c.id).filter(Boolean)
+      : LIFE_CATS.filter(x => x !== 'general');
+    const vecs = {};
+    for(const id of ids){
+      if(id === 'general') continue;
+      const def = getCategoryDef(id);
+      const text = _categoryEmbedTextFromDef(def);
+      if(!text) continue;
+      vecs[id] = await embedText(text);
+    }
+    await embedStore.setMeta(key, { schemaVer, dim, vecs });
+    return vecs;
+  })();
+
+  try{
+    return await _categoryCentroidsPromise;
+  }finally{
+    _categoryCentroidsPromise = null;
+  }
+}
+
+function invalidateCategoryCentroids(){
+  _categoryCentroidsPromise = null;
+  if(typeof embedStore === 'undefined' || !embedStore.deleteMeta) return;
+  const key = typeof embedStore.getCatCentroidsKey === 'function' ? embedStore.getCatCentroidsKey() : 'cat_centroids_v1';
+  embedStore.deleteMeta(key).catch(() => {});
+}
+
+function _sanitizeMergedCategory(merged){
+  if(!merged || !merged.category) return;
+  if(merged.category === 'general' || typeof hasClassificationCategory !== 'function' || !hasClassificationCategory(merged.category)){
+    delete merged.category;
+  }
+}
 
 function _weightedFieldVote(topNeighbors, field){
   const w = new Map();
@@ -353,15 +582,52 @@ function predictMetadataFromVec(queryVec, opts){
   const heuristic = (o.heuristic && typeof o.heuristic === 'object') ? { ...o.heuristic } : {};
   const merged = { ...heuristic };
   const _confidence = {};
+  const hadHeuristicCat = !!(heuristic && heuristic.category);
 
-  if(!store || !queryVec){
+  if(!queryVec){
     merged._confidence = _confidence;
+    _sanitizeMergedCategory(merged);
+    return merged;
+  }
+
+  const centroidMap = o.categoryCentroidVecs;
+  let catFromCentroid = null;
+  if(!hadHeuristicCat && centroidMap && typeof centroidMap === 'object'){
+    const scoredC = [];
+    for(const [cid, vec] of Object.entries(centroidMap)){
+      if(cid === 'general' || !vec) continue;
+      const v = vec instanceof Float32Array ? vec : new Float32Array(vec);
+      if(v.length !== queryVec.length) continue;
+      const sim = cosine(queryVec, v);
+      scoredC.push({ id: cid, sim });
+    }
+    scoredC.sort((a, b) => b.sim - a.sim);
+    if(scoredC.length){
+      const best = scoredC[0];
+      const second = scoredC[1];
+      const haveRunnerUp = scoredC.length >= 2 && second;
+      const margin = haveRunnerUp && best.sim > 0 ? (best.sim - second.sim) / best.sim : null;
+      _confidence.categoryCentroid = { best: best.id, sim: best.sim, margin, second: second && second.id };
+      if(
+        best.sim >= CAT_CENTROID_MIN_SIM && best.id !== 'general' &&
+        (margin != null ? margin >= CAT_CENTROID_MIN_MARGIN : false)
+      ){
+        catFromCentroid = best.id;
+      }
+    }
+  }
+
+  if(!store){
+    if(!hadHeuristicCat && catFromCentroid) merged.category = catFromCentroid;
+    merged._confidence = _confidence;
+    _sanitizeMergedCategory(merged);
     return merged;
   }
 
   const scored = [];
   for(const [id, rec] of store){
     if(id === excludeId) continue;
+    if(!rec || !rec.vec || rec.vec.length !== queryVec.length) continue;
     const t = typeof findTask === 'function' ? findTask(id) : null;
     if(!t || t.archived) continue;
     scored.push({ t, sim: cosine(queryVec, rec.vec) });
@@ -369,7 +635,9 @@ function predictMetadataFromVec(queryVec, opts){
   scored.sort((a, b) => b.sim - a.sim);
   const top = scored.slice(0, kk).filter(x => x.sim > KNN_MIN_SIM);
   if(!top.length){
+    if(!hadHeuristicCat && catFromCentroid) merged.category = catFromCentroid;
     merged._confidence = _confidence;
+    _sanitizeMergedCategory(merged);
     return merged;
   }
 
@@ -382,8 +650,14 @@ function predictMetadataFromVec(queryVec, opts){
     return value;
   };
 
-  const cat = pickDiscrete('category', KNN_CAT_MIN_CONF, KNN_CAT_MIN_MARGIN, v => hasClassificationCategory(v));
-  if(cat) merged.category = cat;
+  if(!hadHeuristicCat){
+    if(catFromCentroid){
+      merged.category = catFromCentroid;
+    } else {
+      const cat = pickDiscrete('category', KNN_CAT_MIN_CONF, KNN_CAT_MIN_MARGIN, v => v !== 'general' && hasClassificationCategory(v));
+      if(cat) merged.category = cat;
+    }
+  }
 
   const prVote = _weightedFieldVote(top, 'priority');
   _confidence.priority = { value: prVote.value, confidence: prVote.confidence, margin: prVote.margin };
@@ -421,6 +695,7 @@ function predictMetadataFromVec(queryVec, opts){
   if(tags.length) merged.tags = tags;
 
   merged._confidence = _confidence;
+  _sanitizeMergedCategory(merged);
   return merged;
 }
 
@@ -431,11 +706,14 @@ async function predictMetadata(taskName, k){
   const kk = k || 5;
   const q = await embedText(taskName);
   const store = await embedStore.all();
+  let centroids = null;
+  try{ centroids = await ensureCategoryCentroids(); }catch(e){}
   return predictMetadataFromVec(q, {
     store,
     excludeId: null,
     heuristic: _heuristicMetadata(taskName),
     k: kk,
+    categoryCentroidVecs: centroids || undefined,
   });
 }
 
@@ -445,8 +723,9 @@ async function semanticSearch(query, limit){
   const store = await embedStore.all();
   const scored = [];
   for(const [id, rec] of store){
+    if(!rec || !rec.vec || rec.vec.length !== q.length) continue;
     const t = typeof findTask === 'function' ? findTask(id) : null;
-    if(!t || t.archived) continue;
+    if(!t || t.archived || t.status === 'done') continue;
     scored.push({ id, t, score: cosine(q, rec.vec) });
   }
   scored.sort((a, b) => b.score - a.score);
@@ -506,7 +785,7 @@ function alignValuesFromVec(vec, schwartzVecs){
   const ranked = Object.entries(schwartzVecs)
     .map(([name, v]) => ({ name, sim: cosine(vec, v) }))
     .sort((a, b) => b.sim - a.sim)
-    .filter(x => x.sim > 0.35)
+    .filter(x => Number.isFinite(x.sim) && x.sim > 0.35)
     .slice(0, 3);
   return ranked.map(x => x.name);
 }
@@ -674,6 +953,7 @@ async function autoOrganizeIntoLists(opts){
 
     let best = null, second = null;
     for(const [lid, lv] of listVecs){
+      if(!lv || lv.length !== rec.vec.length) continue;
       const sim = cosine(rec.vec, lv);
       if(!best || sim > best.sim){ second = best; best = { lid, sim }; }
       else if(!second || sim > second.sim){ second = { lid, sim }; }
@@ -724,6 +1004,8 @@ async function proposeHarmonizeUpdates(opts){
     }
   }
   const store = await embedStore.all();
+  let centroids = null;
+  try{ centroids = await ensureCategoryCentroids(); }catch(e){}
 
   for(const t of active){
     const rec = store.get(t.id);
@@ -734,6 +1016,7 @@ async function proposeHarmonizeUpdates(opts){
       excludeId: t.id,
       heuristic: _heuristicMetadata((t.name || '').trim()),
       k: 7,
+      categoryCentroidVecs: centroids || undefined,
     });
     const fieldConfidence = meta._confidence || null;
     if(meta._confidence) delete meta._confidence;
@@ -800,6 +1083,41 @@ async function proposeHarmonizeUpdates(opts){
   return ops;
 }
 
+/**
+ * Suggest life areas for tasks that have no `category` (preview as UPDATE_TASK batch).
+ * @returns {Promise<Array<{name:'UPDATE_TASK',args:object}>>}
+ */
+async function proposeReclassifyUncategorized(){
+  const ops = [];
+  if(typeof tasks === 'undefined' || !Array.isArray(tasks)) return ops;
+  const targets = tasks.filter(t => t && !t.archived && !t.category);
+  if(!targets.length) return ops;
+  if(typeof embedStore !== 'undefined' && embedStore.ensure){
+    for(const t of targets){
+      try{ await embedStore.ensure(t); }catch(e){}
+    }
+  }
+  const store = await embedStore.all();
+  let centroids = null;
+  try{ centroids = await ensureCategoryCentroids(); }catch(e){}
+  for(const t of targets){
+    const rec = store.get(t.id);
+    if(!rec || !rec.vec) continue;
+    const meta = predictMetadataFromVec(rec.vec, {
+      store,
+      excludeId: t.id,
+      heuristic: _heuristicMetadata((t.name || '').trim()),
+      k: 7,
+      categoryCentroidVecs: centroids || undefined,
+    });
+    if(meta._confidence) delete meta._confidence;
+    if(meta.category && hasClassificationCategory(meta.category) && meta.category !== 'general'){
+      ops.push({ name: 'UPDATE_TASK', args: { id: t.id, category: meta.category } });
+    }
+  }
+  return ops;
+}
+
 async function similarTasksFor(taskId, k){
   const kk = k || 5;
   const t = findTask(taskId);
@@ -835,6 +1153,9 @@ window.isTaskBlocked = isTaskBlocked;
 window.autoOrganizeIntoLists = autoOrganizeIntoLists;
 window.invalidateListVectorCache = invalidateListVectorCache;
 window.proposeHarmonizeUpdates = proposeHarmonizeUpdates;
+window.proposeReclassifyUncategorized = proposeReclassifyUncategorized;
+window.ensureCategoryCentroids = ensureCategoryCentroids;
+window.invalidateCategoryCentroids = invalidateCategoryCentroids;
 window.ensureClassificationConfig = ensureClassificationConfig;
 window.getCategoryDef = getCategoryDef;
 window.getActiveCategories = getActiveCategories;

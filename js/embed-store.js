@@ -8,7 +8,12 @@ const STORE_EMB = 'embeddings';
 const STORE_META = 'meta';
 
 const META_SCHWARTZ_KEY = 'schwartz_vecs_v1';
-const SCHWARTZ_MODEL_VER = 'gte-small';
+/** Bumped with embedding model upgrade — invalidates cached Schwartz value vectors */
+const SCHWARTZ_MODEL_VER = 'gte-base-en-v1.5-migration-v1';
+const META_EMBED_RUNTIME_KEY = 'embed_runtime';
+const META_CAT_CENTROIDS_KEY = 'cat_centroids_v1';
+/** Must match `INTEL_EMBED_MODEL_VER` in js/intel.js (single source of truth is intel.js) */
+const EMBED_SCHEMA_VER = 'gte-base-en-v1.5-migration-v1';
 
 /** Canonical Map from last IDB read; updated incrementally on put/purge for fast embedStore.all() */
 let _embedAllCache = null;
@@ -32,7 +37,7 @@ function _tx(db, stores, mode){
 
 /** djb2-ish hash for change detection */
 function hashTaskText(name, description){
-  const s = String(name || '') + '\n' + String(description || '').slice(0, 4000);
+  const s = String(name || '') + '\n' + String(description || '').slice(0, 2000);
   let h = 5381;
   for(let i = 0; i < s.length; i++){
     h = ((h << 5) + h) ^ s.charCodeAt(i);
@@ -73,7 +78,13 @@ const embedStore = {
 
   /** @returns {Promise<Map<number, {vec: Float32Array, textHash: string}>>} */
   async all(){
-    if(_embedAllCache) return new Map(_embedAllCache);
+    if(_embedAllCache){
+      const c = new Map();
+      for(const [k, v] of _embedAllCache){
+        c.set(k, { textHash: v.textHash, vec: new Float32Array(v.vec) });
+      }
+      return c;
+    }
     const db = await _openDb();
     const map = new Map();
     await new Promise((resolve, reject) => {
@@ -100,6 +111,8 @@ const embedStore = {
     if(typeof embedText !== 'function') return;
     if(typeof isIntelReady === 'function' && !isIntelReady()) return;
     if(!task || task.archived) return;
+    const composite = `${task.name || ''}\n${(task.description || '').slice(0, 2000)}`.trim();
+    if(!composite) return;
     const h = hashTaskText(task.name, task.description);
     const cur = await embedStore.get(task.id);
     if(cur && cur.textHash === h) return;
@@ -178,8 +191,83 @@ const embedStore = {
   async setSchwartzEmbeddings(vecs){
     await embedStore.setMeta(META_SCHWARTZ_KEY, { model: SCHWARTZ_MODEL_VER, vecs });
   },
+
+  async deleteMeta(key){
+    const db = await _openDb();
+    await new Promise((resolve, reject) => {
+      const tx = _tx(db, [STORE_META], 'readwrite');
+      tx.objectStore(STORE_META).delete(key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  },
+
+  /** Remove every task embedding (used on model / dim change). */
+  async clearAllEmbeddings(){
+    const db = await _openDb();
+    await new Promise((resolve, reject) => {
+      const tx = _tx(db, [STORE_EMB], 'readwrite');
+      tx.objectStore(STORE_EMB).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+    _embedAllCache = null;
+  },
+
+  /**
+   * After intelLoad(): if schema version, active model, or dim changed, clear embeddings
+   * and value/category caches so everything re-indexes with the new vectors.
+   * @returns {Promise<{ didPurge: boolean }>}
+   */
+  async migrateEmbedRuntimeIfNeeded(){
+    const ver = (typeof window !== 'undefined' && window.INTEL_EMBED_MODEL_VER) || EMBED_SCHEMA_VER;
+    const modelId = (typeof getActiveEmbedModelId === 'function') ? getActiveEmbedModelId() : '';
+    const dim = (typeof getEmbedDim === 'function') ? getEmbedDim() : 0;
+    if(!modelId || !dim) return { didPurge: false };
+    const prev = await embedStore.getMeta(META_EMBED_RUNTIME_KEY);
+    if(prev && prev.schemaVer === ver && prev.modelId === modelId && prev.dim === dim){
+      return { didPurge: false };
+    }
+    try{
+      await embedStore.clearAllEmbeddings();
+    }catch(e){
+      console.warn('[embedStore] clearAllEmbeddings', e);
+    }
+    try{ await embedStore.deleteMeta(META_SCHWARTZ_KEY); }catch(e){}
+    try{ await embedStore.deleteMeta(META_CAT_CENTROIDS_KEY); }catch(e){}
+    try{ await embedStore.deleteMeta('list_vecs_v1'); }catch(e){}
+    const meta = { schemaVer: ver, modelId, dim };
+    try{ await embedStore.setMeta(META_EMBED_RUNTIME_KEY, meta); }
+    catch(e2){
+      console.warn('[embedStore] setMeta failed after model migration', e2);
+      try{ await embedStore.setMeta(META_EMBED_RUNTIME_KEY, meta); }catch(e3){ console.warn('[embedStore] setMeta retry failed', e3); }
+    }
+    return { didPurge: true };
+  },
+
+  getCatCentroidsKey(){ return META_CAT_CENTROIDS_KEY; },
+
+  /**
+   * Re-embed every non-archived task (after model change or user action).
+   * @param {(done: number, total: number) => void} [onProgress]
+   */
+  async reindexAllOpenTasks(onProgress){
+    if(typeof tasks === 'undefined' || !Array.isArray(tasks)) return;
+    if(typeof isIntelReady === 'function' && !isIntelReady()) return;
+    if(typeof embedText !== 'function') return;
+    const list = tasks.filter(t => t && !t.archived);
+    const total = list.length;
+    for(let i = 0; i < list.length; i++){
+      try{ await embedStore.ensure(list[i]); }catch(e){ /* one bad task */ }
+      if(typeof onProgress === 'function') onProgress(i + 1, total);
+    }
+  },
 };
 
 window.embedStore = embedStore;
 window.hashTaskText = hashTaskText;
 window.INTEL_META_SCHWARTZ_KEY = META_SCHWARTZ_KEY;
+window.INTEL_META_CAT_CENTROIDS = META_CAT_CENTROIDS_KEY;
+window.EMBED_SCHEMA_VER = EMBED_SCHEMA_VER;
