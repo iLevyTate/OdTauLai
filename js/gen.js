@@ -17,7 +17,7 @@ const GEN_MODEL_PRESETS = [
   { id:'HuggingFaceTB/SmolLM2-360M-Instruct',        dtype:'q4', sizeMb:230, label:'SmolLM2 360M (balanced)',       note:'Recommended for most devices' },
   { id:'HuggingFaceTB/SmolLM2-135M-Instruct',        dtype:'q4', sizeMb:100, label:'SmolLM2 135M (tiny)',           note:'Lowest RAM — older phones' },
   { id:'onnx-community/Qwen2.5-0.5B-Instruct',       dtype:'q4', sizeMb:320, label:'Qwen2.5 0.5B (bigger)',         note:'Desktop / WebGPU preferred' },
-  { id:'onnx-community/Qwen2.5-1.5B-Instruct',     dtype:'q4', sizeMb:600, label:'Qwen2.5 1.5B (native tools)',  note:'Brain uses tokenizer tools + <tool_call> XML; WebGPU recommended' },
+  { id:'onnx-community/Qwen2.5-1.5B-Instruct',     dtype:'q4', sizeMb:600, label:'Qwen2.5 1.5B (native tools)',  note:'Cognitask uses tokenizer tools + <tool_call> XML; WebGPU recommended' },
   { id:'onnx-community/SmolLM2-360M-Instruct',       dtype:'q4', sizeMb:230, label:'SmolLM2 360M (onnx-community)', note:'Use if HuggingFaceTB mirror fails' },
   { id:'onnx-community/SmolLM2-135M-Instruct-ONNX',  dtype:'q4', sizeMb:100, label:'SmolLM2 135M (onnx-community)', note:'Use if HuggingFaceTB mirror fails' },
 ];
@@ -44,6 +44,8 @@ let _genAbortCtl = null;
 let _genLastError = null;
 let _genStoppingCriteria = null; // InterruptableStoppingCriteria instance (if available)
 let _genTransformersMod = null;  // cached module handle
+/** Ref-count concurrent genGenerate calls — only clear "busy" when the last in-flight run finishes. */
+let _genGenInFlight = 0;
 
 function getGenDevice(){ return _genDevice; }
 function getGenModel(){ return _genModelId; }
@@ -369,7 +371,8 @@ async function genGenerate(opts){
   const temperature = typeof opts.temperature === 'number' ? opts.temperature : 0.2;
   const onToken     = typeof opts.onToken === 'function' ? opts.onToken : null;
 
-  _genGenerating = true;
+  _genGenInFlight++;
+  _genGenerating = _genGenInFlight > 0;
   const ctl = new AbortController();
   _genAbortCtl = ctl;
   if(opts.signal){
@@ -377,12 +380,13 @@ async function genGenerate(opts){
     else opts.signal.addEventListener('abort', () => ctl.abort(), { once: true });
   }
 
+  let stopping = null;
   try{
     // Route aborts through InterruptableStoppingCriteria when available so
     // decoding halts immediately instead of continuing in the background.
     ctl.signal.addEventListener('abort', () => {
-      if(_genStoppingCriteria && typeof _genStoppingCriteria.interrupt === 'function'){
-        try{ _genStoppingCriteria.interrupt(); }catch(e){}
+      if(stopping && _genStoppingCriteria === stopping && typeof stopping.interrupt === 'function'){
+        try{ stopping.interrupt(); }catch(e){}
       }
     }, { once: true });
 
@@ -399,7 +403,6 @@ async function genGenerate(opts){
     }
 
     let streamer = null;
-    let stopping = null;
     try{
       const mod = await _importTransformers();
       if(mod && mod.TextStreamer && onToken){
@@ -436,11 +439,12 @@ async function genGenerate(opts){
     }
     return '';
   } finally {
-    // Always clear transient state, even on throw, so the next genAbort()
-    // can't target a stale controller / criteria object.
-    _genStoppingCriteria = null;
+    // Clear stopping criteria / abort handle only for this call — other concurrent
+    // genGenerate runs may have replaced them.
+    if(stopping && _genStoppingCriteria === stopping) _genStoppingCriteria = null;
     if(_genAbortCtl === ctl) _genAbortCtl = null;
-    _genGenerating = false;
+    _genGenInFlight = Math.max(0, _genGenInFlight - 1);
+    _genGenerating = _genGenInFlight > 0;
   }
 }
 
