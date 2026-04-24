@@ -419,6 +419,7 @@ setTimeout(() => {
     if(w) w.style.display = 'none';
     if(retry) retry.style.display = '';
     if(typeof syncHeaderAIChip === 'function') syncHeaderAIChip('error', 'Load failed');
+    if(typeof showExportToast === 'function') showExportToast('Embedding model failed to load — semantic features unavailable');
     if(typeof renderAIPanel === 'function') renderAIPanel();
     else if(typeof syncSemanticSearchUi === 'function') syncSemanticSearchUi();
   });

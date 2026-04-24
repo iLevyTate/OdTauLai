@@ -1852,6 +1852,7 @@
 .intel-progress-info{font-size:11px;color:var(--text-3);display:flex;gap:8px;justify-content:space-between}
 /* Generative LLM download / rehydrate — visible on every tab */
 .gen-load-ribbon{position:fixed;left:50%;bottom:max(12px,env(safe-area-inset-bottom));transform:translateX(-50%);z-index:1200;display:flex;flex-direction:column;gap:8px;min-width:min(440px,94vw);max-width:94vw;padding:11px 15px;border-radius:12px;background:var(--bg-1);border:1px solid var(--border-strong);box-shadow:0 10px 36px rgba(0,0,0,.22)}
+.gen-load-ribbon[hidden]{display:none!important}
 .gen-load-ribbon__track{position:relative;height:7px;background:var(--bg-3);border-radius:999px;overflow:hidden}
 .gen-load-ribbon__bar{height:100%;width:0%;background:var(--accent);border-radius:999px;transition:width .22s ease-out}
 .gen-load-ribbon__txt{font-size:12px;color:var(--text-1);line-height:1.4;font-weight:600}

@@ -1,14 +1,14 @@
 /**
- * Ambient intelligence — Xenova/gte-base-en-v1.5 (WebGPU) or Xenova/bge-small-en-v1.5 (WASM)
+ * Ambient intelligence — Xenova/bge-base-en-v1.5 (WebGPU) or Xenova/bge-small-en-v1.5 (WASM)
  * via Transformers.js (feature-extraction). No generative model.
  */
 const TRANSFORMERS_CDN = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.1';
-const EMBED_MODEL_WEBGPU = 'Xenova/gte-base-en-v1.5';
+const EMBED_MODEL_WEBGPU = 'Xenova/bge-base-en-v1.5';
 const EMBED_MODEL_WASM = 'Xenova/bge-small-en-v1.5';
 const EMBED_DIM_WEBGPU = 768;
 const EMBED_DIM_WASM = 384;
 /** Version string for IndexedDB migration — must change when embed model or dim strategy changes */
-const EMBED_MODEL_VER = 'gte-base-en-v1.5-migration-v1';
+const EMBED_MODEL_VER = 'bge-base-en-v1.5-migration-v2';
 
 let _extractor = null;
 let _intelReady = false;
@@ -69,6 +69,13 @@ async function intelLoad(onProgress){
         _activeEmbedModel = EMBED_MODEL_WEBGPU;
       }catch(e){
         console.warn('[intel] WebGPU pipeline failed, falling back to WASM + bge-small', e);
+        // Surface a brief notification so the user knows the fallback happened
+        if(typeof showExportToast === 'function'){
+          const reason = (e && e.message && /401|unauthorized/i.test(e.message))
+            ? 'Auth error — using smaller model (WASM)'
+            : 'WebGPU unavailable — using WASM fallback';
+          showExportToast(reason);
+        }
         await loadWasmFallback();
       }
       _intelReady = true;

@@ -1257,6 +1257,22 @@ function aiToggleValue(key){
   }
   _saveCfg();
   _renderValuesGrid();
+  _syncAlignButton();
+}
+
+/** Surgically update the Align-values button after dominant selection changes. */
+function _syncAlignButton(){
+  const btn = document.getElementById('alignValuesBtn');
+  if(!btn) return;
+  const ready = isIntelReady();
+  const ok = ready && _cfg.dominant.length >= 2;
+  btn.disabled = !ok;
+  const sub = btn.querySelector('.intel-action-btn-sub');
+  if(sub){
+    sub.textContent = !ready ? 'Embedding model loading\u2026'
+      : _cfg.dominant.length < 2 ? 'Pick 2\u20133 dominant values below'
+      : 'Align to ' + _cfg.dominant.join(', ');
+  }
 }
 
 function _renderBreakdown(){
@@ -1311,7 +1327,7 @@ function renderAIPanel(){
   const ready = typeof isIntelReady === 'function' && isIntelReady();
   const dev = typeof getIntelDevice === 'function' ? getIntelDevice() : null;
 
-  const embedModel = (typeof window !== 'undefined' && window.INTEL_EMBED_MODEL) || 'Xenova/gte-base-en-v1.5';
+  const embedModel = (typeof window !== 'undefined' && window.INTEL_EMBED_MODEL) || 'Xenova/bge-base-en-v1.5';
   panel.innerHTML = `
     <div class="intel-card">
       <div class="intel-card-head">
@@ -1341,7 +1357,7 @@ function renderAIPanel(){
             </div>
           </div>
           <details class="intel-details"><summary>How it works</summary>
-            <p class="intel-details-body">An on-device embedding model (<strong>${embedModel}</strong>) encodes each task’s meaning as a vector — WebGPU uses gte-base (~110 MB), WASM uses bge-small (~33 MB). Cosine similarity drives semantic search, duplicate detection, smart-add hints, list routing, similar tasks, and harmonize proposals. Your task text stays local.</p>
+            <p class="intel-details-body">An on-device embedding model (<strong>${embedModel}</strong>) encodes each task’s meaning as a vector — WebGPU uses bge-base (~110 MB), WASM uses bge-small (~33 MB). Cosine similarity drives semantic search, duplicate detection, smart-add hints, list routing, similar tasks, and harmonize proposals. Your task text stays local.</p>
           </details>
         </div>
         <div id="intelProgressWrap" class="intel-progress-wrap" style="display:none">
@@ -1353,9 +1369,9 @@ function renderAIPanel(){
           <button class="intel-tool-btn" type="button" id="intelUndoBtn" onclick="aiUndo()" style="display:${_undoStack.length ? '' : 'none'}">${_IC.undo}<span>Undo</span></button>
         </div>
         <div class="intel-action-grid">
-          <button type="button" class="intel-action-btn intel-action-btn--primary" onclick="aiAlign()" ${!ready || _cfg.dominant.length < 2 ? 'disabled' : ''}>
+          <button type="button" class="intel-action-btn intel-action-btn--primary" id="alignValuesBtn" onclick="aiAlign()" ${!ready || _cfg.dominant.length < 2 ? 'disabled' : ''}>
             ${_IC.bolt}
-            <span class="intel-action-btn-text"><span class="intel-action-btn-lbl">Align values only</span><span class="intel-action-btn-sub">Requires 2–3 dominant values selected below</span></span>
+            <span class="intel-action-btn-text"><span class="intel-action-btn-lbl">Align values only</span><span class="intel-action-btn-sub">${!ready ? 'Embedding model loading\u2026' : _cfg.dominant.length < 2 ? 'Pick 2–3 dominant values below' : 'Align to ' + _cfg.dominant.join(', ')}</span></span>
           </button>
           <button type="button" class="intel-action-btn intel-action-btn--primary" onclick="intelHarmonizeFields()" ${!ready ? 'disabled' : ''}
             title="Propose updates using values, life area, priority, effort, energy, and tags from embeddings and similar tasks. Review before apply.">
@@ -1365,7 +1381,7 @@ function renderAIPanel(){
           <button type="button" class="intel-action-btn" onclick="intelAutoOrganize()" ${!ready || (typeof lists === 'undefined' || lists.length < 2) ? 'disabled' : ''}
             title="Route tasks into the list whose name and description match best. Edit a list description to tune routing.">
             ${_IC.folder}
-            <span class="intel-action-btn-text"><span class="intel-action-btn-lbl">Auto-organize into lists</span><span class="intel-action-btn-sub">Needs at least two lists</span></span>
+            <span class="intel-action-btn-text"><span class="intel-action-btn-lbl">Auto-organize into lists</span><span class="intel-action-btn-sub">${!ready ? 'Embedding model loading\u2026' : (typeof lists === 'undefined' || lists.length < 2) ? 'Needs at least two lists' : 'Route across ' + lists.length + ' lists'}</span></span>
           </button>
           <button type="button" class="intel-action-btn" onclick="intelFindDuplicatesUI()">
             ${_IC.duplicate}
@@ -2320,6 +2336,15 @@ async function genDownloadClick(){
   syncGenChip('loading', '0% · preparing');
   _showGenLoadRibbonIndeterminate('Downloading LLM weight files…');
 
+  // Safety net: force-hide the ribbon after 5 minutes even if genLoad hangs.
+  const ribbonTimeout = setTimeout(() => {
+    const r = document.getElementById('genLoadRibbon');
+    if(r && !r.hidden){
+      console.warn('[ai] download ribbon safety timeout — forcing hide');
+      _hideGenLoadRibbon();
+    }
+  }, 5 * 60 * 1000);
+
   // Monotonic aggregator: HF emits per-file progress that would otherwise snap
   // back to 0% each time a new shard starts downloading.
   const onProgress = _makeProgressAggregator((v, ev) => {
@@ -2342,7 +2367,13 @@ async function genDownloadClick(){
     const msg = (e && e.message) ? e.message : 'Load failed';
     _askLoadError = { modelId: targetModelId, message: msg };
     syncGenChip('error', 'LLM load failed');
+    if(typeof showExportToast === 'function'){
+      const short = msg.length > 80 ? msg.slice(0, 77) + '…' : msg;
+      showExportToast('LLM download failed: ' + short);
+    }
   }finally{
+    clearTimeout(ribbonTimeout);
+    _hideGenLoadRibbon();
     renderGenSettings();
   }
 }
@@ -2412,6 +2443,18 @@ async function genAutoRehydrateIfCached(){
   if(!cfg || !cfg.enabled) return;
   if(!isGenDownloaded(cfg.modelId)) return;
   if(isGenReady() && typeof getGenModel === 'function' && getGenModel() === cfg.modelId) return;
+
+  // Safety net: force-hide the ribbon after 90s even if genLoad hangs
+  // (e.g. stalled fetch, browser cache corruption, WebGPU driver timeout).
+  const ribbonTimeout = setTimeout(() => {
+    const r = document.getElementById('genLoadRibbon');
+    if(r && !r.hidden){
+      console.warn('[ai] rehydrate ribbon safety timeout — forcing hide');
+      _hideGenLoadRibbon();
+      if(typeof syncGenChip === 'function') syncGenChip('idle', '');
+    }
+  }, 90 * 1000);
+
   try{
     if(typeof syncGenChip === 'function'){
       syncGenChip('loading', '0% · rehydrating');
@@ -2427,6 +2470,9 @@ async function genAutoRehydrateIfCached(){
     if(typeof maybeShowEnhanceBtn === 'function') maybeShowEnhanceBtn();
   }catch(e){
     if(typeof syncGenChip === 'function') syncGenChip('idle', '');
+  }finally{
+    clearTimeout(ribbonTimeout);
+    _hideGenLoadRibbon();
   }
 }
 
@@ -2440,6 +2486,26 @@ if(typeof document!=='undefined'){
   else setTimeout(_scheduleGenAutoRehydrate, 500);
 }
 window.genAutoRehydrateIfCached = genAutoRehydrateIfCached;
+
+// Visibility guard: catch any lingering ribbon when the tab regains focus.
+// Covers edge cases where genLoad resolved while the tab was backgrounded
+// and the DOM update was suppressed by the browser.
+document.addEventListener('visibilitychange', function _ribbonVisGuard(){
+  if(document.hidden) return;
+  const r = document.getElementById('genLoadRibbon');
+  if(!r || r.hidden) return;
+  // If the gen module is no longer loading, the ribbon shouldn't be visible.
+  if(typeof isGenLoading === 'function' && !isGenLoading()){
+    console.warn('[ai] visibilitychange — ribbon was stale, hiding');
+    _hideGenLoadRibbon();
+    // Also sync the chip to a coherent state.
+    if(typeof isGenReady === 'function' && isGenReady()){
+      syncGenChip('ready', '');
+    } else {
+      syncGenChip('idle', '');
+    }
+  }
+});
 
 document.addEventListener('click', function _smartAddTagDelegate(e){
   const prev = document.getElementById('smartAddPreview');
