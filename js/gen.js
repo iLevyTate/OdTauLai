@@ -67,6 +67,36 @@ async function _importTransformers(){
   return _genTransformersMod;
 }
 
+/**
+ * Force-reload the Transformers.js module on next import.
+ * Used when a WebGPU crash poisons the ONNX Runtime WASM instance — a fresh
+ * import gets a new, un-aborted WASM module for the CPU fallback path.
+ */
+function _resetTransformersCache(){
+  _genTransformersMod = null;
+}
+
+/**
+ * Pre-flight check: verify the browser can actually create a WebGPU device.
+ * Returns true only when adapter + device succeed; false on any failure.
+ * Prevents the fatal ONNX Runtime WASM `Aborted()` crash that occurs when
+ * WebGPU is nominally present but the GPU backend can't initialise.
+ */
+async function _probeWebGPU(){
+  try{
+    if(typeof navigator === 'undefined' || !navigator.gpu) return false;
+    const adapter = await navigator.gpu.requestAdapter();
+    if(!adapter) return false;
+    const device = await adapter.requestDevice();
+    if(!device) return false;
+    device.destroy();
+    return true;
+  }catch(e){
+    console.info('[gen] WebGPU probe failed — will use WASM (CPU)', e);
+    return false;
+  }
+}
+
 function _pickDefaultPresetForDevice(){
   // Low-RAM devices default to the Tiny preset; otherwise the Balanced one.
   if(typeof navigator !== 'undefined' && typeof navigator.deviceMemory === 'number' && navigator.deviceMemory < 4){
@@ -257,25 +287,43 @@ async function genLoad(modelId, dtype, onProgress){
     const wasmDtype   = dtype === 'q4f16' ? 'q4' : (dtype || 'q4');
 
     const tryPipeline = async (slug) => {
-      try{
-        if(loadSignal.aborted) throw new Error('LOAD_ABORTED');
-        _genPipe = await pipeline('text-generation', slug, {
-          device: 'webgpu',
-          dtype: webgpuDtype,
-          progress_callback: cb,
-        });
-        _genDevice = 'webgpu';
-      }catch(e){
-        if(loadSignal.aborted) throw new Error('LOAD_ABORTED');
-        console.warn('[gen] WebGPU pipeline failed, falling back to WASM', e);
-        try{ cb({ status: 'WebGPU unavailable — loading with WASM (CPU)', file: slug, progress: undefined }); }catch(_){}
-        _genPipe = await pipeline('text-generation', slug, {
-          device: 'wasm',
-          dtype: wasmDtype,
-          progress_callback: cb,
-        });
-        _genDevice = 'wasm';
+      // ---- WebGPU attempt (only if probe succeeds) ----
+      const gpuOk = await _probeWebGPU();
+      if(gpuOk){
+        try{
+          if(loadSignal.aborted) throw new Error('LOAD_ABORTED');
+          _genPipe = await pipeline('text-generation', slug, {
+            device: 'webgpu',
+            dtype: webgpuDtype,
+            progress_callback: cb,
+          });
+          _genDevice = 'webgpu';
+          return; // success — done
+        }catch(e){
+          if(loadSignal.aborted) throw new Error('LOAD_ABORTED');
+          console.warn('[gen] WebGPU pipeline failed, falling back to WASM', e);
+          // A fatal WASM Aborted() crash poisons the ONNX Runtime instance.
+          // Force-reset so the WASM fallback below gets a clean module.
+          _resetTransformersCache();
+          try{
+            const freshMod = await _importTransformers();
+            pipeline = freshMod.pipeline;
+          }catch(reimportErr){
+            console.error('[gen] Failed to re-import Transformers.js after WebGPU crash', reimportErr);
+          }
+        }
+      } else {
+        console.info('[gen] WebGPU not available — loading with WASM (CPU)');
       }
+      // ---- WASM (CPU) fallback ----
+      if(loadSignal.aborted) throw new Error('LOAD_ABORTED');
+      try{ cb({ status: 'Loading with WASM (CPU)', file: slug, progress: undefined }); }catch(_){}
+      _genPipe = await pipeline('text-generation', slug, {
+        device: 'wasm',
+        dtype: wasmDtype,
+        progress_callback: cb,
+      });
+      _genDevice = 'wasm';
     };
 
     let finalSlug = modelId;
@@ -348,6 +396,9 @@ function _friendlyGenError(msg, modelId){
   }
   if(/out of memory|OOM|Allocation failed/i.test(m)){
     return 'Device ran out of memory loading the model. Try the smaller Tiny (135M) preset.';
+  }
+  if(/Aborted\b|RuntimeError/i.test(m)){
+    return 'The ONNX runtime crashed while loading the model. Try clearing site data (Settings → Privacy → Clear browsing data) and reloading, or switch to a smaller model preset.';
   }
   return 'Load failed: ' + m.slice(0, 180);
 }

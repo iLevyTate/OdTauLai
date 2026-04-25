@@ -84,10 +84,10 @@ function _syncGenDownloadProgress(v, ev){
   if(bar) bar.style.width = pct + '%';
   if(pctEl) pctEl.textContent = pct + '%';
   if(txt) txt.textContent = line;
-  if(statusEl) statusEl.textContent = `Downloading weights · ${pct}%`;
-  const chipLine = line.length > 48 ? line.slice(0, 45) + '…' : line;
+  if(statusEl) statusEl.textContent = pct >= 100 ? 'Initializing model…' : `Downloading weights · ${pct}%`;
+  const chipLine = pct >= 100 ? 'Initializing…' : (line.length > 48 ? line.slice(0, 45) + '…' : line);
   _genChipState = 'loading';
-  _genChipMsg = pct + '% · ' + chipLine;
+  _genChipMsg = pct >= 100 ? 'Initializing model…' : pct + '% · ' + chipLine;
   const c = _composeChipState();
   _renderHeaderAIChip(c.state, c.msg);
   const ribbon = document.getElementById('genLoadRibbon');
@@ -96,9 +96,18 @@ function _syncGenDownloadProgress(v, ev){
   const ribbonTxt = document.getElementById('genLoadRibbonTxt');
   if(ribbon){
     ribbon.hidden = false;
-    if(ribbonTrack) ribbonTrack.classList.remove('gen-load-ribbon__track--indeterminate');
-    if(ribbonBar) ribbonBar.style.width = pct + '%';
-    if(ribbonTxt) ribbonTxt.textContent = `On-device LLM · ${pct}% — ${line}`;
+    if(pct >= 100){
+      // Download is done but pipeline init (WebGPU shader compile / WASM
+      // instantiation) can take several seconds. Switch to an animated
+      // indeterminate bar so the user knows work is still in progress.
+      if(ribbonTrack) ribbonTrack.classList.add('gen-load-ribbon__track--indeterminate');
+      if(ribbonBar) ribbonBar.style.width = '40%';
+      if(ribbonTxt) ribbonTxt.textContent = 'On-device LLM · Initializing model…';
+    }else{
+      if(ribbonTrack) ribbonTrack.classList.remove('gen-load-ribbon__track--indeterminate');
+      if(ribbonBar) ribbonBar.style.width = pct + '%';
+      if(ribbonTxt) ribbonTxt.textContent = `On-device LLM · ${pct}% — ${line}`;
+    }
   }
 }
 
