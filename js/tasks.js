@@ -19,7 +19,10 @@ function renderGoalList(){
   if(bar)bar.style.width=pct+'%';if(pctEl)pctEl.textContent=pct+'%';
   [...goals.filter(g=>!g.done),...goals.filter(g=>g.done)].forEach(g=>{
     const d=document.createElement('div');d.className='goal-item'+(g.done?' checked':'');
-    d.innerHTML=`<button class="goal-check${g.done?' on':''}" onclick="toggleGoal(${g.id})">${g.done?'✓':''}</button><span class="goal-text">${esc(g.text)}</span>${g.doneAt?`<span class="goal-time">${g.doneAt}</span>`:''}<button class="goal-rm" onclick="removeGoal(${g.id})">×</button>`;
+    const chk=document.createElement('button');chk.className='goal-check'+(g.done?' on':'');chk.textContent=g.done?'✓':'';chk.onclick=function(){toggleGoal(g.id)};d.appendChild(chk);
+    const txt=document.createElement('span');txt.className='goal-text';txt.textContent=g.text;d.appendChild(txt);
+    if(g.doneAt){const gt=document.createElement('span');gt.className='goal-time';gt.textContent=g.doneAt;d.appendChild(gt)}
+    const rm=document.createElement('button');rm.className='goal-rm';rm.textContent='×';rm.onclick=function(){removeGoal(g.id)};d.appendChild(rm);
     list.appendChild(d)
   })
 }
@@ -253,7 +256,7 @@ function syncQaHintVisibility(){
 window.showQaHint=showQaHint;
 window.syncQaHintVisibility=syncQaHintVisibility;
 
-const SWIPE_TIP_KEY = 'odtaulai_swipe_tip_dismissed';
+const SWIPE_TIP_KEY = (window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.SWIPE_TIP_DISMISSED) || 'odtaulai_swipe_tip_dismissed';
 function maybeShowSwipeTip(){
   try{
     if(localStorage.getItem(SWIPE_TIP_KEY)==='1') return;
@@ -726,16 +729,18 @@ function checkReminders(){
             tag:'task-'+t.id,requireInteraction:true
           });
           n.onclick=function(){window.focus();showTab('tasks');openTaskDetail(t.id);n.close()};
-        }catch(e){}
+        }catch(e){ console.warn('[tasks] Notification failed for task', t.id, e); }
       }else if(cfg.sound){playChime('bell')}
     }
   });
   if(fired)saveState('auto')
 }
-// Check reminders every 30s
-setInterval(checkReminders,30000);
+// Check reminders every 30s (guarded against double-init)
+let _reminderIntervalId = null;
+if (_reminderIntervalId) clearInterval(_reminderIntervalId);
+_reminderIntervalId = setInterval(checkReminders, 30000);
 // And once on load
-setTimeout(checkReminders,1000);
+setTimeout(checkReminders, 1000);
 
 // Recurring tasks — advance due date for habit-in-place completions
 function advanceRecurringDate(dateStr,recurType){
@@ -755,8 +760,7 @@ function advanceRecurringDate(dateStr,recurType){
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 }
 
-/** @deprecated v24 — use completeHabitCycle (single card + completions[]) */
-function spawnRecurringClone(_t){}
+// spawnRecurringClone removed in v32 — use completeHabitCycle (single card + completions[])
 
 /** Log one habit cycle: time since last log, stay open, next due. */
 function completeHabitCycle(t){
@@ -837,7 +841,7 @@ function toggleTaskDoneQuick(id){
       if(row){
         row.classList.add('just-done');
         const spark=document.createElement('span');spark.className='done-sparkle';
-        spark.innerHTML=(window.icon && window.icon('sparkles',{size:20}))||'';
+        spark.textContent='';const sparkSvg=(window.icon && window.icon('sparkles',{size:20}));if(sparkSvg){const tmp=document.createElement('span');tmp.innerHTML=sparkSvg;while(tmp.firstChild)spark.appendChild(tmp.firstChild)};
         const rect=row.getBoundingClientRect();
         spark.style.cssText='left:'+(rect.left+32)+'px;top:'+(rect.top+10)+'px;position:fixed;z-index:2000';
         document.body.appendChild(spark);
@@ -921,7 +925,7 @@ function switchList(id){activeListId=id;renderLists();renderTaskList();saveState
 function renderLists(){
   const bar=gid('listsBar');if(!bar)return;
   ensureDefaultList();
-  bar.innerHTML='';
+  bar.textContent='';
   // Hide the whole bar when only 1 list OR when only 1 list has tasks
   // — reduces visual noise for simple single-list users
   const listsWithTasks=lists.filter(l=>tasks.some(t=>t.listId===l.id&&!t.archived));
@@ -1174,14 +1178,14 @@ function renderTodayBanner(){
   const banner=gid('todayBanner');
   if(banner){
     let snooze=null;
-    try{ snooze=localStorage.getItem('odtaulai_tb_snooze'); }catch(e){}
+    try{ snooze=localStorage.getItem((window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.TB_SNOOZE) || 'odtaulai_tb_snooze'); }catch(e){}
     const hasUrgent=overdue>0||dueToday>0;
     const hiddenBySnooze=snooze===today;
     banner.style.display=hasUrgent&&!hiddenBySnooze?'':'none';
   }
 }
 function snoozeTodayBanner(){
-  try{ localStorage.setItem('odtaulai_tb_snooze', todayISO()); }catch(e){}
+  try{ localStorage.setItem((window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.TB_SNOOZE) || 'odtaulai_tb_snooze', todayISO()); }catch(e){}
   const banner=gid('todayBanner');
   if(banner) banner.style.display='none';
 }
@@ -1505,31 +1509,31 @@ function renderBlockedBy(taskId){
 })();
 
 function getCardDensity(){
-  try{ return localStorage.getItem('stupind_card_density') === 'detailed' ? 'detailed' : 'compact'; }
+  try{ return localStorage.getItem((window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.CARD_DENSITY) || 'stupind_card_density') === 'detailed' ? 'detailed' : 'compact'; }
   catch(e){ return 'compact'; }
 }
 function onCardDensityToggle(){
   const el = gid('cardDensityDetailed');
   const on = el && el.checked;
-  try{ localStorage.setItem('stupind_card_density', on ? 'detailed' : 'compact'); }catch(e){}
+  try{ localStorage.setItem((window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.CARD_DENSITY) || 'stupind_card_density', on ? 'detailed' : 'compact'); }catch(e){}
   if(typeof updateFiltersActiveBadge === 'function') updateFiltersActiveBadge();
   renderTaskList();
 }
 function onShowCompletedToggle(){
   try{
     const sc = gid('showCompletedAll');
-    localStorage.setItem('stupind_show_done_all', sc && sc.checked ? '1' : '0');
+    localStorage.setItem((window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.SHOW_DONE_ALL) || 'stupind_show_done_all', sc && sc.checked ? '1' : '0');
   }catch(e){}
   updateTaskFilters();
 }
 function restoreTaskToolbarPrefs(){
   const sc = gid('showCompletedAll');
   if(sc){
-    try{ sc.checked = localStorage.getItem('stupind_show_done_all') === '1'; }catch(e){}
+    try{ sc.checked = localStorage.getItem((window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.SHOW_DONE_ALL) || 'stupind_show_done_all') === '1'; }catch(e){}
   }
   const cd = gid('cardDensityDetailed');
   if(cd){
-    try{ cd.checked = localStorage.getItem('stupind_card_density') === 'detailed'; }catch(e){}
+    try{ cd.checked = localStorage.getItem((window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.CARD_DENSITY) || 'stupind_card_density') === 'detailed'; }catch(e){}
   }
   const hh = gid('hideHabitsInMain');
   if(hh && typeof cfg === 'object' && cfg && typeof cfg.hideHabitsInMainViews === 'boolean'){

@@ -9,9 +9,14 @@ const ASK_RECENT_MAX_TASKS = 20;
 const ASK_CONTEXT_MAX_CHARS = 1800;
 const ASK_TASK_LINE_MAX = 200;
 
+// (M3) Strip C0 control characters + DEL from user-supplied text before it
+// enters the LLM prompt.  Prevents theoretical prompt injection via embedded
+// control sequences in task names, categories, or the query itself.
+const _askStripCtrl = s => String(s || '').replace(/[\u0000-\u001F\u007F]/g, '');
+
+// Uses todayISO() from tasks.js / todayKey() from utils.js — no local re-implementation
 function _askToday(){
-  const d = new Date();
-  return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  return (typeof todayISO === 'function') ? todayISO() : (typeof todayKey === 'function' ? todayKey() : new Date().toISOString().slice(0, 10));
 }
 
 function _askListName(id){
@@ -23,15 +28,15 @@ function _askListName(id){
 function _askSerializeTask(t){
   const line = {
     id: t.id,
-    name: String(t.name || '').slice(0, 80),
+    name: _askStripCtrl(t.name).slice(0, 80),
     status: t.status || 'open',
     priority: t.priority || 'none',
   };
   if(t.dueDate) line.due = t.dueDate;
   if(t.listId != null){ const n = _askListName(t.listId); if(n) line.list = n; }
-  if(Array.isArray(t.tags) && t.tags.length) line.tags = t.tags.slice(0, 6);
+  if(Array.isArray(t.tags) && t.tags.length) line.tags = t.tags.slice(0, 6).map(x => _askStripCtrl(x));
   if(t.effort) line.effort = t.effort;
-  if(t.category) line.category = t.category;
+  if(t.category) line.category = _askStripCtrl(t.category);
   if(t.starred) line.starred = true;
   if(t.archived) line.archived = true;
   let s = JSON.stringify(line);
@@ -100,7 +105,7 @@ async function _askBuildContext(query){
 function _askListsBlock(){
   if(typeof lists === 'undefined' || !Array.isArray(lists) || !lists.length) return '';
   return lists.slice(0, 20)
-    .map(l => '{"id":' + l.id + ',"name":' + JSON.stringify(String(l.name || '').slice(0, 40)) + '}')
+    .map(l => '{"id":' + l.id + ',"name":' + JSON.stringify(_askStripCtrl(l.name).slice(0, 40)) + '}')
     .join('\n');
 }
 
@@ -155,7 +160,7 @@ function _askUserPrompt(query, contextLines){
   const calB = (typeof _askCalendarBlock === 'function') ? _askCalendarBlock() : '';
   if(calB) parts.push(calB);
   if(contextLines.length) parts.push('Context (relevant tasks):\n' + contextLines.join('\n'));
-  parts.push('Request: ' + String(query || '').slice(0, 600));
+  parts.push('Request: ' + _askStripCtrl(query).slice(0, 600));
   parts.push('JSON array:');
   return parts.join('\n\n');
 }

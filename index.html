@@ -28,8 +28,10 @@
 <meta name="apple-mobile-web-app-title" content="ODTAULAI">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="application-name" content="ODTAULAI">
-<!-- CSP: pragmatic defaults — block drive-by nasties but don’t fight real usage (calendars over HTTP on localhost/LAN, any HTTPS feed/proxy, CDNs, WASM embeddings, PeerJS). Mixed http content is still blocked by the browser when the app is served over HTTPS. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' http: https: https://cdn.jsdelivr.net https://huggingface.co https://*.huggingface.co https://cdn-lfs.huggingface.co https://hf.co https://*.hf.co https://unpkg.com https://api.peerjs.com https://*.peerjs.com wss://*.peerjs.com wss://0.peerjs.com wss://1.peerjs.com wss://peerjs.com;">
+<!-- CSP: script-src / object-src / base-uri are the hard security boundaries.
+     connect-src uses http:/https: broadly because calfeeds.js allows user-configured CORS proxy URLs.
+     wss: entries are required for PeerJS WebRTC signalling. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' http: https: wss://*.peerjs.com wss://0.peerjs.com wss://1.peerjs.com wss://peerjs.com;">
 
 <!-- Icons -->
 <link rel="manifest" href="manifest.json" id="pwa-manifest">
@@ -823,6 +825,7 @@
 </div>
 
 <!-- App modules — load order matters (globals first, init last) -->
+<script src="js/config.js"></script>
 <script src="js/icons.js"></script>
 <script src="js/utils.js"></script>
 <script src="js/storage.js"></script>

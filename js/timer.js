@@ -25,7 +25,7 @@ function _reflowSettingsIfOpen(){
   const cap=Math.floor(window.innerHeight*0.92);
   body.style.maxHeight=Math.min(body.scrollHeight+8,cap)+'px';
 }
-window.addEventListener('resize',_reflowSettingsIfOpen);
+window.addEventListener('resize',_reflowSettingsIfOpen,{passive:true});
 window.addEventListener('orientationchange',_reflowSettingsIfOpen);
 
 // ========== STATE ==========
@@ -81,14 +81,15 @@ function setTimerSub(sub){
   if(typeof saveState==='function') saveState('auto');
 }
 window.setTimerSub=setTimerSub;
-function renderPips(){const c=gid('pips');c.innerHTML='';for(let i=0;i<cfg.cycle;i++){const d=document.createElement('div');d.className='pip'+(i<pomosInCycle?' done':i===pomosInCycle&&phase==='work'?' current':'');d.title='Jump to pomo '+(i+1);d.onclick=(function(idx){return function(){jumpToPomo(idx)}})(i);c.appendChild(d)}}
+function renderPips(){const c=gid('pips');c.textContent='';for(let i=0;i<cfg.cycle;i++){const d=document.createElement('div');d.className='pip'+(i<pomosInCycle?' done':i===pomosInCycle&&phase==='work'?' current':'');d.title='Jump to pomo '+(i+1);d.onclick=(function(idx){return function(){jumpToPomo(idx)}})(i);c.appendChild(d)}}
 function jumpToPomo(idx){if(running)return;if(idx<0||idx>=cfg.cycle)return;pomosInCycle=idx;renderPips();saveState('user')}
+function _mkBtn(cls,label,handler){const b=document.createElement('button');b.className=cls;b.textContent=label;b.onclick=handler;return b}
 function renderCtrls(){
-  const c=gid('ctrls');
-  if(!running&&!finished&&remaining===totalDuration)c.innerHTML='<button class="btn btn-primary" onclick="startTimer()">Start</button>';
-  else if(running)c.innerHTML='<button class="btn btn-pause" onclick="pauseTimer()">Pause</button><button class="btn-skip" onclick="skipPhase()">Skip ▸</button><button class="btn-danger" onclick="resetAll()">Reset</button>';
-  else if(finished){const nl=phase==='work'?(pomosInCycle>=cfg.cycle?'Long Break ▸':'Short Break ▸'):'Start Focus ▸';c.innerHTML='<button class="btn btn-primary" onclick="advancePhase()">'+nl+'</button><button class="btn-danger" onclick="resetAll()">Reset</button>'}
-  else c.innerHTML='<button class="btn btn-primary" onclick="resumeTimer()">Resume</button><button class="btn-skip" onclick="skipPhase()">Skip ▸</button><button class="btn-danger" onclick="resetAll()">Reset</button>'
+  const c=gid('ctrls');c.textContent='';
+  if(!running&&!finished&&remaining===totalDuration){c.appendChild(_mkBtn('btn btn-primary','Start',startTimer))}
+  else if(running){c.appendChild(_mkBtn('btn btn-pause','Pause',pauseTimer));c.appendChild(_mkBtn('btn-skip','Skip ▸',skipPhase));c.appendChild(_mkBtn('btn-danger','Reset',resetAll))}
+  else if(finished){const nl=phase==='work'?(pomosInCycle>=cfg.cycle?'Long Break ▸':'Short Break ▸'):'Start Focus ▸';c.appendChild(_mkBtn('btn btn-primary',nl,advancePhase));c.appendChild(_mkBtn('btn-danger','Reset',resetAll))}
+  else{c.appendChild(_mkBtn('btn btn-primary','Resume',resumeTimer));c.appendChild(_mkBtn('btn-skip','Skip ▸',skipPhase));c.appendChild(_mkBtn('btn-danger','Reset',resetAll))}
 }
 
 // ========== TIMER ==========
@@ -128,8 +129,8 @@ function resetAll(){running=false;finished=false;clearInterval(tickId);cancelSch
 // ========== STOPWATCH ==========
 function swToggle(){if(swRunning){swRunning=false;swPausedEl+=Date.now()-swStartTime;gid('swStartBtn').textContent='Resume';gid('swStartBtn').className='btn btn-primary';maybeStopKeepalive()}else{swRunning=true;swStartTime=Date.now();clearInterval(swTickId);swTickId=setInterval(swTick,100);gid('swStartBtn').textContent='Pause';gid('swStartBtn').className='btn btn-pause';startKeepalive()}}
 function swTick(){if(!swRunning)return;swElapsed=swPausedEl+Date.now()-swStartTime;gid('swDisplay').textContent=fmtHMS(Math.floor(swElapsed/1000))}
-function swLap(){if(swElapsed<=0)return;const s=Math.floor(swElapsed/1000),d=document.createElement('div');d.className='sw-lap';d.innerHTML='<span>Lap '+(swLapList.length+1)+'</span><span>'+fmtHMS(s)+'</span>';gid('swLaps').prepend(d);swLapList.push(s)}
-function swReset(){swRunning=false;swElapsed=0;swPausedEl=0;swLapList=[];clearInterval(swTickId);gid('swDisplay').textContent='00:00:00';gid('swStartBtn').textContent='Start';gid('swStartBtn').className='btn btn-primary';gid('swLaps').innerHTML='';maybeStopKeepalive()}
+function swLap(){if(swElapsed<=0)return;const s=Math.floor(swElapsed/1000),d=document.createElement('div');d.className='sw-lap';const s1=document.createElement('span');s1.textContent='Lap '+(swLapList.length+1);const s2=document.createElement('span');s2.textContent=fmtHMS(s);d.appendChild(s1);d.appendChild(s2);gid('swLaps').prepend(d);swLapList.push(s)}
+function swReset(){swRunning=false;swElapsed=0;swPausedEl=0;swLapList=[];clearInterval(swTickId);gid('swDisplay').textContent='00:00:00';gid('swStartBtn').textContent='Start';gid('swStartBtn').className='btn btn-primary';gid('swLaps').textContent='';maybeStopKeepalive()}
 
 // ========== QUICK TIMERS ==========
 function addQuickTimer(){
@@ -267,15 +268,15 @@ function renderQuickTimers(){
     const btnIcon=qt.finished?'↻':qt.running?'⏸':'▶';
     const timeClass='qt-time'+(qt.finished?' done':qt.running?' running':'')+(rem<=10&&qt.running&&rem>0?' warn':'');
     const barClass='qt-bar'+(qt.finished?' done':'');
-    d.innerHTML='<button class="qt-btn '+btnClass+'" onclick="toggleQuickTimer('+qt.id+')" title="'+(qt.finished?'Restart':qt.running?'Pause':'Start')+'">'+btnIcon+'</button>'
-      +'<div class="qt-info"><div class="qt-label">'+esc(qt.label)+'</div>'
-      +'<div class="'+timeClass+'">'+fmtHMS(rem)+'</div>'
-      +'<div class="qt-progress"><div class="'+barClass+'" style="width:'+pct+'%"></div></div>'
-      +'</div>'
-      +'<div class="qt-actions">'
-      +'<button class="qt-act" onclick="resetQuickTimer('+qt.id+')" title="Reset">↺</button>'
-      +'<button class="qt-act" onclick="removeQuickTimer('+qt.id+')" title="Remove">×</button>'
-      +'</div>';
+    const togBtn=document.createElement('button');togBtn.className='qt-btn '+btnClass;togBtn.title=qt.finished?'Restart':qt.running?'Pause':'Start';togBtn.textContent=btnIcon;togBtn.onclick=function(){toggleQuickTimer(qt.id)};
+    const info=document.createElement('div');info.className='qt-info';
+    const lbl=document.createElement('div');lbl.className='qt-label';lbl.textContent=qt.label;info.appendChild(lbl);
+    const tm=document.createElement('div');tm.className=timeClass;tm.textContent=fmtHMS(rem);info.appendChild(tm);
+    const prog=document.createElement('div');prog.className='qt-progress';const bar=document.createElement('div');bar.className=barClass;bar.style.width=pct+'%';prog.appendChild(bar);info.appendChild(prog);
+    const acts=document.createElement('div');acts.className='qt-actions';
+    const rstBtn=document.createElement('button');rstBtn.className='qt-act';rstBtn.title='Reset';rstBtn.textContent='↺';rstBtn.onclick=function(){resetQuickTimer(qt.id)};acts.appendChild(rstBtn);
+    const rmBtn=document.createElement('button');rmBtn.className='qt-act';rmBtn.title='Remove';rmBtn.textContent='×';rmBtn.onclick=function(){removeQuickTimer(qt.id)};acts.appendChild(rmBtn);
+    d.appendChild(togBtn);d.appendChild(info);d.appendChild(acts);
     list.appendChild(d)
   })
 }
@@ -284,5 +285,5 @@ function renderQuickTimers(){
 function addInterval(){const m=parseInt(gid('intMin').value)||0,s=parseInt(gid('intSec').value)||0,sec=m*60+s;if(sec<=0)return;intervals.push({id:++intIdCtr,intervalSec:sec,label:gid('intLabel').value||'Every '+fmt(sec),chime:gid('intChime').value});gid('intLabel').value='';gid('intMin').value='5';gid('intSec').value='0';renderIntList();if(running)schedulePhaseAudio();saveState('user')}
 function removeInterval(id){intervals=intervals.filter(i=>i.id!==id);delete fireCounts[id];renderIntList();if(running)schedulePhaseAudio();saveState('user')}
 function flashInt(id){lastFlash=id;setTimeout(()=>{if(lastFlash===id){lastFlash=null;renderIntList()}},600);renderIntList()}
-function renderIntList(){const list=gid('intList');gid('intCount').textContent=intervals.length+' set';list.querySelectorAll('.iitem').forEach(e=>e.remove());if(!intervals.length){gid('intEmpty').style.display='';return}gid('intEmpty').style.display='none';const totalEl=totalDuration-remaining;intervals.forEach(iv=>{const fires=fireCounts[iv.id]||0,fl=lastFlash===iv.id,next=(fires+1)*iv.intervalSec-totalEl;const d=document.createElement('div');d.className='iitem'+(fl?' flash':'');d.innerHTML='<div class="idot'+(fl?' flash':fires>0?' active':'')+'"></div><div class="iinfo"><div class="iname">'+esc(iv.label)+'</div><div class="imeta">⟳ every '+fmt(iv.intervalSec)+' · '+CHL[iv.chime]+'</div></div>'+(running||finished?'<div class="istat"><div class="ifires'+(fl?' flash':'')+'">'+fires+'×</div>'+(next>0&&running?'<div class="inext">next '+fmt(next)+'</div>':'')+'</div>':'')+'<button class="irm" onclick="removeInterval('+iv.id+')">×</button>';list.appendChild(d)})}
+function renderIntList(){const list=gid('intList');gid('intCount').textContent=intervals.length+' set';list.querySelectorAll('.iitem').forEach(e=>e.remove());if(!intervals.length){gid('intEmpty').style.display='';return}gid('intEmpty').style.display='none';const totalEl=totalDuration-remaining;intervals.forEach(iv=>{const fires=fireCounts[iv.id]||0,fl=lastFlash===iv.id,next=(fires+1)*iv.intervalSec-totalEl;const d=document.createElement('div');d.className='iitem'+(fl?' flash':'');const dot=document.createElement('div');dot.className='idot'+(fl?' flash':fires>0?' active':'');d.appendChild(dot);const info=document.createElement('div');info.className='iinfo';const nm=document.createElement('div');nm.className='iname';nm.textContent=iv.label;info.appendChild(nm);const meta=document.createElement('div');meta.className='imeta';meta.textContent='⟳ every '+fmt(iv.intervalSec)+' · '+CHL[iv.chime];info.appendChild(meta);d.appendChild(info);if(running||finished){const st=document.createElement('div');st.className='istat';const fc=document.createElement('div');fc.className='ifires'+(fl?' flash':'');fc.textContent=fires+'×';st.appendChild(fc);if(next>0&&running){const nx=document.createElement('div');nx.className='inext';nx.textContent='next '+fmt(next);st.appendChild(nx)}d.appendChild(st)}const rm=document.createElement('button');rm.className='irm';rm.textContent='×';rm.onclick=function(){removeInterval(iv.id)};d.appendChild(rm);list.appendChild(d)})}
 

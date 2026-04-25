@@ -2,18 +2,19 @@
  * IndexedDB store for task embeddings + meta (Schwartz value vectors).
  * DB: stupind_intel (legacy name; retains existing IndexedDB after rebrand to ODTAULAI)
  */
-const INTEL_DB = 'stupind_intel';
+const _EC = window.ODTAULAI_CONFIG || {};
+const INTEL_DB = (_EC.IDB && _EC.IDB.INTEL_DB) || 'stupind_intel';
 const INTEL_DB_VER = 1;
 const STORE_EMB = 'embeddings';
 const STORE_META = 'meta';
 
 const META_SCHWARTZ_KEY = 'schwartz_vecs_v1';
 /** Bumped with embedding model upgrade — invalidates cached Schwartz value vectors */
-const SCHWARTZ_MODEL_VER = 'bge-base-en-v1.5-migration-v2';
+const SCHWARTZ_MODEL_VER = _EC.EMBED_MODEL_VER || 'bge-base-en-v1.5-migration-v2';
 const META_EMBED_RUNTIME_KEY = 'embed_runtime';
 const META_CAT_CENTROIDS_KEY = 'cat_centroids_v1';
-/** Must match `INTEL_EMBED_MODEL_VER` in js/intel.js (single source of truth is intel.js) */
-const EMBED_SCHEMA_VER = 'bge-base-en-v1.5-migration-v2';
+/** Must match `EMBED_MODEL_VER` in js/config.js (single source of truth) */
+const EMBED_SCHEMA_VER = _EC.EMBED_MODEL_VER || 'bge-base-en-v1.5-migration-v2';
 
 /** Canonical Map from last IDB read; updated incrementally on put/purge for fast embedStore.all() */
 let _embedAllCache = null;

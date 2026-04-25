@@ -2,13 +2,14 @@
  * Ambient intelligence — Xenova/bge-base-en-v1.5 (WebGPU) or Xenova/bge-small-en-v1.5 (WASM)
  * via Transformers.js (feature-extraction). No generative model.
  */
-const TRANSFORMERS_CDN = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.1';
-const EMBED_MODEL_WEBGPU = 'Xenova/bge-base-en-v1.5';
-const EMBED_MODEL_WASM = 'Xenova/bge-small-en-v1.5';
-const EMBED_DIM_WEBGPU = 768;
-const EMBED_DIM_WASM = 384;
+const _C = window.ODTAULAI_CONFIG || {};
+const TRANSFORMERS_CDN  = _C.TRANSFORMERS_CDN  || 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.1';
+const EMBED_MODEL_WEBGPU = _C.EMBED_MODEL_WEBGPU || 'Xenova/bge-base-en-v1.5';
+const EMBED_MODEL_WASM   = _C.EMBED_MODEL_WASM   || 'Xenova/bge-small-en-v1.5';
+const EMBED_DIM_WEBGPU   = _C.EMBED_DIM_WEBGPU   || 768;
+const EMBED_DIM_WASM     = _C.EMBED_DIM_WASM     || 384;
 /** Version string for IndexedDB migration — must change when embed model or dim strategy changes */
-const EMBED_MODEL_VER = 'bge-base-en-v1.5-migration-v2';
+const EMBED_MODEL_VER    = _C.EMBED_MODEL_VER    || 'bge-base-en-v1.5-migration-v2';
 
 let _extractor = null;
 let _intelReady = false;
@@ -142,3 +143,16 @@ window.getActiveEmbedModelId = getActiveEmbedModelId;
 Object.defineProperty(window, 'INTEL_EMBED_DIM', { get: () => _embedDim, configurable: true });
 Object.defineProperty(window, 'INTEL_EMBED_MODEL', { get: () => _activeEmbedModel, configurable: true });
 window.INTEL_EMBED_MODEL_VER = EMBED_MODEL_VER;
+
+// ── Cleanup on tab close (M1) ─────────────────────────────────────────────────
+// Release the embedding pipeline reference so the browser can reclaim GPU/WASM
+// memory promptly.  In normal tabs the GC handles this automatically on unload,
+// but long-lived PWA windows and service-worker scopes can hold orphaned
+// contexts indefinitely without an explicit teardown.
+window.addEventListener('beforeunload', () => {
+  if (_extractor && typeof _extractor.dispose === 'function') {
+    try { _extractor.dispose(); } catch (_) {}
+  }
+  _extractor = null;
+  _intelReady = false;
+});

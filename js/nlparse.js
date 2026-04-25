@@ -2,7 +2,7 @@
  * Extends quick-add with chrono-node (dynamic import) for natural date phrases.
  * Depends on global parseQuickAdd from tasks.js.
  */
-const CHRONO_CDN = 'https://cdn.jsdelivr.net/npm/chrono-node@2.7.7/+esm';
+const CHRONO_CDN = (window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.CHRONO_CDN) || 'https://cdn.jsdelivr.net/npm/chrono-node@2.7.7/+esm';
 
 let _chronoMod = null;
 let _chronoLoad = null;

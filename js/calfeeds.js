@@ -6,8 +6,11 @@
 // or via a user-configured CORS proxy. No centralised infrastructure — each
 // user decides their own privacy/convenience tradeoff.
 
-const CALFEEDS_KEY    = 'stupind_calfeeds';       // {feeds:[{id,label,color,url,proxy,content,events,lastSync}]}
-const CALFEEDS_PROXY  = 'stupind_calfeeds_proxy'; // default proxy URL (optional, user-entered)
+const CALFEEDS_KEY    = (window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.CAL_FEEDS) || 'stupind_calfeeds';       // {feeds:[{id,label,color,url,proxy,content,events,lastSync}]}
+const CALFEEDS_PROXY  = (window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.CAL_FEEDS_PROXY) || 'stupind_calfeeds_proxy'; // default proxy URL (optional, user-entered)
+// PRIVACY NOTE: Calendar events are stored in localStorage for offline access.
+// Same-origin isolation prevents cross-site access. The proxy URL is also stored
+// here — users accept this tradeoff when configuring URL-mode feeds.
 
 let _calFeeds = null;
 
@@ -308,6 +311,11 @@ function _calFetchUrlOk(urlStr){
   catch(e){ return false; }
   if(u.protocol !== 'http:' && u.protocol !== 'https:') return false;
   if(location.protocol === 'https:' && u.protocol === 'http:') return false;
+  // Defense-in-depth: block loopback / private RFC1918 addresses
+  const h = u.hostname;
+  if(h === 'localhost' || h === '127.0.0.1' || h === '[::1]' ||
+     h.startsWith('192.168.') || h.startsWith('10.') ||
+     /^172\.(1[6-9]|2\d|3[01])\./.test(h)) return false;
   return true;
 }
 
@@ -614,15 +622,15 @@ function renderCalFeedsPanel(){
           ? `<span style="color:#e74c3c;font-size:10px">✕ ${esc(f.error)}</span>`
           : `<span style="color:#2ecc71;font-size:10px">✓ ${evCount} events · ${lastSync}</span>`;
         return `
-          <div class="calfeed-row" data-id="${f.id}">
+          <div class="calfeed-row" data-id="${escAttr(f.id)}">
             <span class="calfeed-dot" style="background:${typeof sanitizeListColor==='function'?sanitizeListColor(f.color):'#888'}"></span>
             <div class="calfeed-info">
               <div class="calfeed-label">${esc(f.label)}</div>
               ${status}
             </div>
-            <button class="calfeed-btn" onclick="toggleCalFeedVisibility('${f.id}');renderCalFeedsPanel();if(typeof renderTaskList==='function')renderTaskList()" title="${f.visible?'Hide':'Show'}">${f.visible?'👁':'◎'}</button>
-            <button class="calfeed-btn" onclick="refreshCalFeed('${f.id}')" title="Refresh now">↻</button>
-            <button class="calfeed-btn calfeed-rm" onclick="confirmRemoveCalFeed('${f.id}')" title="Remove">×</button>
+            <button class="calfeed-btn" onclick="toggleCalFeedVisibility('${escAttr(f.id)}');renderCalFeedsPanel();if(typeof renderTaskList==='function')renderTaskList()" title="${f.visible?'Hide':'Show'}">${f.visible?'👁':'◎'}</button>
+            <button class="calfeed-btn" onclick="refreshCalFeed('${escAttr(f.id)}')" title="Refresh now">↻</button>
+            <button class="calfeed-btn calfeed-rm" onclick="confirmRemoveCalFeed('${escAttr(f.id)}')" title="Remove">×</button>
           </div>`;
       }).join('')
     : '<div class="calfeed-empty">No calendars added yet</div>';

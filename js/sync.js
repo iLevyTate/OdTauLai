@@ -7,9 +7,9 @@
 // Displayed as `STU-XXX-XXX` where the first "STU" is branding only.
 // A legacy v1 bug produced 9-char ids starting with "stu" (the brand accidentally
 // embedded in the id), rendered as "STU-STU-XXXXXX". We migrate those on boot.
-const SYNC_PEER_KEY    = 'stupind_peer_id_v2'; // cleaned format
-const SYNC_PEER_KEY_V1 = 'stupind_peer_id';    // legacy — detected & migrated
-const SYNC_ROOM_KEY    = 'stupind_sync_room';
+const SYNC_PEER_KEY    = (window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.SYNC_PEER) || 'stupind_peer_id_v2'; // cleaned format
+const SYNC_PEER_KEY_V1 = (window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.SYNC_PEER_V1) || 'stupind_peer_id';    // legacy — detected & migrated
+const SYNC_ROOM_KEY    = (window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.SYNC_ROOM) || 'stupind_sync_room';
 const SYNC_VERSION     = 1;
 const CODE_ALPHABET    = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Crockford-ish, no 0/O/1/I
 
@@ -376,9 +376,9 @@ function _wireConn(conn) {
   conn.on('open', () => {
     _setSyncStatus('connected');
     // Exchange state on connect
-    try { conn.send({ type: 'state', payload: _packState() }); } catch(e) {}
+    try { conn.send({ type: 'state', payload: _packState() }); } catch(e) { console.warn('[Sync] send state', e); }
     // Persist the room code we connected to
-    try { localStorage.setItem(SYNC_ROOM_KEY, _idToCode(conn.peer)); } catch(e) {}
+    try { localStorage.setItem(SYNC_ROOM_KEY, _idToCode(conn.peer)); } catch(e) { /* LS fire-and-forget */ }
   });
 
   conn.on('data', (msg) => {
@@ -388,7 +388,7 @@ function _wireConn(conn) {
     } else if (msg.type === 'patch') {
       _mergeState(msg.payload);
     } else if (msg.type === 'ping') {
-      try { conn.send({ type: 'pong' }); } catch(e) {}
+      try { conn.send({ type: 'pong' }); } catch(e) { console.warn('[Sync] send pong', e); }
     }
   });
 
@@ -522,12 +522,12 @@ async function syncInit() {
 
   _peer.on('disconnected', () => {
     _setSyncStatus('waiting');
-    try { _peer.reconnect(); } catch(e) {}
+    try { _peer.reconnect(); } catch(e) { console.warn('[Sync] reconnect', e); }
   });
 }
 
 function syncConnect(code) {
-  if (!_peer) { syncInit().then(() => syncConnect(code)); return; }
+  if (!_peer) { syncInit().then(() => syncConnect(code)).catch(e => console.warn('[Sync] init failed', e)); return; }
   if (!_isValidCode(code)) {
     _setSyncStatus('error', 'Invalid code — expected 6 letters/digits after STU-');
     return;
@@ -579,14 +579,14 @@ function syncRegenerateCode() {
   if (_conn) { try { _conn.close(); } catch(e) {} _conn = null; }
   if (_peer) { try { _peer.destroy(); } catch(e) {} _peer = null; }
   _setSyncStatus('loading');
-  syncInit().then(() => renderSyncPanel());
+  syncInit().then(() => renderSyncPanel()).catch(e => console.warn('[Sync] init failed', e));
 }
 
 function syncDisconnect() {
   if (_connectTimeoutId) { clearTimeout(_connectTimeoutId); _connectTimeoutId = null; }
-  if (_conn) { try { _conn.close(); } catch(e) {} _conn = null; }
-  if (_peer) { try { _peer.destroy(); } catch(e) {} _peer = null; }
-  try { localStorage.removeItem(SYNC_ROOM_KEY); } catch(e) {}
+  if (_conn) { try { _conn.close(); } catch(e) { console.warn('[Sync] conn close', e); } _conn = null; }
+  if (_peer) { try { _peer.destroy(); } catch(e) { console.warn('[Sync] peer destroy', e); } _peer = null; }
+  try { localStorage.removeItem(SYNC_ROOM_KEY); } catch(e) { /* LS fire-and-forget */ }
   _setSyncStatus('off');
   _syncEnabled = false;
   renderSyncPanel();
@@ -610,12 +610,12 @@ function syncBroadcast() {
     _broadcastTimer = setTimeout(() => {
       _lastBroadcastAt = Date.now();
       _broadcastTimer = null;
-      try { _conn.send({ type: 'patch', payload: _packState() }); } catch(e) {}
+      try { _conn.send({ type: 'patch', payload: _packState() }); } catch(e) { console.warn('[Sync] broadcast', e); }
     }, 500);
     return;
   }
   _lastBroadcastAt = now;
-  try { _conn.send({ type: 'patch', payload: _packState() }); } catch(e) {}
+  try { _conn.send({ type: 'patch', payload: _packState() }); } catch(e) { console.warn('[Sync] broadcast', e); }
 }
 
 // ── UI ───────────────────────────────────────────────────────────────────────

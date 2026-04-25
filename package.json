@@ -4,6 +4,10 @@
   "description": "Static PWA — npm scripts are for CI and local checks only (no install step).",
   "scripts": {
     "test": "node scripts/run-tests.mjs",
+    "check:version": "node scripts/check-version-sync.mjs",
+    "check:assets": "node scripts/check-assets.mjs",
+    "check": "npm run check:version && npm run check:assets",
+    "bump:version": "node scripts/bump-version.mjs",
     "build:icons": "node scripts/build-icons.mjs"
   },
   "devDependencies": {

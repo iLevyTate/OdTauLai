@@ -1,5 +1,11 @@
 // ========== UTILS ==========
 function gid(id){return document.getElementById(id)}
+/**
+ * HTML-escape a string for safe insertion into innerHTML.
+ * SECURITY: This is the primary XSS boundary. All user-supplied
+ * data rendered via innerHTML MUST pass through esc() first.
+ * Uses DOM textContent encoding — handles &, <, >, ", ' correctly.
+ */
 function esc(s){const d=document.createElement("div");d.textContent=s;return d.innerHTML}
 /** Escape for HTML double-quoted attributes (title=, etc.). */
 function escAttr(s){

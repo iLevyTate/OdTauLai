@@ -1,3 +1,20 @@
+// ── Global error safety net ─────────────────────────────────────────────────
+// Catches unhandled exceptions and promise rejections so they never vanish
+// silently.  Logs to console (no user-facing toast to avoid spam).
+window.onerror = function(msg, src, line, col, err) {
+  console.error('[ODTAULAI] Uncaught error:', msg, 'at', src, line + ':' + col, err);
+  return false; // allow default browser handling too
+};
+window.addEventListener('unhandledrejection', function(e) {
+  console.error('[ODTAULAI] Unhandled promise rejection:', e.reason);
+});
+// Capture-phase listener for resource load failures (broken images, script 404s, etc.)
+window.addEventListener('error', function(e) {
+  if (e.target && e.target !== window && e.target.tagName) {
+    console.warn('[ODTAULAI] Resource load error:', e.target.tagName, e.target.src || e.target.href || '');
+  }
+}, true);
+
 // ── App version — see js/version.js (ODTAULAI_RELEASE) ─────────────────────
 const R = window.ODTAULAI_RELEASE || {};
 const APP_VERSION = R.version || 'v26';
@@ -32,6 +49,22 @@ async function checkStorageQuota(){
   } catch(e) { return null; }
 }
 
+/** Proactive storage-pressure check. Shows a toast when usage > 80%. */
+let _storageWarningShown = false;
+async function _checkStoragePressure(){
+  const info = await checkStorageQuota();
+  if(!info) return;
+  if(info.pct > 80 && !_storageWarningShown){
+    _storageWarningShown = true;
+    const msg = `⚠️ Storage ${info.pct}% full (${info.usedMB} MB / ${info.quotaMB} MB). Consider exporting a backup via Settings → Export.`;
+    if(typeof showExportToast === 'function') showExportToast(msg);
+    console.warn('[app] Storage pressure:', info);
+  } else if(info.pct <= 70){
+    // Reset the flag so warning re-fires if usage climbs again after a cleanup
+    _storageWarningShown = false;
+  }
+}
+
 // ── Online/offline status indicator ─────────────────────────────────────────
 function updateOnlineStatus(){
   const el = document.getElementById('onlineStatus');
@@ -53,7 +86,8 @@ setTimeout(updateOnlineStatus, 500);
 if ('serviceWorker' in navigator && !window.location.protocol.startsWith('file')) {
   navigator.serviceWorker.ready.then(reg => {
     // Check for updates every 30 min while app is open
-    setInterval(() => { try{ reg.update(); }catch(e){} }, 30 * 60 * 1000);
+    const _swUpdateMs = (window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.SW_UPDATE_CHECK_MS) || 30 * 60 * 1000;
+    setInterval(() => { try{ reg.update(); }catch(e){} }, _swUpdateMs);
 
     // Listen for a new service worker waiting to take over
     const showUpdateBanner = () => {
@@ -62,10 +96,12 @@ if ('serviceWorker' in navigator && !window.location.protocol.startsWith('file')
       banner.id = 'updateBanner';
       banner.className = 'update-banner';
       const sparkIc = (window.icon && window.icon('sparkles', {size:14})) || '';
-      banner.innerHTML = `
-        <span class="update-banner-msg">${sparkIc}<span>New version available</span></span>
-        <button onclick="applyUpdate()">Reload to update</button>
-        <button onclick="dismissUpdate()" class="update-dismiss">Later</button>`;
+      const msg = document.createElement('span');msg.className='update-banner-msg';
+      if(sparkIc){const tmp=document.createElement('span');tmp.innerHTML=sparkIc;while(tmp.firstChild)msg.appendChild(tmp.firstChild)}
+      const txt=document.createElement('span');txt.textContent='New version available';msg.appendChild(txt);
+      banner.appendChild(msg);
+      const reloadBtn=document.createElement('button');reloadBtn.textContent='Reload to update';reloadBtn.onclick=function(){applyUpdate()};banner.appendChild(reloadBtn);
+      const laterBtn=document.createElement('button');laterBtn.className='update-dismiss';laterBtn.textContent='Later';laterBtn.onclick=function(){dismissUpdate()};banner.appendChild(laterBtn);
       document.body.appendChild(banner);
     };
     window.applyUpdate = () => {
@@ -104,8 +140,8 @@ function renderArchive(){
   const archives=getArchives();
   const list=gid('archiveList');
   gid('archiveCount').textContent=archives.length+' day'+(archives.length!==1?'s':'');
-  list.innerHTML='';
-  if(!archives.length){list.innerHTML='<div class="iempty">History will appear here after each day</div>';return}
+  list.textContent='';
+  if(!archives.length){const e=document.createElement('div');e.className='iempty';e.textContent='History will appear here after each day';list.appendChild(e);return}
   // Most recent first
   archives.slice().reverse().forEach((a,idx)=>{
     const doneG=a.goals?a.goals.filter(g=>g.done).length:0;
@@ -179,32 +215,7 @@ function exportFile(format){
 }
 function exportClipboard(){const content=buildReport('txt');navigator.clipboard.writeText(content).then(()=>{const btn=gid('exportClipBtn')||document.querySelector('.export-clip');if(!btn)return;const orig=btn.textContent;btn.textContent='Copied!';btn.style.color='#2ecc71';btn.style.borderColor='#1a4a2a';setTimeout(()=>{btn.textContent=orig;btn.style.color='';btn.style.borderColor=''},1500)}).catch(()=>{const ta=document.createElement('textarea');ta.value=content;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta)})}
 
-// ========== v16 migration (WebLLM removal — reclaim ~1.5GB) ==========
-function runV16Migration(){
-  if(localStorage.getItem('stupind_v16_migrated') === '1') return;
-  try{
-    ['webllm/model','webllm/wasm','webllm/config'].forEach(n => {
-      try{ indexedDB.deleteDatabase(n); }catch(e){}
-    });
-    if(typeof caches !== 'undefined'){
-      caches.keys().then(ks => ks.filter(k => k.startsWith('webllm/')).forEach(k => caches.delete(k))).catch(() => {});
-    }
-    const old = localStorage.getItem('stupind_ai_cfg');
-    if(old && !localStorage.getItem('stupind_intel_cfg')){
-      try{
-        const j = JSON.parse(old);
-        if(j && Array.isArray(j.dominant) && j.dominant.length){
-          localStorage.setItem('stupind_intel_cfg', JSON.stringify({ dominant: j.dominant.slice(0, 3) }));
-        }
-      }catch(e){}
-    }
-  }catch(e){}
-  localStorage.removeItem('stupind_ai_cfg');
-  localStorage.removeItem('stupind_model_ready');
-  localStorage.removeItem('stupind_ai_chat_history');
-  localStorage.setItem('stupind_v16_migrated', '1');
-}
-runV16Migration();
+// v16 migration (WebLLM removal) — removed in v32; all active users migrated.
 
 // ========== INIT ==========
 loadState();
@@ -292,7 +303,7 @@ function _handleDayRollover(){
       sessionHistory: sessionHistory,
     };
     try{
-      const k = 'stupind_archived_' + _lastKnownDate;
+      const k = ((window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.ARCHIVED_PREFIX) || 'stupind_archived_') + _lastKnownDate;
       if(typeof localStorage === 'undefined' || localStorage.getItem(k) !== '1'){
         archiveDay(yesterday);
       }
@@ -312,7 +323,10 @@ setInterval(_handleDayRollover, 60 * 1000);
 // …and again whenever the tab regains focus (backgrounded phones/laptops
 // often suspend setInterval for hours, so this covers the common case).
 document.addEventListener('visibilitychange', () => {
-  if(!document.hidden) _handleDayRollover();
+  if(!document.hidden){
+    _handleDayRollover();
+    _checkStoragePressure();
+  }
 });
 
 // Init sync panel UI (renders the "Enable Sync" state by default)
@@ -352,7 +366,7 @@ async function renderSystemInfo(info){
       : '<span style="color:var(--text-3)">Loads in background (WebGPU ~110 MB, WASM ~33 MB, cached offline)</span>'}</div>`;
 }
 // Initial render + re-render when online status changes
-setTimeout(() => { renderSystemInfo(); }, 400);
+setTimeout(() => { renderSystemInfo(); _checkStoragePressure(); }, 400);
 window.addEventListener('online',  () => renderSystemInfo());
 window.addEventListener('offline', () => renderSystemInfo());
 

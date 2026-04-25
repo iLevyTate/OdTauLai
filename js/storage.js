@@ -1,7 +1,7 @@
 // ========== PERSISTENCE ==========
 // Internal keys keep stupind_* prefix so existing installs retain data after rebrand to ODTAULAI.
-const STORE_KEY     = 'stupind_state';
-const ARCHIVE_KEY   = 'stupind_archive';
+const STORE_KEY     = (window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.STATE) || 'stupind_state';
+const ARCHIVE_KEY   = (window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.ARCHIVE) || 'stupind_archive';
 const SCHEMA_VERSION = 6;
 
 /** P2P sync: permanent task deletion tombstones id → deleted-at (ms). Merged with max(ts). */
@@ -21,7 +21,7 @@ let _idb = null;
 function _openIDB(){
   if(_idb) return Promise.resolve(_idb);
   return new Promise((res,rej)=>{
-    const req = indexedDB.open('stupind_backup',1);
+    const req = indexedDB.open((window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.IDB && window.ODTAULAI_CONFIG.IDB.BACKUP_DB) || 'stupind_backup',1);
     req.onupgradeneeded = e => e.target.result.createObjectStore('kv');
     req.onsuccess = e => { _idb = e.target.result; res(_idb); };
     req.onerror   = () => rej(req.error);
@@ -298,16 +298,33 @@ function saveState(reason){
     syncGoalDels: { ...syncGoalDels },
     stateEpoch,
   };
-  const serialized = JSON.stringify(state);
+  let serialized;
+  try {
+    serialized = JSON.stringify(state);
+  } catch (serErr) {
+    // Circular reference, BigInt, or exotic value — skip LS cache but still
+    // attempt IDB (structured clone is more forgiving than JSON.stringify).
+    console.error('[storage] JSON.stringify failed — skipping localStorage, attempting IDB', serErr);
+    _idbSet(STORE_KEY, state);
+    return;
+  }
+
+  // ── IDB-first persistence (M2) ──────────────────────────────────────────────
+  // IndexedDB is the primary store — its quota is orders of magnitude larger
+  // than localStorage (hundreds of MB vs 5-10 MB).  We write here first so
+  // even if the LS fast-path cache below hits QuotaExceededError, the user's
+  // data is safe in IDB and will be recovered on the next loadState().
+  _idbSet(STORE_KEY, serialized);
+
+  // localStorage is kept as a synchronous fast-path cache and for cross-tab
+  // `storage` event notifications.  Quota failures are non-fatal.
   try{
     localStorage.setItem(STORE_KEY, serialized);
     window._saveError = null;
     window._lastSaveAt = Date.now();
   }catch(e){
-    // QuotaExceededError — warn user. Most common cause: archive grew huge.
+    // QuotaExceededError — warn user but their data IS safe in IDB.
     window._saveError = e.name || 'save-failed';
-    // Re-show the banner on repeated failures (dismissing the old one alone is not enough
-    // if the user needs another reminder). Debounce a bit to avoid a tight error loop.
     const now = Date.now();
     if (now - (window._lastQuotaBannerAt || 0) >= 2000) {
       window._lastQuotaBannerAt = now;
@@ -317,14 +334,15 @@ function saveState(reason){
       w.id = 'quotaWarning';
       w.className = 'quota-warning';
       const warnIc = (window.icon && window.icon('alertTriangle', {size:14})) || '';
-      w.innerHTML = `
-        <span class="quota-warning-msg">${warnIc}<span>Storage nearly full — new changes may not be saved.</span></span>
-        <button type="button" onclick="document.getElementById('quotaWarning').remove()">Dismiss</button>
-        <button type="button" onclick="exportData();document.getElementById('quotaWarning').remove()">Backup now</button>`;
+      const msg = document.createElement('span');msg.className='quota-warning-msg';
+      if(warnIc){const tmp=document.createElement('span');tmp.innerHTML=warnIc;while(tmp.firstChild)msg.appendChild(tmp.firstChild)}
+      const msgTxt=document.createElement('span');msgTxt.textContent='Local cache full \u2014 data is saved in IndexedDB. Consider exporting a backup.';msg.appendChild(msgTxt);
+      w.appendChild(msg);
+      const dismissBtn=document.createElement('button');dismissBtn.type='button';dismissBtn.textContent='Dismiss';dismissBtn.onclick=function(){document.getElementById('quotaWarning').remove()};w.appendChild(dismissBtn);
+      const backupBtn=document.createElement('button');backupBtn.type='button';backupBtn.textContent='Backup now';backupBtn.onclick=function(){exportData();document.getElementById('quotaWarning').remove()};w.appendChild(backupBtn);
       document.body.appendChild(w);
     }
   }
-  _idbSet(STORE_KEY, serialized);
   if(typeof syncBroadcast==='function') syncBroadcast();
   if(reason === 'user') showSaveIndicator();
 
@@ -667,9 +685,12 @@ function _onStorageFromOtherTab(e){
 }
 
 // ── Load — with multi-layer fallback ─────────────────────────────────────────
-// Priority: localStorage → IDB → clean start (never crashes)
+// Priority: localStorage (sync fast-path cache) → IDB (primary store) → clean start.
+// Under the IDB-first model (M2), saveState() always writes IDB first and
+// localStorage second.  If LS has stale data or hit quota, IDB is
+// authoritative and will restore via the async fallback below.
 function loadState(){
-  // Try localStorage first
+  // Try localStorage first — synchronous, fast.
   try{
     const raw = localStorage.getItem(STORE_KEY);
     if(raw){
@@ -684,14 +705,14 @@ function loadState(){
   // defaults, which means the user may have typed a task or tweaked settings
   // in the meantime. We must NEVER blindly replace live state. Only restore
   // when every user-writeable store is still at its pristine default.
+  const _idbInd = document.getElementById('saveInd');
+  if(_idbInd){ _idbInd.textContent = 'restoring\u2026'; _idbInd.style.opacity = '1'; }
   _idbGet(STORE_KEY).then(raw=>{
+    if(_idbInd){ _idbInd.textContent = 'saved'; _idbInd.style.opacity = ''; }
     if(!raw) return;
     try{
       if(!_isStatePristine()){
-        // User is mid-session. Surface recovery as an opt-in toast rather than
-        // clobbering their work. If showExportToast is missing (very early boot
-        // or stripped build) we still log a visible warning.
-        const msg = 'Backup found in IndexedDB but local data has diverged — kept current data.';
+        const msg = 'Backup found in IndexedDB but local data has diverged \u2014 kept current data.';
         if(typeof showExportToast === 'function') showExportToast(msg);
         console.warn('[storage]', msg);
         return;
@@ -707,6 +728,8 @@ function loadState(){
         if(typeof showExportToast === 'function') showExportToast('Restored from backup');
       }
     }catch(e){ console.warn('[storage] IDB fallback failed:',e); }
+  }).catch(()=>{
+    if(_idbInd){ _idbInd.textContent = 'saved'; _idbInd.style.opacity = ''; }
   });
 
   return false;
@@ -728,9 +751,7 @@ function _isStatePristine(){
 }
 
 // ── Data export / import (manual backup) ─────────────────────────────────────
-function exportData(){
-  const raw = localStorage.getItem(STORE_KEY);
-  const archive = localStorage.getItem(ARCHIVE_KEY);
+function _triggerExportDownload(raw, archive){
   const blob = new Blob([JSON.stringify({export:raw,archive,exportedAt:new Date().toISOString()},null,2)],{type:'application/json'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -738,6 +759,19 @@ function exportData(){
   a.download = fname;
   a.click(); URL.revokeObjectURL(a.href);
   if(typeof showExportToast === 'function') showExportToast('Exported full backup — '+fname);
+}
+function exportData(){
+  // (M2) Prefer IDB as the authoritative source.  Fall back to localStorage
+  // if IDB is unavailable (private browsing) or the read fails.
+  _idbGet(STORE_KEY).then(idbRaw => {
+    const raw = idbRaw || localStorage.getItem(STORE_KEY);
+    const archive = localStorage.getItem(ARCHIVE_KEY);
+    _triggerExportDownload(raw, archive);
+  }).catch(() => {
+    const raw = localStorage.getItem(STORE_KEY);
+    const archive = localStorage.getItem(ARCHIVE_KEY);
+    _triggerExportDownload(raw, archive);
+  });
 }
 
 function importData(file){
@@ -1181,7 +1215,7 @@ function archiveDay(state){
   try{
     const day = state && state.date;
     if(!day) return;
-    const claimKey = 'stupind_archived_' + day;
+    const claimKey = ((window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.ARCHIVED_PREFIX) || 'stupind_archived_') + day;
     try{
       if(localStorage.getItem(claimKey) === '1') return;
     }catch(_){}

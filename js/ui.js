@@ -185,8 +185,8 @@ function _applyCmdkMode(){
     tog.setAttribute('aria-pressed',cmdkMode==='ask'?'true':'false');
   }
   if(reply){
-    if(cmdkMode==='ask'){reply.hidden=false;if(!reply.innerHTML)reply.innerHTML='<div class="cmdk-ask-hint">Press Enter to run on-device. <strong>No auto-apply</strong> — you’ll preview every proposed change.</div>'}
-    else{reply.hidden=true;reply.innerHTML=''}
+    if(cmdkMode==='ask'){reply.hidden=false;if(!reply.childNodes.length){const h=document.createElement('div');h.className='cmdk-ask-hint';h.textContent='Press Enter to run on-device. No auto-apply — you’ll preview every proposed change.';reply.appendChild(h)}}
+    else{reply.hidden=true;reply.textContent=''}
   }
   if(results)results.style.display=cmdkMode==='ask'?'none':'';
   _syncCmdkFindHint();
@@ -226,11 +226,11 @@ function _renderAskStatus(state,msg){
         </details>
       </div>`;
   }else if(state==='error'){
-    reply.innerHTML='<div class="cmdk-ask-error">'+esc(msg||'Error')+'</div>';
+    reply.textContent='';const ed=document.createElement('div');ed.className='cmdk-ask-error';ed.textContent=msg||'Error';reply.appendChild(ed);
   }else if(state==='empty'){
-    reply.innerHTML='<div class="cmdk-ask-empty">'+esc(msg||'No changes proposed.')+'</div>';
+    reply.textContent='';const em=document.createElement('div');em.className='cmdk-ask-empty';em.textContent=msg||'No changes proposed.';reply.appendChild(em);
   }else if(state==='done'){
-    reply.innerHTML='<div class="cmdk-ask-done">'+esc(msg||'Proposed.')+'</div>';
+    reply.textContent='';const dn=document.createElement('div');dn.className='cmdk-ask-done';dn.textContent=msg||'Proposed.';reply.appendChild(dn);
   }else if(state==='need-model'){
     // Message reflects whether the model just needs loading vs a full download.
     const cfg = typeof getGenCfg === 'function' ? getGenCfg() : null;
@@ -394,7 +394,7 @@ function renderCmdK(){
   cmdkFilteredItems=items.filter(i=>!i.section);
   if(cmdkActiveIdx>=cmdkFilteredItems.length)cmdkActiveIdx=Math.max(0,cmdkFilteredItems.length-1);
   _cmdkFootFindText();
-  if(!items.length){results.innerHTML='<div class="cmdk-empty">No matches</div>';return}
+  if(!items.length){results.textContent='';const emp=document.createElement('div');emp.className='cmdk-empty';emp.textContent='No matches';results.appendChild(emp);return}
   let itemIdx=0;
   results.innerHTML=items.map(i=>{
     if(i.section)return '<div class="cmdk-section">'+i.section+'</div>';
@@ -633,28 +633,26 @@ function renderSubtaskForm(parentId,depth){
   const d=document.createElement('div');
   d.className='task-subtask-form';
   d.style.marginLeft=(depth*18)+'px';
-  d.innerHTML='<input class="task-sub-input" data-parent="'+parentId+'" placeholder="Subtask name..." '
-    +'onkeydown="if(event.key===\'Enter\')addSubtask('+parentId+');if(event.key===\'Escape\')cancelSubtaskPrompt()">'
-    +'<div class="task-sub-btns">'
-    +'<button class="task-sub-btn task-sub-add" onclick="addSubtask('+parentId+')">Add</button>'
-    +'<button class="task-sub-btn task-sub-cancel" onclick="cancelSubtaskPrompt()">×</button>'
-    +'</div>';
+  const inp=document.createElement('input');inp.className='task-sub-input';inp.dataset.parent=parentId;inp.placeholder='Subtask name...';
+  inp.onkeydown=function(e){if(e.key==='Enter')addSubtask(parentId);if(e.key==='Escape')cancelSubtaskPrompt()};
+  d.appendChild(inp);
+  const btns=document.createElement('div');btns.className='task-sub-btns';
+  const addBtn=document.createElement('button');addBtn.className='task-sub-btn task-sub-add';addBtn.textContent='Add';addBtn.onclick=function(){addSubtask(parentId)};btns.appendChild(addBtn);
+  const cancelBtn=document.createElement('button');cancelBtn.className='task-sub-btn task-sub-cancel';cancelBtn.textContent='×';cancelBtn.onclick=function(){cancelSubtaskPrompt()};btns.appendChild(cancelBtn);
+  d.appendChild(btns);
   list.appendChild(d);
-  const inp=d.querySelector('.task-sub-input');
-  if(inp){
-    if(typeof _subtaskFormDraftParent==='number'&&_subtaskFormDraftParent===parentId&&typeof _subtaskFormDraftText==='string'){
-      inp.value=_subtaskFormDraftText;
-    }
-    inp.addEventListener('input',()=>{
-      _subtaskFormDraftText=inp.value;
-      _subtaskFormDraftParent=parentId;
-    });
+  if(typeof _subtaskFormDraftParent==='number'&&_subtaskFormDraftParent===parentId&&typeof _subtaskFormDraftText==='string'){
+    inp.value=_subtaskFormDraftText;
   }
+  inp.addEventListener('input',()=>{
+    _subtaskFormDraftText=inp.value;
+    _subtaskFormDraftParent=parentId;
+  });
 }
 
 // Kanban Board View
 function renderBoard(visibleTasks){
-  const board=gid('boardView');board.innerHTML='';
+  const board=gid('boardView');board.textContent='';
   const isMobile=window.matchMedia('(max-width:640px)').matches;
   STATUS_ORDER.forEach(st=>{
     const status=STATUSES[st];
@@ -825,7 +823,7 @@ function openTaskDetail(id){
     const bdAcc = gid('mdBreakdownAccordion');
     if(bdAcc) bdAcc.classList.remove('open');
     const bdBody = gid('mdBreakdownBody');
-    if(bdBody){ bdBody.innerHTML = ''; delete bdBody.dataset.loaded; }
+    if(bdBody){ bdBody.textContent = ''; delete bdBody.dataset.loaded; }
   }
   renderMdHabitLog(t);
   gid('taskModal').classList.add('open');
@@ -838,13 +836,17 @@ function renderMdHabitLog(t){
   const el=gid('mdHabitLog');
   if(!el)return;
   if(!t||!t.recur||!Array.isArray(t.completions)||!t.completions.length){
-    el.innerHTML='<span class="intel-muted">Completion history appears after you finish a repeating task.</span>';
+    el.textContent='';const hint=document.createElement('span');hint.className='intel-muted';hint.textContent='Completion history appears after you finish a repeating task.';el.appendChild(hint);
     return;
   }
   const rows=t.completions.slice(-14).reverse();
   const sum=(typeof getHabitLoggedSecTotal==='function')?getHabitLoggedSecTotal(t):0;
-  el.innerHTML='<div class="habit-log-sum">Logged in completions: <strong>'+fmtHMS(sum)+'</strong></div>'
-    +'<ul class="habit-log-list">'+rows.map(c=>'<li><span>'+esc(c.date)+'</span> · '+fmtHMS(c.sec||0)+'</li>').join('')+'</ul>';
+  el.textContent='';
+  const sumDiv=document.createElement('div');sumDiv.className='habit-log-sum';sumDiv.textContent='Logged in completions: ';
+  const sumStrong=document.createElement('strong');sumStrong.textContent=fmtHMS(sum);sumDiv.appendChild(sumStrong);el.appendChild(sumDiv);
+  const ul=document.createElement('ul');ul.className='habit-log-list';
+  rows.forEach(c=>{const li=document.createElement('li');const ds=document.createElement('span');ds.textContent=c.date;li.appendChild(ds);li.append(' · '+fmtHMS(c.sec||0));ul.appendChild(li)});
+  el.appendChild(ul);
 }
 
 async function refreshMdSimilarTasks(id){
@@ -852,27 +854,30 @@ async function refreshMdSimilarTasks(id){
   const acc = gid('mdSimilarAccordion');
   if(!body) return;
   if(typeof isIntelReady !== 'function' || !isIntelReady()){
-    body.innerHTML = '<span class="intel-muted">Load the model (AI chip or Tools → Task understanding) for similar tasks.</span>';
+    body.textContent='';const m1=document.createElement('span');m1.className='intel-muted';m1.textContent='Load the model (AI chip or Tools → Task understanding) for similar tasks.';body.appendChild(m1);
     if(acc) acc.classList.remove('open');
     return;
   }
-  body.innerHTML = '<span class="intel-muted">Finding neighbors…</span>';
+  body.textContent='';const m2=document.createElement('span');m2.className='intel-muted';m2.textContent='Finding neighbors…';body.appendChild(m2);
   try{
     const sim = await similarTasksFor(id, 5);
     if (editingTaskId !== id) return;
     if(!sim.length){
-      body.innerHTML = '<span class="intel-muted">No similar tasks found yet.</span>';
+      body.textContent='';const m3=document.createElement('span');m3.className='intel-muted';m3.textContent='No similar tasks found yet.';body.appendChild(m3);
       return;
     }
-    body.innerHTML = sim.map(({ t: ot, sim: s }) => `
-      <button type="button" class="similar-task-row" onclick="closeTaskDetail();openTaskDetail(${ot.id})">
-        <span class="st-name">${esc(ot.name.slice(0, 48))}</span>
-        <span class="st-sim">${s.toFixed(2)}</span>
-      </button>`).join('');
+    body.textContent='';
+    sim.forEach(({ t: ot, sim: s }) => {
+      const btn=document.createElement('button');btn.type='button';btn.className='similar-task-row';
+      btn.onclick=function(){closeTaskDetail();openTaskDetail(parseInt(ot.id,10)||0)};
+      const nm=document.createElement('span');nm.className='st-name';nm.textContent=ot.name.slice(0,48);btn.appendChild(nm);
+      const sc=document.createElement('span');sc.className='st-sim';sc.textContent=s.toFixed(2);btn.appendChild(sc);
+      body.appendChild(btn);
+    });
     if(acc) acc.classList.add('open');
   }catch(e){
     if (editingTaskId !== id) return;
-    body.innerHTML = '<span class="intel-muted">Could not load neighbors.</span>';
+    body.textContent='';const m4=document.createElement('span');m4.className='intel-muted';m4.textContent='Could not load neighbors.';body.appendChild(m4);
   }
 }
 
@@ -883,10 +888,11 @@ function renderEffortChips(t,eChips){
 
 function renderTagsEditor(id){
   const t=findTask(id);if(!t)return;
-  const ed=gid('mdTagsEditor');ed.innerHTML='';
+  const ed=gid('mdTagsEditor');ed.textContent='';
   (t.tags||[]).forEach((tag,i)=>{
     const chip=document.createElement('span');chip.className='tag-edit-chip';
-    chip.innerHTML=esc(tag)+'<span class="tag-rm" onclick="removeTag('+id+','+i+')">×</span>';
+    chip.textContent=tag;
+    const rm=document.createElement('span');rm.className='tag-rm';rm.textContent='×';rm.onclick=function(){removeTag(id,i)};chip.appendChild(rm);
     ed.appendChild(chip)
   });
   const inp=document.createElement('input');inp.className='tag-input';inp.placeholder='+ tag';
@@ -985,7 +991,7 @@ function renderBanner(){
   const path=getTaskPath(activeTaskId);
   const bel=gid('bannerTask');
   if(path.length>1){
-    bel.innerHTML='<span class="task-breadcrumb">'+path.slice(0,-1).map(esc).join(' › ')+' › </span>'+esc(t.name);
+    bel.textContent='';const bc=document.createElement('span');bc.className='task-breadcrumb';bc.textContent=path.slice(0,-1).join(' › ')+' › ';bel.appendChild(bc);bel.append(t.name);
   }else{
     bel.textContent=t.name;
   }
@@ -1126,7 +1132,7 @@ document.addEventListener('keydown',e=>{
 // ========== LOG ==========
 function addLog(name,durSec,type){timeLog.unshift({id:++logIdCtr,name,durSec,type,time:timeNow()});renderLog();saveState('user')}
 function removeLog(id){timeLog=timeLog.filter(l=>l.id!==id);renderLog();saveState('user')}
-function renderLog(){const list=gid('logList');list.querySelectorAll('.log-item').forEach(e=>e.remove());if(!timeLog.length){gid('logEmpty').style.display='';return}gid('logEmpty').style.display='none';timeLog.slice(0,40).forEach(l=>{const d=document.createElement('div');d.className='log-item';const col=l.type==='work'?'var(--work)':l.type==='short'?'var(--short)':l.type==='quick'?'#48b5e0':'var(--long)';const lid=l.id||0;d.innerHTML=`<div class="log-dot" style="background:${col}"></div><span class="log-name">${esc(l.name)}</span><span class="log-dur">${fmtShort(l.durSec)}</span><span class="log-time">${esc(l.time)}</span>${lid?`<button class="log-del" onclick="removeLog(${lid})" title="Remove">×</button>`:''}`;list.appendChild(d)})}
+function renderLog(){const list=gid('logList');list.querySelectorAll('.log-item').forEach(e=>e.remove());if(!timeLog.length){gid('logEmpty').style.display='';return}gid('logEmpty').style.display='none';timeLog.slice(0,40).forEach(l=>{const d=document.createElement('div');d.className='log-item';const col=l.type==='work'?'var(--work)':l.type==='short'?'var(--short)':l.type==='quick'?'#48b5e0':'var(--long)';const lid=l.id||0;const dot=document.createElement('div');dot.className='log-dot';dot.style.background=col;d.appendChild(dot);const nm=document.createElement('span');nm.className='log-name';nm.textContent=l.name;d.appendChild(nm);const dur=document.createElement('span');dur.className='log-dur';dur.textContent=fmtShort(l.durSec);d.appendChild(dur);const tm=document.createElement('span');tm.className='log-time';tm.textContent=l.time;d.appendChild(tm);if(lid){const del=document.createElement('button');del.className='log-del';del.title='Remove';del.textContent='�';del.onclick=function(){removeLog(lid)};d.appendChild(del)}list.appendChild(d)})}
 function clearLog(){timeLog=[];renderLog();saveState('user')}
 
 // ========== TAB NAVIGATION ==========
@@ -1196,7 +1202,7 @@ function miniTimerToggle(){
 }
 
 // ========== STATS ==========
-function renderStats(){gid('statPomos').textContent=totalPomos;const fm=Math.floor(totalFocusSec/60);gid('statFocus').textContent=fm>=60?Math.floor(fm/60)+'h '+fm%60+'m':fm+'m';gid('statBreaks').textContent=totalBreaks;const h=gid('historyBlocks');h.innerHTML='';sessionHistory.forEach(s=>{const b=document.createElement('div');b.className='hblock h'+s.type[0];h.appendChild(b)})}
+function renderStats(){gid('statPomos').textContent=totalPomos;const fm=Math.floor(totalFocusSec/60);gid('statFocus').textContent=fm>=60?Math.floor(fm/60)+'h '+fm%60+'m':fm+'m';gid('statBreaks').textContent=totalBreaks;const h=gid('historyBlocks');h.textContent='';sessionHistory.forEach(s=>{const b=document.createElement('div');b.className='hblock h'+s.type[0];h.appendChild(b)})}
 async function resetStats(){
   if(!(await showAppConfirm('Reset today\'s pomodoro stats and time log? Tasks and goals are not affected. A snapshot is archived to Past Days if there is progress to keep.')))return;
   const state={date:todayKey(),totalPomos,totalBreaks,totalFocusSec,goals:goals.map(g=>({text:g.text,done:g.done,doneAt:g.doneAt})),tasks:tasks.map(t=>({name:t.name,totalSec:getTaskElapsed(t),sessions:t.sessions})),timeLog,sessionHistory};

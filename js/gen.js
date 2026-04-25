@@ -5,9 +5,10 @@
 // no analytics, no fetch besides the one-time model weights from the
 // same Hugging Face CDN already used by the embedding model.
 
-const GEN_TRANSFORMERS_CDN = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.1';
-const GEN_CFG_KEY = 'stupind_gen_cfg';
-const GEN_HIST_KEY = 'stupind_gen_history';
+const _GC = window.ODTAULAI_CONFIG || {};
+const GEN_TRANSFORMERS_CDN = _GC.TRANSFORMERS_CDN || 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.1';
+const GEN_CFG_KEY  = (_GC.STORAGE_KEYS && _GC.STORAGE_KEYS.GEN_CFG)     || 'stupind_gen_cfg';
+const GEN_HIST_KEY = (_GC.STORAGE_KEYS && _GC.STORAGE_KEYS.GEN_HISTORY) || 'stupind_gen_history';
 
 // Published instruct-tuned models with ONNX weights. The HuggingFaceTB
 // originals and onnx-community repacks both ship ONNX weights under onnx/.
@@ -43,6 +44,10 @@ let _genLoadAbortCtl = null;
 let _genAbortCtl = null;
 let _genLastError = null;
 let _genStoppingCriteria = null; // InterruptableStoppingCriteria instance (if available)
+// (M5) Sets tracking all concurrent in-flight abort controllers / stopping
+// criteria so genAbort() can cancel every active call, not just the latest.
+const _genActiveAbortCtls = new Set();
+const _genActiveStoppers  = new Set();
 let _genTransformersMod = null;  // cached module handle
 /** Ref-count concurrent genGenerate calls — only clear "busy" when the last in-flight run finishes. */
 let _genGenInFlight = 0;
@@ -348,11 +353,25 @@ function _friendlyGenError(msg, modelId){
 }
 
 /**
- * Cancel an in-flight generation. Uses Transformers.js v3's
+ * Cancel ALL in-flight generation calls. Uses Transformers.js v3's
  * InterruptableStoppingCriteria when available so decoding actually halts
  * (vs. rejecting the promise but letting tokens keep decoding in the bg).
+ *
+ * (M5) Iterates the full Sets so concurrent calls are all cancelled, not
+ * just the most recent one.
  */
 function genAbort(){
+  for(const sc of _genActiveStoppers){
+    if(sc && typeof sc.interrupt === 'function'){
+      try{ sc.interrupt(); }catch(e){}
+    }
+  }
+  for(const ctl of _genActiveAbortCtls){
+    if(ctl){
+      try{ ctl.abort(); }catch(e){}
+    }
+  }
+  // Legacy single-ref compat (genDispose calls genAbort before clearing these)
   if(_genStoppingCriteria && typeof _genStoppingCriteria.interrupt === 'function'){
     try{ _genStoppingCriteria.interrupt(); }catch(e){}
   }
@@ -376,6 +395,7 @@ async function genGenerate(opts){
   _genGenerating = _genGenInFlight > 0;
   const ctl = new AbortController();
   _genAbortCtl = ctl;
+  _genActiveAbortCtls.add(ctl); // (M5)
   if(opts.signal){
     if(opts.signal.aborted){ ctl.abort(); }
     else opts.signal.addEventListener('abort', () => ctl.abort(), { once: true });
@@ -416,6 +436,7 @@ async function genGenerate(opts){
       if(mod && mod.InterruptableStoppingCriteria){
         stopping = new mod.InterruptableStoppingCriteria();
         _genStoppingCriteria = stopping;
+        _genActiveStoppers.add(stopping); // (M5)
       }
     }catch(e){
       // streaming/stopping criteria are best-effort; generation still works without them.
@@ -440,8 +461,10 @@ async function genGenerate(opts){
     }
     return '';
   } finally {
-    // Clear stopping criteria / abort handle only for this call — other concurrent
-    // genGenerate runs may have replaced them.
+    // (M5) Remove this call's handles from the active sets AND clear the
+    // legacy single-ref when it still points at this call's instance.
+    _genActiveAbortCtls.delete(ctl);
+    if(stopping) _genActiveStoppers.delete(stopping);
     if(stopping && _genStoppingCriteria === stopping) _genStoppingCriteria = null;
     if(_genAbortCtl === ctl) _genAbortCtl = null;
     _genGenInFlight = Math.max(0, _genGenInFlight - 1);
@@ -801,6 +824,28 @@ async function genExplainMove(task, listName){
   return _genTextCall({ system: sys, user, maxTokens: 40, temperature: 0.3 });
 }
 
+// ── Explicit disposal (M1 + M4) ───────────────────────────────────────────────
+// Releases the generative pipeline and its GPU/WASM context.  Called
+// automatically on tab close but also exposed as `genDispose()` so callers can
+// proactively free memory after heavy generation runs on constrained devices.
+function genDispose(){
+  // Abort any in-flight generation first
+  genAbort();
+  if(_genPipe && typeof _genPipe.dispose === 'function'){
+    try{ _genPipe.dispose(); }catch(_){}
+  }
+  _genPipe = null;
+  _genReady = false;
+  _genGenerating = false;
+  _genGenInFlight = 0;
+  _genDevice = null;
+  _genModelId = null;
+  _genStoppingCriteria = null;
+  _genAbortCtl = null;
+  _genActiveAbortCtls.clear(); // (M5)
+  _genActiveStoppers.clear();  // (M5)
+}
+
 if(typeof window !== 'undefined'){
   window.GEN_MODEL_PRESETS = GEN_MODEL_PRESETS;
   window.GEN_MODEL_ALT_SLUGS = GEN_MODEL_ALT_SLUGS;
@@ -810,6 +855,7 @@ if(typeof window !== 'undefined'){
   window.genLoad = genLoad;
   window.genAbortLoad = genAbortLoad;
   window.genGenerate = genGenerate;
+  window.genDispose = genDispose;
   window.parseQwen25ToolCallBlocks = parseQwen25ToolCallBlocks;
   window.isGenModelNativeQwen25Tools = isGenModelNativeQwen25Tools;
   window.genAbort = genAbort;
@@ -840,4 +886,9 @@ if(typeof window !== 'undefined'){
   window._genExtractFirstLine  = _extractFirstLine;
   window._genStripCodeFences   = _stripCodeFences;
   window._formatGenTextCallOutput = _formatGenTextCallOutput;
+
+  // ── Cleanup on tab close (M1) ───────────────────────────────────────────────
+  window.addEventListener('beforeunload', () => {
+    genDispose();
+  });
 }

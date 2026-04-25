@@ -20,7 +20,7 @@ function loadGen(storage = {}, navOverride = null) {
     setItem: (k, v) => { storage[k] = String(v); },
     removeItem: (k) => { delete storage[k]; },
   };
-  const win = {};
+  const win = { addEventListener: () => {}, removeEventListener: () => {} };
   const ctx = { window: win, localStorage: fakeLocalStorage, console, caches: undefined };
   if (navOverride) ctx.navigator = navOverride;
   const fn = new Function(...Object.keys(ctx), src);

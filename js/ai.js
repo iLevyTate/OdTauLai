@@ -1,7 +1,7 @@
 // ========== AMBIENT INTELLIGENCE (embeddings + rules — no generative LLM) ==========
 // Preview/undo, Schwartz values UI, smart-add chips. Task mutations via executeIntelOp.
 
-const INTEL_CFG_KEY = 'stupind_intel_cfg';
+const INTEL_CFG_KEY = (window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.INTEL_CFG) || 'stupind_intel_cfg';
 
 // LIFE_CATS, CAT_ICON, SCHWARTZ, VALUE_KEYS — globals from intel-features.js
 

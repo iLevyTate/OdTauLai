@@ -36,7 +36,7 @@ function loadGen(storage = {}) {
     setItem: (k, v) => { storage[k] = String(v); },
     removeItem: (k) => { delete storage[k]; },
   };
-  const win = {};
+  const win = { addEventListener: () => {}, removeEventListener: () => {} };
   const ctx = { window: win, localStorage: fakeLocalStorage, console, caches: undefined };
   const fn = new Function(...Object.keys(ctx), genSrc);
   fn(...Object.values(ctx));

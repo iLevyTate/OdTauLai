@@ -9,6 +9,7 @@ const ASSETS = [
   './css/main.css',
   './js/version.js',
   './js/pwa.js',
+  './js/config.js',
   './js/icons.js',
   './js/utils.js',
   './js/storage.js',
@@ -77,7 +78,7 @@ self.addEventListener('fetch', e => {
           }
           return res;
         })
-        .catch(() => caches.match('./index.html') || caches.match(e.request))
+        .catch(() => caches.match('./index.html').then(r => r || caches.match(e.request)))
     );
     return;
   }
