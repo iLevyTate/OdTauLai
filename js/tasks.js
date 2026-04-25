@@ -884,7 +884,8 @@ async function addList(){
   lists.push({id:++listIdCtr,name:String(name).trim(),color,description,lastModified:Date.now()});
   activeListId=listIdCtr;
   if(typeof invalidateListVectorCache==='function')invalidateListVectorCache();
-  renderLists();renderTaskList();saveState('user')
+  renderLists();renderTaskList();saveState('user');
+  if(typeof renderAIPanel==='function') renderAIPanel();
 }
 async function editList(id){
   event&&event.stopPropagation();
@@ -898,7 +899,8 @@ async function editList(id){
   l.description=String(descriptionRaw).trim();
   l.lastModified=Date.now();
   if(typeof invalidateListVectorCache==='function')invalidateListVectorCache();
-  renderLists();renderTaskList();saveState('user')
+  renderLists();renderTaskList();saveState('user');
+  if(typeof renderAIPanel==='function') renderAIPanel();
 }
 async function removeList(id){
   event&&event.stopPropagation();
@@ -912,7 +914,8 @@ async function removeList(id){
   tasks.forEach(t=>{if(t.listId===id)t.listId=fallbackId});
   if(activeListId===id)activeListId=fallbackId;
   if(typeof invalidateListVectorCache==='function')invalidateListVectorCache();
-  renderLists();renderTaskList();saveState('user')
+  renderLists();renderTaskList();saveState('user');
+  if(typeof renderAIPanel==='function') renderAIPanel();
 }
 function switchList(id){activeListId=id;renderLists();renderTaskList();saveState('user')}
 function renderLists(){
