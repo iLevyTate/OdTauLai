@@ -432,11 +432,20 @@ function _alldayRangeCovers(ev, isoDate){
 function getCalFeedEventsForDate(isoDate){
   _loadCalFeeds();
   const out = [];
+  // G-19: optional "hide past" filter — drops timed events that already ended.
+  // Read from cfg if present; otherwise no-op so callers (like LLM context
+  // builders) get the unfiltered set.
+  const hidePast = !!(typeof cfg === 'object' && cfg && cfg.calHidePast);
+  const now = Date.now();
   _calFeeds.feeds.forEach(feed => {
     if(!feed.visible) return;
     (feed.events || []).forEach(ev => {
       if(ev.exdateList && ev.exdateList.includes && ev.exdateList.includes(isoDate)) return;
       if(ev.dateISO === isoDate || _alldayRangeCovers(ev, isoDate)){
+        if(hidePast && !ev.allDay){
+          const endMs = _calEventEndMs(ev);
+          if(endMs && endMs < now) return;
+        }
         out.push({ ...ev, feedId: feed.id, feedLabel: feed.label, feedColor: feed.color });
       }
     });
@@ -711,12 +720,34 @@ function renderCalFeedsPanel(){
       <ol start="5" style="font-size:11px;line-height:1.6;padding-left:18px;color:var(--text-3)">
         <li>Click <strong>Save and deploy</strong></li>
         <li>Copy your Worker URL (looks like <code>ical-proxy.your-name.workers.dev</code>)</li>
-        <li>In ODTAULAI, paste it in the "CORS proxy URL" field above, appending <code>?url=</code></li>
+        <li>In OdTauLai, paste it in the "CORS proxy URL" field above, appending <code>?url=</code></li>
       </ol>
       <p style="font-size:11px;color:var(--text-3)"><strong>Privacy note:</strong> This Worker only forwards requests to <code>calendar.google.com</code>. You're the only one using it. Cloudflare's free tier gives 100k requests/day, more than enough for personal use.</p>
     </div>
   `;
+  // G-19: hide-past toggle, prepended via DOM (not template literal) so it
+  // isn't part of any innerHTML interpolation.
+  const hidePast = !!(typeof cfg === 'object' && cfg && cfg.calHidePast);
+  const togWrap = document.createElement('label');
+  togWrap.className = 'task-tb-check';
+  togWrap.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-3);margin-bottom:10px';
+  const togCb = document.createElement('input');
+  togCb.type = 'checkbox';
+  togCb.id = 'calHidePast';
+  togCb.checked = hidePast;
+  togCb.onchange = function(){ toggleCalHidePast(); };
+  togWrap.append(togCb, document.createTextNode(' Hide past events'));
+  panel.insertBefore(togWrap, panel.firstChild);
 }
+
+function toggleCalHidePast(){
+  const cb = document.getElementById('calHidePast');
+  if(typeof cfg !== 'object' || !cfg) return;
+  cfg.calHidePast = !!(cb && cb.checked);
+  if(typeof saveState === 'function') saveState('user');
+  if(typeof renderTaskList === 'function') renderTaskList();
+}
+window.toggleCalHidePast = toggleCalHidePast;
 
 // Wire up mode tabs in the add-feed form
 function calFeedMode(btn, mode){
@@ -798,7 +829,7 @@ async function confirmRemoveCalFeed(feedId){
   _loadCalFeeds();
   const f = _calFeeds.feeds.find(x => x.id === feedId);
   if(!f) return;
-  const q = `Remove "${f.label}"? This only removes it from ODTAULAI — your actual calendar is unaffected.`;
+  const q = `Remove "${f.label}"? This only removes it from OdTauLai — your actual calendar is unaffected.`;
   const ok = typeof showAppConfirm === 'function' ? await showAppConfirm(q) : confirm(q);
   if(!ok) return;
   removeCalFeed(feedId);
