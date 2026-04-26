@@ -7,7 +7,7 @@ const ASK_MAX_OPS = 50;
 
 const TOOL_SCHEMA = {
   CREATE_TASK:    { required:['name'], optional:['priority','category','dueDate','effort','tags','listId','description','type','parentId'], destructive:false, readOnly:false },
-  UPDATE_TASK:    { required:['id'],   optional:['name','priority','status','dueDate','startDate','effort','energyLevel','category','description','url','estimateMin','starred','type','valuesAlignment','valuesNote','tags'], destructive:false, readOnly:false },
+  UPDATE_TASK:    { required:['id'],   optional:['name','priority','status','dueDate','startDate','hiddenUntil','effort','energyLevel','category','description','url','estimateMin','starred','type','valuesAlignment','valuesNote','tags'], destructive:false, readOnly:false },
   MARK_DONE:      { required:['id'],   optional:['completionNote'], destructive:false, readOnly:false },
   REOPEN:         { required:['id'],   optional:[], destructive:false, readOnly:false },
   TOGGLE_STAR:    { required:['id'],   optional:[], destructive:false, readOnly:false },
@@ -48,7 +48,7 @@ const ENUM_FIELDS = {
   effort:   ['xs','s','m','l','xl'],
   energyLevel: ['high','low'],
   type:     ['task','bug','idea','errand','waiting'],
-  recur:    ['daily','weekdays','weekly','monthly'],
+  recur:    ['daily','weekdays','weekly','monthly','after1d','after3d','after7d','after14d','after30d'],
 };
 
 function _coerceInt(v){
@@ -132,7 +132,7 @@ function _coerceArg(key, raw, ctx){
   if(key === 'tags') return _coerceTags(raw);
   if(key === 'valuesAlignment') return _coerceStrArr(raw);
   if(key === 'starred'){ const b = _coerceBool(raw); return b == null ? null : b; }
-  if(key === 'dueDate' || key === 'startDate') return _coerceDate(raw);
+  if(key === 'dueDate' || key === 'startDate' || key === 'hiddenUntil') return _coerceDate(raw);
   if(key === 'remindAt') return _coerceDateTime(raw);
   if(key === 'priority' || key === 'status' || key === 'effort' || key === 'energyLevel' || key === 'type' || key === 'recur'){
     const s = String(raw).toLowerCase().trim();

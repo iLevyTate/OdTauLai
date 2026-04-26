@@ -877,6 +877,51 @@ async function genExplainMove(task, listName){
 
 // ── Explicit disposal (M1 + M4) ───────────────────────────────────────────────
 // Releases the generative pipeline and its GPU/WASM context.  Called
+// G-9: Rephrase a task title for clarity / imperative form.
+async function genRephrase(task){
+  if(!_genReady) return null;
+  const sys = 'You rewrite a to-do task title to be a clear, concise imperative. '
+    + 'Keep it under 90 characters. Preserve specifics (names, dates, numbers). '
+    + 'No preamble, no quotes — return ONLY the rewritten title.';
+  const user = 'Original title: ' + JSON.stringify(String(task.name || '').slice(0, 200))
+    + (task.description ? '\nDescription (context only): ' + JSON.stringify(String(task.description).slice(0, 300)) : '');
+  const out = await _genTextCall({ system: sys, user, maxTokens: 48, temperature: 0.3 });
+  if(typeof out !== 'string') return null;
+  const cleaned = out.trim().replace(/^['"]|['"]$/g, '').slice(0, 200);
+  return cleaned || null;
+}
+
+// G-10: Daily-brief — short prose summary using already-ranked top tasks.
+async function genDailyBrief(opts){
+  if(!_genReady) return null;
+  const o = opts || {};
+  const sys = 'You write a 3-line daily brief for the user. '
+    + 'Line 1: top priority for today (one short sentence). '
+    + 'Line 2: anything overdue or blocked. '
+    + 'Line 3: a one-sentence pep talk grounded in today\'s actual context. '
+    + 'No preamble, no markdown headers, no greetings. Use the user\'s tasks verbatim where you reference them.';
+  const user = 'Top tasks (ranked): ' + JSON.stringify((o.topTasks || []).slice(0, 5))
+    + '\nDue-today count: ' + (o.dueTodayCount || 0)
+    + '\nOverdue count: ' + (o.overdueCount || 0)
+    + '\nBlocked count: ' + (o.blockedCount || 0)
+    + '\nUpcoming events: ' + JSON.stringify((o.events || []).slice(0, 3));
+  return _genTextCall({ system: sys, user, maxTokens: 220, temperature: 0.4 });
+}
+
+// G-11: Weekly review — prose summary over the last 7 days.
+async function genWeeklyReview(opts){
+  if(!_genReady) return null;
+  const o = opts || {};
+  const sys = 'You write a candid weekly review for the user in 4–6 short bullets. '
+    + 'Cover: what got done, what stalled, recurring patterns (e.g. tasks reopened or repeatedly snoozed), '
+    + 'and one concrete suggestion for next week. Reference task names verbatim. No preamble.';
+  const user = 'Completed this week (' + (o.doneCount || 0) + '): ' + JSON.stringify((o.done || []).slice(0, 12))
+    + '\nReopened: ' + JSON.stringify((o.reopened || []).slice(0, 6))
+    + '\nStill open & blocked: ' + JSON.stringify((o.blocked || []).slice(0, 6))
+    + '\nStill open & untouched 7+ days: ' + JSON.stringify((o.stuck || []).slice(0, 6));
+  return _genTextCall({ system: sys, user, maxTokens: 360, temperature: 0.4 });
+}
+
 // automatically on tab close but also exposed as `genDispose()` so callers can
 // proactively free memory after heavy generation runs on constrained devices.
 function genDispose(){
@@ -933,6 +978,9 @@ if(typeof window !== 'undefined'){
   window.genBreakdownTask = genBreakdownTask;
   window.genExplainRanking = genExplainRanking;
   window.genExplainMove = genExplainMove;
+  window.genRephrase = genRephrase;
+  window.genDailyBrief = genDailyBrief;
+  window.genWeeklyReview = genWeeklyReview;
   window._genExtractJsonObject = _extractJsonObject;
   window._genExtractFirstLine  = _extractFirstLine;
   window._genStripCodeFences   = _stripCodeFences;

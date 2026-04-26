@@ -364,7 +364,7 @@ function executeIntelOp(op){
     case 'UPDATE_TASK':{
       const t = findTask(a.id); if(!t) return null;
       snap = { type: 'updated', id: t.id, before: { ...t } };
-      const allow = ['name','priority','status','dueDate','startDate','effort','energyLevel','category','description','url','estimateMin','starred','type','valuesAlignment','valuesNote','tags'];
+      const allow = ['name','priority','status','dueDate','startDate','hiddenUntil','effort','energyLevel','category','description','url','estimateMin','starred','type','valuesAlignment','valuesNote','tags'];
       allow.forEach(f => { if(a[f] !== undefined) t[f] = a[f]; });
       if(t.status === 'done' && !t.completedAt) t.completedAt = stampCompletion();
       if(t.status !== 'done') t.completedAt = null;
@@ -517,9 +517,9 @@ function executeIntelOp(op){
     case 'SNOOZE_TASK':{
       const t = findTask(a.id); if(!t) return null;
       snap = { type: 'updated', id: t.id, before: { ...t } };
-      if(a.untilDate) t.dueDate = a.untilDate;
-      t.remindAt = null;
-      t.reminderFired = false;
+      // Snooze hides until a date — the deadline (dueDate) and reminder
+      // are intentionally untouched. Use RESCHEDULE for due-date moves.
+      if(a.untilDate) t.hiddenUntil = a.untilDate;
       break;
     }
     case 'RESCHEDULE':{
@@ -2298,7 +2298,7 @@ function toggleGenEnabled(){
   } else if(typeof intelLoad === 'function' && typeof isIntelReady === 'function' && !isIntelReady()){
     // When enabling, warm up the embedding loader in the background so the
     // first Ask turn has semantic retrieval ready. Cheap no-op if loaded.
-    intelLoad(() => {}).catch(() => {});
+    intelLoad(() => {}).catch(e => console.warn('[ai] embedding warmup failed', e));
   }
   renderGenSettings();
 }
@@ -2478,6 +2478,7 @@ async function genAutoRehydrateIfCached(){
     if(typeof syncAskPromoChip === 'function') syncAskPromoChip();
     if(typeof maybeShowEnhanceBtn === 'function') maybeShowEnhanceBtn();
   }catch(e){
+    console.warn('[ai] LLM auto-rehydrate failed', e);
     if(typeof syncGenChip === 'function') syncGenChip('idle', '');
   }finally{
     clearTimeout(ribbonTimeout);
@@ -2486,7 +2487,7 @@ async function genAutoRehydrateIfCached(){
 }
 
 function _scheduleGenAutoRehydrate(){
-  const run=()=>{ genAutoRehydrateIfCached().catch(function(){}); };
+  const run=()=>{ genAutoRehydrateIfCached().catch(e => console.warn('[ai] auto-rehydrate scheduler', e)); };
   if(typeof requestIdleCallback==='function') requestIdleCallback(run,{timeout:4000});
   else setTimeout(run, 500);
 }

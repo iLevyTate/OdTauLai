@@ -717,6 +717,50 @@ async function predictMetadata(taskName, k){
   });
 }
 
+/**
+ * G-8: Suggest a dueDate by looking at the median offset (in days from
+ * creation) of similar past tasks with due dates. Returns YYYY-MM-DD or null.
+ *
+ * Heuristic: take top-K most-similar tasks that had a dueDate; compute their
+ * (dueDate − created) in days; use the median, clamped to [0, 90]. We project
+ * forward from *today*, not from the source's creation date.
+ */
+async function predictDueDate(taskName, k){
+  if(typeof embedText !== 'function' || typeof embedStore === 'undefined' || !embedStore || typeof cosine !== 'function') return null;
+  const q = await embedText(taskName);
+  if(!q) return null;
+  const store = await embedStore.all();
+  const scored = [];
+  for(const [id, rec] of store){
+    if(!rec || !rec.vec || rec.vec.length !== q.length) continue;
+    const t = typeof findTask === 'function' ? findTask(id) : null;
+    if(!t || t.archived || !t.dueDate || !t.created) continue;
+    scored.push({ t, sim: cosine(q, rec.vec) });
+  }
+  scored.sort((a, b) => b.sim - a.sim);
+  const top = scored.slice(0, k || 8).filter(x => x.sim > 0.5);
+  if(top.length < 3) return null; // need a quorum to avoid noise
+  // Compute relative offsets in days
+  const offsets = [];
+  for(const { t } of top){
+    try{
+      const dDue = new Date(t.dueDate + 'T00:00:00').getTime();
+      const dCreated = new Date(String(t.created).slice(0, 10) + 'T00:00:00').getTime();
+      if(!Number.isFinite(dDue) || !Number.isFinite(dCreated)) continue;
+      const diff = Math.round((dDue - dCreated) / 86400000);
+      if(diff >= 0 && diff <= 365) offsets.push(diff);
+    }catch(_){}
+  }
+  if(offsets.length < 3) return null;
+  offsets.sort((a, b) => a - b);
+  const median = offsets[Math.floor(offsets.length / 2)];
+  const clamped = Math.max(0, Math.min(90, median));
+  const today = new Date();
+  today.setDate(today.getDate() + clamped);
+  return today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+}
+if(typeof window !== 'undefined') window.predictDueDate = predictDueDate;
+
 async function semanticSearch(query, limit){
   const lim = limit || 20;
   const q = await embedText(query);
