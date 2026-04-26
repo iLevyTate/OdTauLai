@@ -943,6 +943,7 @@ async function addList(){
   activeListId=listIdCtr;
   if(typeof invalidateListVectorCache==='function')invalidateListVectorCache();
   renderLists();renderTaskList();saveState('user');
+  if(typeof renderListsManager==='function') renderListsManager();
   if(typeof renderAIPanel==='function') renderAIPanel();
 }
 async function editList(id){
@@ -958,6 +959,7 @@ async function editList(id){
   l.lastModified=Date.now();
   if(typeof invalidateListVectorCache==='function')invalidateListVectorCache();
   renderLists();renderTaskList();saveState('user');
+  if(typeof renderListsManager==='function') renderListsManager();
   if(typeof renderAIPanel==='function') renderAIPanel();
 }
 async function removeList(id){
@@ -973,6 +975,7 @@ async function removeList(id){
   if(activeListId===id)activeListId=fallbackId;
   if(typeof invalidateListVectorCache==='function')invalidateListVectorCache();
   renderLists();renderTaskList();saveState('user');
+  if(typeof renderListsManager==='function') renderListsManager();
   if(typeof renderAIPanel==='function') renderAIPanel();
 }
 function switchList(id){activeListId=id;renderLists();renderTaskList();saveState('user')}
@@ -980,14 +983,13 @@ function renderLists(){
   const bar=gid('listsBar');if(!bar)return;
   ensureDefaultList();
   bar.textContent='';
-  // Hide the whole bar when only 1 list OR when only 1 list has tasks
-  // — reduces visual noise for simple single-list users
-  const listsWithTasks=lists.filter(l=>tasks.some(t=>t.listId===l.id&&!t.archived));
-  if(lists.length<=1||listsWithTasks.length<=1){
-    bar.style.display='none';
-    return;
-  }
   bar.style.display='';
+  // Render a chip per list. Even with one list we render its chip so the user
+  // can always see what list their tasks belong to and where the +List button
+  // is. The ✕ delete control is suppressed when only one list exists so the
+  // user can't strand themselves (removeList already guards against this, but
+  // hiding the affordance is clearer).
+  const onlyOne=lists.length<=1;
   lists.forEach(l=>{
     const count=tasks.filter(t=>t.listId===l.id&&(!t.parentId)).length;
     const chip=document.createElement('button');
@@ -1007,25 +1009,87 @@ function renderLists(){
     edit.title='Edit name + description';
     edit.textContent='✎';
     edit.onclick=function(e){if(e)e.stopPropagation();editList(l.id)};
-    const rm=document.createElement('span');
-    rm.className='lc-rm';
-    rm.textContent='✕';
-    rm.onclick=function(e){if(e)e.stopPropagation();removeList(l.id)};
-    chip.replaceChildren(dot,nameNode,cnt,edit,rm);
+    const kids=[dot,nameNode,cnt,edit];
+    if(!onlyOne){
+      const rm=document.createElement('span');
+      rm.className='lc-rm';
+      rm.textContent='✕';
+      rm.title='Delete this list';
+      rm.onclick=function(e){if(e)e.stopPropagation();removeList(l.id)};
+      kids.push(rm);
+    }
+    chip.replaceChildren(...kids);
     bar.appendChild(chip)
   });
   const add=document.createElement('button');
-  add.className='list-add';add.textContent='+ List';add.onclick=addList;
+  add.className='list-add';
+  add.type='button';
+  add.textContent='+ List';
+  add.title='Add a new list (e.g. Research, School, Side Project) with an optional description that helps Auto-organize route tasks here.';
+  add.onclick=addList;
   bar.appendChild(add);
-  // G-7: visible focus-on-list toggle next to the +List button
-  const focus=document.createElement('button');
-  const focusOn=!!(typeof cfg==='object'&&cfg&&cfg.focusListMode);
-  focus.className='list-focus-toggle'+(focusOn?' on':'');
-  focus.type='button';
-  focus.title=focusOn?'Exit focus-on-list mode':'Hide every list except the active one';
-  focus.textContent=focusOn?'◉ Focus':'◎ Focus';
-  focus.onclick=function(){ if(typeof toggleFocusListMode==='function') toggleFocusListMode(); };
-  bar.appendChild(focus);
+  // G-7: focus-on-list toggle is meaningless with a single list — only show
+  // it once there's actually something to scope to.
+  if(!onlyOne){
+    const focus=document.createElement('button');
+    const focusOn=!!(typeof cfg==='object'&&cfg&&cfg.focusListMode);
+    focus.className='list-focus-toggle'+(focusOn?' on':'');
+    focus.type='button';
+    focus.title=focusOn?'Exit focus-on-list mode':'Hide every list except the active one';
+    focus.textContent=focusOn?'◉ Focus':'◎ Focus';
+    focus.onclick=function(){ if(typeof toggleFocusListMode==='function') toggleFocusListMode(); };
+    bar.appendChild(focus);
+  }
+}
+
+/**
+ * Settings → Lists manager. Renders one row per list (color · name · description
+ * preview · Edit / Delete) plus an "+ Add list" button. Mirrors the chip-bar
+ * controls so users who instinctively look in Settings (alongside Life areas)
+ * can find list management there too.
+ */
+function renderListsManager(){
+  const root=gid('listsManager');
+  if(!root) return;
+  ensureDefaultList();
+  root.textContent='';
+  const onlyOne=lists.length<=1;
+  lists.forEach(l=>{
+    const row=document.createElement('div');
+    row.className='lists-mgr-row';
+    const dot=document.createElement('span');
+    dot.className='lists-mgr-dot';
+    dot.style.background=sanitizeListColor(l.color);
+    const meta=document.createElement('div');
+    meta.className='lists-mgr-meta';
+    const nm=document.createElement('div');
+    nm.className='lists-mgr-name';
+    nm.textContent=l.name;
+    meta.appendChild(nm);
+    const desc=document.createElement('div');
+    desc.className='lists-mgr-desc';
+    desc.textContent=l.description?l.description:'No description — add one to help Auto-organize route tasks here.';
+    if(!l.description) desc.classList.add('lists-mgr-desc--empty');
+    meta.appendChild(desc);
+    const count=tasks.filter(t=>t.listId===l.id&&!t.archived&&!t.parentId).length;
+    const cnt=document.createElement('span');
+    cnt.className='lists-mgr-count';
+    cnt.textContent=count+(count===1?' task':' tasks');
+    const editBtn=document.createElement('button');
+    editBtn.type='button';
+    editBtn.className='btn-ghost btn-sm';
+    editBtn.textContent='Edit';
+    editBtn.onclick=function(){ editList(l.id); };
+    const delBtn=document.createElement('button');
+    delBtn.type='button';
+    delBtn.className='btn-ghost btn-sm lists-mgr-del';
+    delBtn.textContent='Delete';
+    delBtn.disabled=onlyOne;
+    delBtn.title=onlyOne?'You need at least one list':'Delete this list (its tasks move to the first remaining list)';
+    delBtn.onclick=function(){ removeList(l.id); };
+    row.replaceChildren(dot,meta,cnt,editBtn,delBtn);
+    root.appendChild(row);
+  });
 }
 
 // Filter/Sort/Search

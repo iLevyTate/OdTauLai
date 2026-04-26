@@ -11,6 +11,7 @@ function toggleSettings(){
     const cap=Math.floor(window.innerHeight*0.92);
     body.style.maxHeight=Math.min(body.scrollHeight+8,cap)+'px';
     if(typeof renderClassificationSettings==='function') renderClassificationSettings();
+    if(typeof renderListsManager==='function') renderListsManager();
   }else{
     body.style.maxHeight='0';
     body.style.overflowY='';
