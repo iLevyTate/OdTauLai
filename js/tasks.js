@@ -227,13 +227,42 @@ async function addTask(){
   },defaultTaskProps(),props);
   tasks.push(_newT);
   _taskIndexRegister(_newT);
-  inp.value='';maybeShowSwipeTip();
+  inp.value='';
+  // Brain-dump mode: keep focus in the input so the mobile keyboard stays up
+  // and the next task can be typed immediately. Without this, every Enter
+  // dismisses the keyboard on iOS/Android.
+  try{ inp.focus({preventScroll:true}); }catch(_){ inp.focus(); }
+  // Clear any live parse-preview chips left over from this entry.
+  if(typeof clearLiveParsePreview==='function') clearLiveParsePreview();
+  maybeShowSwipeTip();
   if(typeof cfg==='object'&&cfg&&!cfg.qaHintHidden){
     cfg.qaHintTaskCount=(cfg.qaHintTaskCount||0)+1;
     if(cfg.qaHintTaskCount>=3) cfg.qaHintHidden=true;
   }
   if(typeof syncQaHintVisibility==='function') syncQaHintVisibility();
-  renderTaskList();saveState('user')
+  // Hint to renderTaskItem: animate this card on the upcoming render and
+  // scroll it into view. The flag self-clears in the renderer.
+  window._lastAddedTaskId=_newT.id;
+  renderTaskList();
+  // a11y: announce the add to screen readers via the polite live region.
+  if(typeof announceTaskAdd==='function') announceTaskAdd(_newT.name);
+  // Undo affordance: a 5-second window to recover from an accidental Enter.
+  // Mirrors Gmail's "Undo Send". Captures the new ID up-front so the closure
+  // doesn't go stale if the user adds another task before the undo fires.
+  if(typeof showActionToast==='function'){
+    const _undoId = _newT.id;
+    showActionToast('Task added', 'Undo', () => {
+      const idx = tasks.findIndex(x => x.id === _undoId);
+      if(idx >= 0){
+        tasks.splice(idx, 1);
+        if(typeof _taskIndexRemove === 'function') _taskIndexRemove(_undoId);
+        renderTaskList();
+        saveState('user');
+        if(typeof announce === 'function') announce('Task removed');
+      }
+    }, 5000);
+  }
+  saveState('user')
 }
 
 function showQaHint(){
@@ -255,6 +284,97 @@ function syncQaHintVisibility(){
 }
 window.showQaHint=showQaHint;
 window.syncQaHintVisibility=syncQaHintVisibility;
+
+/**
+ * Keyboard handler for the task input. Centralized here so the inline HTML
+ * stays small and the behavior is testable.
+ *
+ *   Enter         → addTask() (or applySmartAddAndSubmit when LLM preview exists)
+ *   Escape        → clear the input (a quick discard of an aborted thought)
+ *   Cmd/Ctrl+Enter → reserved for "add and open detail" — see follow-up
+ */
+function onTaskInputKey(event){
+  if(event.key==='Enter' && !event.isComposing){
+    if(window._smartAddPreview) applySmartAddAndSubmit();
+    else addTask();
+    return;
+  }
+  if(event.key==='Escape'){
+    const inp=event.target;
+    if(inp && inp.value){
+      event.preventDefault();
+      inp.value='';
+      if(typeof clearLiveParsePreview==='function') clearLiveParsePreview();
+      if(typeof maybeShowEnhanceBtn==='function') maybeShowEnhanceBtn();
+    }
+  }
+}
+window.onTaskInputKey=onTaskInputKey;
+
+/**
+ * Live parse-token preview. Runs the synchronous parseQuickAdd against the
+ * current input text and renders chips for every token it matched
+ * (priority, tags, star, recurrence, due-date). Gives users visible
+ * confirmation that "@urgnet" (a typo) didn't match while "@urgent" did.
+ *
+ * All chip text is set via textContent to avoid any XSS surface — chip
+ * structure is built with createElement, never innerHTML.
+ */
+function _qpcChip(cls, text, title){
+  const s = document.createElement('span');
+  s.className = 'qpc qpc--' + cls;
+  if(title) s.title = title;
+  s.textContent = text;
+  return s;
+}
+function updateLiveParsePreview(){
+  const inp=gid('taskInput');
+  const host=gid('qaParseChips');
+  if(!inp||!host) return;
+  const raw=inp.value;
+  if(!raw||raw.length<2){ clearLiveParsePreview(); return; }
+  const {props,name}=parseQuickAdd(raw);
+  // Build offline so we can decide whether to show the row at all.
+  const chips=[];
+  if(props.priority){
+    const cls = ({urgent:'danger',high:'warning',normal:'accent',low:'muted'})[props.priority] || 'accent';
+    chips.push(_qpcChip(cls, '@'+props.priority, 'Priority'));
+  }
+  if(props.tags && props.tags.length){
+    props.tags.forEach(t => chips.push(_qpcChip('tag', '#'+t, 'Tag')));
+  }
+  if(props.starred) chips.push(_qpcChip('star', '★', 'Pinned to top'));
+  if(props.recur)   chips.push(_qpcChip('recur', '↻ '+props.recur, 'Repeats'));
+  if(props.dueDate){
+    let label=props.dueDate;
+    if(typeof prettyDate==='function'){ try{ label=prettyDate(props.dueDate); }catch(_){} }
+    chips.push(_qpcChip('due', label, 'Due date'));
+  }
+  if(!chips.length){ clearLiveParsePreview(); return; }
+  // Build via DOM, not innerHTML — keeps user-controlled text safe even though
+  // parseQuickAdd already strips/normalizes its outputs.
+  host.replaceChildren();
+  if(name && name !== raw){
+    const n = document.createElement('span');
+    n.className = 'qpc-name';
+    n.title = 'Task title (after token strip)';
+    n.textContent = name;
+    host.appendChild(n);
+  }
+  const list = document.createElement('span');
+  list.className = 'qpc-list';
+  chips.forEach(c => list.appendChild(c));
+  host.appendChild(list);
+  host.hidden = false;
+}
+function clearLiveParsePreview(){
+  const host=gid('qaParseChips');
+  if(!host) return;
+  host.replaceChildren();
+  host.hidden=true;
+}
+window.updateLiveParsePreview=updateLiveParsePreview;
+window.clearLiveParsePreview=clearLiveParsePreview;
 
 const SWIPE_TIP_KEY = (window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.SWIPE_TIP_DISMISSED) || 'odtaulai_swipe_tip_dismissed';
 function maybeShowSwipeTip(){
@@ -309,6 +429,15 @@ function openBulkImportModal(items, skippedLong){
   ta.oninput = _updateBulkImportButtonState;
   ov.classList.add('open');
   setTimeout(() => ta.focus(), 30);
+  // Modal focus management — trap Tab/Shift+Tab inside the dialog so users
+  // can't accidentally tab back to the page behind it.
+  if(typeof installTabTrap === 'function') setTimeout(() => installTabTrap(ov), 40);
+  if(typeof openFocusTrap !== 'function' && typeof installTabTrap !== 'function'){
+    // Both utils unavailable — leave focus management to the user agent.
+  }
+  // Capture previous focus manually so we can restore on close even if the
+  // trap util chose skipPrevFocus mode.
+  ov._prevFocus = document.activeElement;
 }
 
 function _updateBulkImportButtonState(){
@@ -327,6 +456,12 @@ function closeBulkImportModal(){
   if(ov) ov.classList.remove('open');
   const ta = gid('bulkImportTextarea');
   if(ta) ta.oninput = null;
+  if(typeof removeTabTrap === 'function') removeTabTrap();
+  // Restore focus to whatever launched the modal (the task input, typically).
+  if(ov && ov._prevFocus){
+    try { ov._prevFocus.focus(); } catch(_){}
+    ov._prevFocus = null;
+  }
 }
 
 async function confirmBulkImport(){
@@ -592,6 +727,22 @@ async function removeTask(id){
       activeTaskId=null;taskStartedAt=null;
     }
     toArchive.forEach(tid=>{const t=findTask(tid);if(t)t.archived=true});
+    // Undo affordance for accidental misfires (the × button is small).
+    // Skip the toast when descendants forced a confirm dialog — the user
+    // already deliberated. Skip in archive view too (different context).
+    if(typeof showActionToast==='function' && descendants.length===0 && smartView!=='archived'){
+      const _undoIds=toArchive.slice();
+      const _name=task.name;
+      showActionToast('Task archived', 'Undo', () => {
+        _undoIds.forEach(uid => {
+          const t = findTask(uid);
+          if(t) t.archived = false;
+        });
+        renderTaskList();
+        saveState('user');
+        if(typeof announce === 'function') announce('Restored: ' + _name);
+      }, 5000);
+    }
   }
   renderTaskList();renderBanner();saveState('user')
 }
@@ -700,7 +851,12 @@ window.toggleSmartViews = toggleSmartViews;
 function toggleStar(id){
   event&&event.stopPropagation();
   const t=findTask(id);if(!t)return;
-  t.starred=!t.starred;renderTaskList();saveState('user')
+  t.starred=!t.starred;
+  // Star toggles can shift this card to/from the top of the list — animate.
+  const list=gid('taskList');
+  if(list&&typeof flipReorder==='function')flipReorder(list,()=>renderTaskList());
+  else renderTaskList();
+  saveState('user')
 }
 
 // Reorder (manual)
@@ -733,7 +889,11 @@ function handleTaskDrop(srcId,targetId,position){
   siblings.forEach((s,i)=>{s.order=i*10});
   // Force manual sort when user drags
   if(taskSortBy!=='manual'){taskSortBy='manual';const sel=gid('taskSortSel');if(sel)sel.value='manual'}
-  renderTaskList();saveState('user')
+  // Drop landing: animate the dragged card into its new slot.
+  const list=gid('taskList');
+  if(list&&typeof flipReorder==='function')flipReorder(list,()=>renderTaskList());
+  else renderTaskList();
+  saveState('user')
 }
 
 // Subtask completion progress
@@ -908,7 +1068,11 @@ function cycleStatus(id){
     if(t.status==='done')t.completedAt=stampCompletion();
     else t.completedAt=null;
   }
-  renderTaskList();saveState('user')
+  // Status cycle may move this card under a sticky group header — FLIP it.
+  const list=gid('taskList');
+  if(list&&typeof flipReorder==='function')flipReorder(list,()=>renderTaskList());
+  else renderTaskList();
+  saveState('user')
 }
 
 function toggleTaskDoneQuick(id){
@@ -1455,7 +1619,13 @@ function renderSmartViewCounts(){
 function renderTaskList(){
   const list=gid('taskList');
   if(!list)return;
-  if(list) list.classList.toggle('task-list--comfortable', typeof getCardDensity==='function' && getCardDensity()==='detailed');
+  // Apply density class — exactly one of the three modifiers is active.
+  if(list){
+    const _d = (typeof getCardDensity==='function' ? getCardDensity() : 'cozy');
+    list.classList.toggle('task-list--comfortable', _d==='comfortable');
+    list.classList.toggle('task-list--cozy',        _d==='cozy');
+    list.classList.toggle('task-list--compact',     _d==='compact');
+  }
   // H2: compute the "lists that own open tasks" set once per render so
   // renderTaskItem doesn't rebuild it for every row (was O(N²)).
   if(typeof _computeListsWithTasks==='function') _computeListsWithTasks();
@@ -1475,21 +1645,71 @@ function renderTaskList(){
   if(!visibleTasks.length){
     const empty=gid('taskEmpty');
     empty.style.display='';
+    // Rebuild via createElement so styling is class-driven (theme-aware) and
+    // there's no inline-style spaghetti to update when tokens change.
+    empty.replaceChildren();
+    empty.classList.add('task-empty');
+    const buildIcon = (kind) => {
+      const ic = document.createElement('div');
+      ic.className = 'task-empty-icon';
+      const svg = (window.icon && window.icon(kind,{size:28})) || '';
+      if(svg){
+        // window.icon returns a known-safe inline SVG string from icons.js.
+        ic.insertAdjacentHTML('afterbegin', svg);
+      }else{
+        ic.textContent = kind === 'archive' ? '🗂' : kind === 'filter' ? '🔍' : '✨';
+      }
+      return ic;
+    };
+    const addBlock = (cls, text) => {
+      const b = document.createElement('div');
+      b.className = cls;
+      b.textContent = text;
+      empty.appendChild(b);
+    };
     if(tasks.length){
-      // Has tasks, but filter/view excludes all
-      empty.innerHTML='<div style="font-size:28px;margin-bottom:8px;opacity:.6">🔍</div><div style="font-weight:500;margin-bottom:4px">No tasks match your filters</div><div style="font-size:12px;opacity:.7">Try adjusting the Filters panel, or switch to the "All" smart view.</div>';
+      // Has tasks, but filter/view excludes all.
+      empty.appendChild(buildIcon('filter'));
+      addBlock('task-empty-title', 'No tasks match your filters');
+      addBlock('task-empty-help',  'Try adjusting the Filters panel, or switch to the "All" smart view.');
     } else if(smartView==='archived'){
-      {
-        const ic=(window.icon && window.icon('archive',{size:28}))||'';
-        empty.innerHTML='<div class="empty-ic" style="opacity:.6;margin-bottom:8px">'+ic+'</div><div style="font-weight:500;margin-bottom:4px">Archive is empty</div><div style="font-size:12px;opacity:.7">Archived tasks will appear here when you archive them from the menu.</div>';
-      }
+      empty.appendChild(buildIcon('archive'));
+      addBlock('task-empty-title', 'Archive is empty');
+      addBlock('task-empty-help',  'Archived tasks will appear here when you archive them from the menu.');
     } else {
-      {
-        const ic=(window.icon && window.icon('sparkles',{size:28}))||'';
-        const mod=/(Mac|iPhone|iPod|iPad)/i.test(navigator.platform||'')?'⌘':'Ctrl';
-        empty.innerHTML='<div class="empty-ic" style="opacity:.6;margin-bottom:8px">'+ic+'</div><div style="font-weight:500;margin-bottom:4px">No tasks yet</div><button type="button" class="first-task-btn" onclick="var i=gid(&quot;taskInput&quot;);if(i){i.focus();i.select();}">+ Add your first task</button><div style="font-size:12px;opacity:.85;margin:10px 0 6px">Or press <strong>'+mod+'+K</strong> to open the command palette.</div><div style="font-size:12px;opacity:.7;margin-bottom:8px"><strong>Filters</strong> (button above) set sort, group, and status — smart-view chips are quick lenses on top.</div><div style="font-size:11px;opacity:.55;font-family:var(--font-mono,monospace);line-height:1.6">Buy milk <span style="color:var(--accent,#48b5e0)">tomorrow @urgent #shopping !star</span></div>';
-      }
+      const mod = /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform||'') ? '⌘' : 'Ctrl';
+      empty.appendChild(buildIcon('sparkles'));
+      addBlock('task-empty-title', 'No tasks yet');
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'first-task-btn';
+      btn.textContent = '+ Add your first task';
+      btn.onclick = () => {
+        const i = gid('taskInput');
+        if(i){ i.focus(); i.select(); }
+      };
+      empty.appendChild(btn);
+      const cmdkLine = document.createElement('div');
+      cmdkLine.className = 'task-empty-help';
+      cmdkLine.append('Or press ');
+      const kbd = document.createElement('strong');
+      kbd.textContent = mod + '+K';
+      cmdkLine.append(kbd);
+      cmdkLine.append(' to open the command palette.');
+      empty.appendChild(cmdkLine);
+      addBlock('task-empty-tip', 'The Filters button sets sort, group, and status — smart-view chips are quick lenses on top.');
+      // Inline syntax example.
+      const ex = document.createElement('div');
+      ex.className = 'task-empty-example';
+      ex.append('Buy milk ');
+      const tokens = document.createElement('span');
+      tokens.className = 'task-empty-example-tokens';
+      tokens.textContent = 'tomorrow @urgent #shopping !star';
+      ex.appendChild(tokens);
+      empty.appendChild(ex);
     }
+    // Hide progress bar — empty list has nothing to scroll through.
+    if(typeof refreshTaskListProgress==='function') requestAnimationFrame(refreshTaskListProgress);
     return;
   }
   gid('taskEmpty').style.display='none';
@@ -1497,6 +1717,7 @@ function renderTaskList(){
   // If grouping, bypass tree-render and group flat (only roots)
   if(taskGroupBy!=='none'){
     renderGroupedTasks(visibleTasks);
+    if(typeof refreshTaskListProgress==='function') requestAnimationFrame(refreshTaskListProgress);
     return;
   }
   function renderNode(parentId,depth){
@@ -1511,6 +1732,8 @@ function renderTaskList(){
     });
   }
   renderNode(null,0);
+  // Long-list affordance: show/hide the scroll-progress bar once DOM commits.
+  if(typeof refreshTaskListProgress==='function') requestAnimationFrame(refreshTaskListProgress);
 }
 
 // ========== SECTION GROUPING ==========
@@ -1720,16 +1943,33 @@ function renderBlockedBy(taskId){
   if(inp) inp.addEventListener('paste', taskInputPaste);
 })();
 
+// Density: enum of 'comfortable' | 'cozy' | 'compact'. Default cozy.
+// Back-compat: legacy 'detailed' -> 'comfortable'; legacy 'compact' (which was
+// the previous default) -> 'cozy' so existing users see no visual change.
+const _DENSITY_KEY = (window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.CARD_DENSITY) || 'stupind_card_density';
 function getCardDensity(){
-  try{ return localStorage.getItem((window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.CARD_DENSITY) || 'stupind_card_density') === 'detailed' ? 'detailed' : 'compact'; }
-  catch(e){ return 'compact'; }
+  try{
+    const v = localStorage.getItem(_DENSITY_KEY);
+    if(v==='comfortable'||v==='cozy'||v==='compact') return v;
+    if(v==='detailed') return 'comfortable';
+    return 'cozy';
+  }catch(e){ return 'cozy'; }
 }
-function onCardDensityToggle(){
-  const el = gid('cardDensityDetailed');
-  const on = el && el.checked;
-  try{ localStorage.setItem((window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.CARD_DENSITY) || 'stupind_card_density', on ? 'detailed' : 'compact'); }catch(e){}
+function setCardDensity(v){
+  if(v!=='comfortable'&&v!=='cozy'&&v!=='compact') v='cozy';
+  try{ localStorage.setItem(_DENSITY_KEY, v); }catch(e){}
+  // Reflect in the segmented control radios.
+  document.querySelectorAll('.density-seg-btn').forEach(b=>{
+    const on = b.dataset.density === v;
+    b.setAttribute('aria-checked', on ? 'true' : 'false');
+    b.classList.toggle('on', on);
+  });
   if(typeof updateFiltersActiveBadge === 'function') updateFiltersActiveBadge();
   renderTaskList();
+}
+// Legacy entry-point kept so any old onclick="onCardDensityToggle()" still works.
+function onCardDensityToggle(){
+  setCardDensity(getCardDensity()==='comfortable' ? 'cozy' : 'comfortable');
 }
 function onShowCompletedToggle(){
   try{
@@ -1743,10 +1983,16 @@ function restoreTaskToolbarPrefs(){
   if(sc){
     try{ sc.checked = localStorage.getItem((window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.SHOW_DONE_ALL) || 'stupind_show_done_all') === '1'; }catch(e){}
   }
+  // Reflect persisted density on the new segmented control (and legacy
+  // checkbox if still present).
+  const _d = getCardDensity();
+  document.querySelectorAll('.density-seg-btn').forEach(b=>{
+    const on = b.dataset.density === _d;
+    b.setAttribute('aria-checked', on ? 'true' : 'false');
+    b.classList.toggle('on', on);
+  });
   const cd = gid('cardDensityDetailed');
-  if(cd){
-    try{ cd.checked = localStorage.getItem((window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.CARD_DENSITY) || 'stupind_card_density') === 'detailed'; }catch(e){}
-  }
+  if(cd){ cd.checked = (_d === 'comfortable'); }
   const hh = gid('hideHabitsInMain');
   if(hh && typeof cfg === 'object' && cfg && typeof cfg.hideHabitsInMainViews === 'boolean'){
     hh.checked = cfg.hideHabitsInMainViews;
@@ -1754,6 +2000,7 @@ function restoreTaskToolbarPrefs(){
 }
 
 window.getCardDensity = getCardDensity;
+window.setCardDensity = setCardDensity;
 window.onCardDensityToggle = onCardDensityToggle;
 window.onShowCompletedToggle = onShowCompletedToggle;
 window.restoreTaskToolbarPrefs = restoreTaskToolbarPrefs;

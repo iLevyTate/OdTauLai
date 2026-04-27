@@ -59,3 +59,62 @@ function prettyDate(iso){const d=new Date(iso+'T12:00:00');return d.toLocaleDate
 gid('headerDate').textContent=dateStr();
 
 function timeNowFull(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')}
+
+/**
+ * Polite a11y announcement for transient events (task added/removed, sort
+ * changed, filter applied). Re-set after a tick so consecutive identical
+ * messages are still announced (some SRs dedupe identical aria-live values).
+ */
+function announce(msg){
+  const r=gid('srAnnouncer');if(!r||!msg)return;
+  r.textContent='';
+  setTimeout(()=>{r.textContent=String(msg)},30);
+  clearTimeout(r._clr);
+  r._clr=setTimeout(()=>{r.textContent=''},1200);
+}
+function announceTaskAdd(name){announce('Task added: '+(name||'(unnamed)'))}
+window.announce=announce;
+window.announceTaskAdd=announceTaskAdd;
+
+/**
+ * Action toast: a transient bottom-right toast with a single action button
+ * (typically "Undo"). The toast auto-dismisses after `ms` and the action
+ * fires only if the user clicks it before then. Built via createElement so
+ * any caller-supplied label is treated as text, never HTML.
+ *
+ *   showActionToast('Task added', 'Undo', () => removeTask(id), 5000);
+ */
+function showActionToast(label, actionLabel, actionFn, ms){
+  const ttl = (typeof ms === 'number' && ms > 0) ? ms : 5000;
+  let host = document.getElementById('actionToast');
+  if(!host){
+    host = document.createElement('div');
+    host.id = 'actionToast';
+    host.className = 'action-toast';
+    host.setAttribute('role', 'status');
+    host.setAttribute('aria-live', 'polite');
+    document.body.appendChild(host);
+  }
+  // Reset any in-flight toast so the new one supersedes it cleanly.
+  host.replaceChildren();
+  clearTimeout(host._tm);
+  const lbl = document.createElement('span');
+  lbl.className = 'action-toast-lbl';
+  lbl.textContent = label;
+  host.appendChild(lbl);
+  if(actionLabel && typeof actionFn === 'function'){
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'action-toast-btn';
+    btn.textContent = actionLabel;
+    btn.onclick = () => {
+      try { actionFn(); } catch(_) {}
+      host.classList.remove('show');
+    };
+    host.appendChild(btn);
+  }
+  // Force a frame so the .show transition kicks in.
+  requestAnimationFrame(() => host.classList.add('show'));
+  host._tm = setTimeout(() => host.classList.remove('show'), ttl);
+}
+window.showActionToast = showActionToast;

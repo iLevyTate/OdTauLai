@@ -137,9 +137,11 @@ function openCmdK(opts){
   if(inp){
     try{inp.focus({preventScroll:true})}catch(_){inp.focus()}
   }
+  if(typeof installTabTrap==='function') installTabTrap(ov);
 }
 function closeCmdK(){
   _cmdkAbortAsk();
+  if(typeof removeTabTrap==='function') removeTabTrap();
   gid('cmdkOverlay').classList.remove('open');
   if(_cmdkPrevFocus&&_cmdkPrevFocus.focus)try{_cmdkPrevFocus.focus()}catch(_){}
   _cmdkPrevFocus=null;
@@ -491,8 +493,16 @@ document.addEventListener('keydown',e=>{
 });
 
 // ========== THEME TOGGLE ==========
+// Manual toggle wins over OS preference: once the user picks a theme it sticks
+// across reloads (persisted in localStorage). The OS auto-apply only takes
+// effect for users who haven't explicitly chosen yet.
+const _THEME_MANUAL_KEY = 'stupind_theme_manual';
+function _isThemeManual(){
+  try{ return localStorage.getItem(_THEME_MANUAL_KEY) === '1'; }catch(_){ return false; }
+}
 function toggleTheme(){
   theme=theme==='dark'?'light':'dark';
+  try{ localStorage.setItem(_THEME_MANUAL_KEY, '1'); }catch(_){}
   applyTheme();saveState('user');
 }
 function applyTheme(){
@@ -504,6 +514,23 @@ function applyTheme(){
     if(c) meta.setAttribute('content',c);
   }
 }
+// Sync to OS preference on load, but only when the user hasn't made a manual
+// choice. matchMedia listener also tracks runtime OS-theme changes.
+(function _syncThemeToOS(){
+  try{
+    const mq = matchMedia('(prefers-color-scheme: light)');
+    const apply = () => {
+      if(_isThemeManual()) return;
+      const want = mq.matches ? 'light' : 'dark';
+      if(theme !== want){ theme = want; applyTheme(); }
+    };
+    if(typeof mq.addEventListener === 'function') mq.addEventListener('change', apply);
+    else if(typeof mq.addListener === 'function') mq.addListener(apply);
+    // Defer the initial sync until after saveState's restore pass has set the
+    // persisted theme value, otherwise we'd overwrite the user's prior choice.
+    setTimeout(apply, 100);
+  }catch(_){}
+})();
 function hasVisibleDescendant(taskId,visibleSet){
   return getTaskDescendantIds(taskId).some(id=>visibleSet.has(id))
 }
@@ -545,6 +572,11 @@ function renderTaskItem(t,depth){
       d.classList.add('task-cat-stripe');
       d.style.setProperty('--cat-stripe',cdef.color);
     }
+  }
+  if(window._lastAddedTaskId===t.id){
+    d.classList.add('task-item--enter');
+    window._lastAddedTaskId=null;
+    requestAnimationFrame(()=>{try{d.scrollIntoView({block:'nearest',behavior:'smooth'})}catch(_){}});
   }
   d.ondragstart=function(e){e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain',t.id);d.classList.add('dragging')};
   d.ondragend=function(){d.classList.remove('dragging');document.querySelectorAll('.task-item').forEach(el=>el.classList.remove('drop-above','drop-below'))};
@@ -1227,7 +1259,14 @@ function showTab(tab){
   if(typeof closeCmdK==='function')closeCmdK();
   activeTab=tab;
   document.querySelectorAll('[data-tab]').forEach(el=>{el.style.display=el.dataset.tab===tab?'':'none'});
-  document.querySelectorAll('.nav-tab').forEach(el=>{const on=el.dataset.navtab===tab;el.classList.toggle('active',on);el.setAttribute('aria-selected',on?'true':'false')});
+  document.querySelectorAll('.nav-tab').forEach(el=>{
+    const on=el.dataset.navtab===tab;
+    el.classList.toggle('active',on);
+    el.setAttribute('aria-selected',on?'true':'false');
+    // aria-current also marks navigation membership for screen readers that
+    // navigate by page/section (in addition to the tablist's aria-selected).
+    if(on) el.setAttribute('aria-current','page'); else el.removeAttribute('aria-current');
+  });
   if(tab==='settings'){
     // Refresh the dynamic sub-managers so legacy data (renamed categories,
     // newly added lists) shows up immediately when the tab is opened.

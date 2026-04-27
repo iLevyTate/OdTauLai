@@ -55,11 +55,15 @@
 
 </head>
 <body>
+<a class="skip-link" href="#mainTabpanels">Skip to main content</a>
+<!-- Polite live region: announces task add/remove/done events to screen readers
+     without interrupting whatever the user is doing. -->
+<div id="srAnnouncer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 <div id="embedReindexBanner" class="track-banner" style="display:none" role="status" aria-live="polite"></div>
 <!-- Offline status indicator — only visible when navigator.onLine is false -->
 <div id="onlineStatus" class="offline-indicator" style="display:none" role="status" aria-live="polite"></div>
-<div class="container" id="mainTabpanels" role="main" aria-label="App content">
-  <div class="header">
+<main class="container" id="mainTabpanels" aria-label="App content">
+  <header class="header">
     <h1>
       <svg class="header-logo" viewBox="0 0 512 512" width="32" height="32" aria-hidden="true">
         <defs>
@@ -91,7 +95,7 @@
       <div class="header-date" id="headerDate"></div>
       <button type="button" class="what-next-pill" id="whatNextBtn" onclick="openWhatNext()" title="Top-ranked next actions">What next?</button>
     </div>
-  </div>
+  </header>
 
   <div id="banner" class="track-banner" style="display:none">
     <div class="track-banner-inner">
@@ -103,7 +107,7 @@
   </div>
 
   <!-- Main Nav Tabs -->
-  <div class="header-nav-bar">
+  <nav class="header-nav-bar" aria-label="Primary">
     <div class="nav-tabs" id="navTabs" role="tablist" aria-label="Main">
     <button type="button" class="nav-tab active" data-navtab="tasks" onclick="showTab('tasks')" role="tab" aria-selected="true" id="navTab-tasks">
       <span class="nav-tab-icon" aria-hidden="true">☰</span>
@@ -139,13 +143,13 @@
       <span class="cmdk-btn-kbd" aria-hidden="true">⌘K</span>
     </button>
     </div>
-  </div>
+  </nav>
 
   <!-- Tasks (primary ClickUp-style task manager) -->
   <div class="panel" data-tab="tasks" style="padding:14px">
     <div class="shdr">
       <div class="sdot" style="background:#e056a0"></div>
-      <span class="slbl">Task Manager</span>
+      <h2 class="slbl">Task Manager</h2>
       <span class="scnt" id="taskCountBadge">0 active</span>
     </div>
 
@@ -154,8 +158,10 @@
       <label class="sr-only" for="taskInput">New task</label>
       <div class="task-input-wrap">
         <input class="task-input" id="taskInput" placeholder="Add a task… or paste multiple lines to import"
-          oninput="maybeShowEnhanceBtn()"
-          onkeydown="if(event.key==='Enter'){if(window._smartAddPreview){applySmartAddAndSubmit()}else{addTask()}}">
+          autocomplete="off" autocorrect="on" autocapitalize="sentences" spellcheck="true"
+          enterkeyhint="send"
+          oninput="maybeShowEnhanceBtn();updateLiveParsePreview()"
+          onkeydown="onTaskInputKey(event)">
         <button class="task-enhance-btn" id="taskEnhanceBtn" onclick="smartAddEnhance()" style="display:none" title="Suggest metadata from your task history (embeddings)" data-icon="sparkles" aria-label="Smart-add suggestions"></button>
         <button class="task-enhance-btn task-enhance-btn--llm" id="taskParseBtn" onclick="smartAddParseWithLLM()" style="display:none" title="Parse this freeform sentence with the on-device LLM" data-icon="wand" aria-label="Parse with LLM"></button>
         <button class="task-enhance-btn task-voice-btn" id="taskVoiceBtn" onclick="toggleVoiceInput()" style="display:none" title="Voice input (on-device speech recognition)" data-icon="mic" aria-label="Voice input"></button>
@@ -163,7 +169,22 @@
       <button class="task-add" onclick="if(window._smartAddPreview){applySmartAddAndSubmit()}else{addTask()}">+ Add</button>
     </div>
     <div id="smartAddPreview" class="smart-add-preview" style="display:none"></div>
-    <div class="qa-hint" id="qa-hint">QUICK ADD: <code>today</code> / <code>tomorrow</code> / weekdays · natural dates (e.g. next Friday, in 3 days) · <code>@urgent</code> <code>@high</code> <code>@low</code> · <code>#tag</code> · <code>!star</code> · <code>~daily</code> <code>~weekly</code></div>
+    <!-- Live parse preview: chips reflect quick-add tokens parsed from current
+         input text so users can SEE what will commit before pressing Enter.
+         Hidden when nothing is parseable. -->
+    <div id="qaParseChips" class="qa-parse-chips" role="status" aria-live="polite" aria-atomic="true" hidden></div>
+    <div class="qa-hint" id="qa-hint" aria-label="Quick-add syntax examples">
+      <span class="qa-hint-lbl">Try:</span>
+      <span class="qa-hint-tokens">
+        <span class="qpc qpc--due"   title="Due dates">today</span>
+        <span class="qpc qpc--due"   title="Due dates">tomorrow</span>
+        <span class="qpc qpc--due"   title="Natural dates work too">next Friday</span>
+        <span class="qpc qpc--danger" title="Priority">@urgent</span>
+        <span class="qpc qpc--tag"    title="Tags">#tag</span>
+        <span class="qpc qpc--star"   title="Pin to top">!star</span>
+        <span class="qpc qpc--recur"  title="Recurrence">~daily</span>
+      </span>
+    </div>
     <button type="button" class="qa-hint-reveal" id="qa-hint-reveal" style="display:none" onclick="showQaHint()">Show quick-add syntax</button>
     <button type="button" id="askPromoChip" class="ask-promo-chip" style="display:none" onclick="openAskMode()" aria-label="Ask the on-device AI about your tasks" title="Ask the on-device AI">
       <span class="ask-promo-ic" data-icon="spark" data-icon-size="14" aria-hidden="true"></span>
@@ -227,7 +248,9 @@
         <button id="viewBoardMobile" onclick="setTaskView('board');updateMobileViewToggle()" style="flex:1"><span class="mv-ic" data-icon="grid"></span> Board</button>
         <button id="viewCalMobile" onclick="setTaskView('calendar');updateMobileViewToggle()" style="flex:1"><span class="mv-ic" data-icon="calendar"></span> Cal</button>
       </div>
-      <div class="task-toolbar-row">
+      <fieldset class="task-toolbar-row" style="border:0;padding:0;margin:0;display:flex;gap:8px;flex-wrap:wrap">
+        <legend class="sr-only">Filter tasks</legend>
+        <label class="sr-only" for="filterStatus">Filter by status</label>
         <select class="task-tb-sel" id="filterStatus" onchange="updateTaskFilters()">
           <option value="all">All status</option>
           <option value="open">Open</option>
@@ -237,6 +260,7 @@
           <option value="done">Done</option>
           <option value="active">Not Done</option>
         </select>
+        <label class="sr-only" for="filterPriority">Filter by priority</label>
         <select class="task-tb-sel" id="filterPriority" onchange="updateTaskFilters()">
           <option value="all">Any priority</option>
           <option value="urgent">Urgent</option>
@@ -244,13 +268,16 @@
           <option value="normal">Normal</option>
           <option value="low">Low</option>
         </select>
-      </div>
+      </fieldset>
       <div class="task-toolbar-row">
+        <label class="sr-only" for="filterCategory">Filter by category</label>
         <select class="task-tb-sel" id="filterCategory" onchange="updateTaskFilters()">
           <option value="all">Any category</option>
         </select>
       </div>
-      <div class="task-toolbar-row">
+      <fieldset class="task-toolbar-row" style="border:0;padding:0;margin:0;display:flex;gap:8px;flex-wrap:wrap">
+        <legend class="sr-only">Sort and group tasks</legend>
+        <label class="sr-only" for="taskSortSel">Sort tasks by</label>
         <select class="task-tb-sel" id="taskSortSel" onchange="updateTaskFilters()">
           <option value="manual">Sort: Manual</option>
           <option value="smart">Sort: Smart (starred, due, priority)</option>
@@ -261,6 +288,7 @@
           <option value="name">Sort: Name</option>
           <option value="time">Sort: Time tracked</option>
         </select>
+        <label class="sr-only" for="groupBySel">Group tasks by</label>
         <select class="task-tb-sel" id="groupBySel" onchange="updateTaskFilters()">
           <option value="none">Group: None</option>
           <option value="priority">Group: Priority</option>
@@ -268,12 +296,14 @@
           <option value="due">Group: Due Date</option>
           <option value="list">Group: List</option>
         </select>
-      </div>
+      </fieldset>
       <div class="task-toolbar-row task-toolbar-display">
         <span class="filter-display-lbl">Display</span>
-        <label class="task-tb-check" title="Slightly more padding per row">
-          <input type="checkbox" id="cardDensityDetailed" onchange="onCardDensityToggle()"> Comfortable spacing
-        </label>
+        <div class="density-seg" role="radiogroup" aria-label="Card density">
+          <button type="button" class="density-seg-btn" data-density="comfortable" role="radio" aria-checked="false" onclick="setCardDensity('comfortable')" title="Roomy padding, easier scanning">Comfortable</button>
+          <button type="button" class="density-seg-btn" data-density="cozy" role="radio" aria-checked="true" onclick="setCardDensity('cozy')" title="Default — balanced">Cozy</button>
+          <button type="button" class="density-seg-btn" data-density="compact" role="radio" aria-checked="false" onclick="setCardDensity('compact')" title="Tight rows — fit more on screen">Compact</button>
+        </div>
         <label class="task-tb-check" title="When on, recurring tasks only appear in the Habits view">
           <input type="checkbox" id="hideHabitsInMain" checked onchange="onHideHabitsToggle()"> Hide recurring from main
         </label>
@@ -314,6 +344,8 @@
 
     <!-- List view (default) -->
     <div id="habitsHiddenNotice" class="habits-hidden-notice" style="display:none" role="status" aria-live="polite"></div>
+    <!-- Scroll progress shown only when tasks.length > 50; updated by ui.js. -->
+    <div class="task-list-progress" id="taskListProgress" role="progressbar" aria-label="Task list scroll position" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden><div class="task-list-progress-bar" id="taskListProgressBar"></div></div>
     <div class="task-list" id="taskList"><div class="task-empty" id="taskEmpty"></div></div>
 
     <!-- Board view (kanban) -->
@@ -333,7 +365,7 @@
   <div class="panel timer-sub-panel" data-tab="focus" data-timer-sub="pomo" style="padding:20px">
     <div class="shdr">
       <div class="sdot" style="background:var(--accent)"></div>
-      <span class="slbl">Focus Timer</span>
+      <h2 class="slbl">Focus Timer</h2>
       <span class="scnt" id="pomoCycleLabel">Pomodoro</span>
     </div>
     <div class="tabs" id="tabs">
@@ -359,7 +391,7 @@
   <div class="panel timer-sub-panel" data-tab="focus" data-timer-sub="quick" style="display:none">
     <div class="shdr">
       <div class="sdot" style="background:#48b5e0"></div>
-      <span class="slbl">Quick Timers</span>
+      <h2 class="slbl">Quick Timers</h2>
       <span class="scnt" id="qtCount">0 timers</span>
     </div>
     <div class="qt-form">
@@ -384,7 +416,7 @@
 
   <!-- Stopwatch -->
   <div class="panel timer-sub-panel" data-tab="focus" data-timer-sub="sw" style="display:none">
-    <div class="shdr"><div class="sdot" style="background:#9b59b6"></div><span class="slbl">Stopwatch</span></div>
+    <div class="shdr"><div class="sdot" style="background:#9b59b6"></div><h2 class="slbl">Stopwatch</h2></div>
     <div style="text-align:center">
       <div id="swDisplay" style="font-size:42px;font-weight:800;color:#e2e8f0;letter-spacing:3px;font-variant-numeric:tabular-nums;margin-bottom:12px">00:00:00</div>
       <div style="display:flex;gap:10px;justify-content:center">
@@ -398,7 +430,7 @@
 
   <!-- Intervals / repeating chimes -->
   <div class="panel timer-sub-panel" data-tab="focus" data-timer-sub="chimes" style="display:none">
-    <div class="shdr"><div class="sdot" style="background:#3d8bcc"></div><span class="slbl">Repeating Chimes</span><span class="scnt" id="intCount">0 set</span></div>
+    <div class="shdr"><div class="sdot" style="background:#3d8bcc"></div><h2 class="slbl">Repeating Chimes</h2><span class="scnt" id="intCount">0 set</span></div>
     <div class="iform">
       <div style="flex:1 1 100px"><label class="fl">Label</label><input class="fi fi-w" id="intLabel" placeholder="e.g. Posture check"></div>
       <div style="display:flex;gap:6px;align-items:flex-end"><div><label class="fl">Min</label><input type="number" class="fi fi-n" id="intMin" value="5" min="0" max="999"></div><div><label class="fl">Sec</label><input type="number" class="fi fi-n" id="intSec" value="0" min="0" max="59"></div></div>
@@ -416,7 +448,7 @@
 
   <!-- Settings -->
   <div class="panel panel-settings" data-tab="settings">
-    <div class="stitle stitle-static"><div class="sdot" style="background:#3d8bcc"></div><span class="slbl">Settings</span></div>
+    <div class="stitle stitle-static"><div class="sdot" style="background:#3d8bcc"></div><h2 class="slbl">Settings</h2></div>
     <div class="sbody sbody-static" id="settingsBody">
       <details class="set-section" open>
         <summary class="set-section-sum">General</summary>
@@ -430,16 +462,16 @@
               <option value="deepwork">Deep work 120/30</option>
             </select>
           </div>
-          <div class="srow"><span class="sr-lbl">Focus Duration</span><input type="number" class="sinput" id="cfgWork" value="25" min="1" max="120" onchange="updateConfig()"><span class="sunit">min</span></div>
-          <div class="srow"><span class="sr-lbl">Short Break</span><input type="number" class="sinput" id="cfgShort" value="5" min="1" max="30" onchange="updateConfig()"><span class="sunit">min</span></div>
-          <div class="srow"><span class="sr-lbl">Long Break</span><input type="number" class="sinput" id="cfgLong" value="15" min="1" max="60" onchange="updateConfig()"><span class="sunit">min</span></div>
-          <div class="srow"><span class="sr-lbl">Sessions / Cycle</span><input type="number" class="sinput" id="cfgCycle" value="4" min="2" max="10" onchange="updateConfig()"></div>
-          <div class="srow"><span class="sr-lbl">Ask for session note</span><div class="toggle on" id="togSnpNote" role="switch" aria-checked="true" tabindex="0" onclick="toggleOpt('togSnpNote')"><div class="tknob"></div></div></div>
-          <div class="srow"><span class="sr-lbl">Auto-start Breaks</span><div class="toggle on" id="togBreak" role="switch" aria-checked="true" tabindex="0" onclick="toggleOpt('togBreak')"><div class="tknob"></div></div></div>
-          <div class="srow"><span class="sr-lbl">Auto-start Focus</span><div class="toggle" id="togWork" role="switch" aria-checked="false" tabindex="0" onclick="toggleOpt('togWork')"><div class="tknob"></div></div></div>
-          <div class="srow"><span class="sr-lbl">Sound Alerts</span><div class="toggle on" id="togSound" role="switch" aria-checked="true" tabindex="0" onclick="toggleOpt('togSound')"><div class="tknob"></div></div></div>
-          <div class="srow"><span class="sr-lbl">Desktop Notifications</span><div class="toggle on" id="togNotif" role="switch" aria-checked="true" tabindex="0" onclick="toggleOpt('togNotif')"><div class="tknob"></div></div></div>
-          <div class="srow"><span class="sr-lbl">Link Task to Session</span><div class="toggle on" id="togLink" role="switch" aria-checked="true" tabindex="0" onclick="toggleOpt('togLink')"><div class="tknob"></div></div></div>
+          <div class="srow"><span class="sr-lbl">Focus Duration</span><input type="number" inputmode="numeric" pattern="[0-9]*" class="sinput" id="cfgWork" value="25" min="1" max="120" onchange="updateConfig()"><span class="sunit">min</span></div>
+          <div class="srow"><span class="sr-lbl">Short Break</span><input type="number" inputmode="numeric" pattern="[0-9]*" class="sinput" id="cfgShort" value="5" min="1" max="30" onchange="updateConfig()"><span class="sunit">min</span></div>
+          <div class="srow"><span class="sr-lbl">Long Break</span><input type="number" inputmode="numeric" pattern="[0-9]*" class="sinput" id="cfgLong" value="15" min="1" max="60" onchange="updateConfig()"><span class="sunit">min</span></div>
+          <div class="srow"><span class="sr-lbl">Sessions / Cycle</span><input type="number" inputmode="numeric" pattern="[0-9]*" class="sinput" id="cfgCycle" value="4" min="2" max="10" onchange="updateConfig()"></div>
+          <div class="srow"><span class="sr-lbl" id="lbl-togSnpNote">Ask for session note</span><button type="button" class="toggle on" id="togSnpNote" role="switch" aria-checked="true" aria-labelledby="lbl-togSnpNote" onclick="toggleOpt('togSnpNote')"><span class="tknob" aria-hidden="true"></span></button></div>
+          <div class="srow"><span class="sr-lbl" id="lbl-togBreak">Auto-start Breaks</span><button type="button" class="toggle on" id="togBreak" role="switch" aria-checked="true" aria-labelledby="lbl-togBreak" onclick="toggleOpt('togBreak')"><span class="tknob" aria-hidden="true"></span></button></div>
+          <div class="srow"><span class="sr-lbl" id="lbl-togWork">Auto-start Focus</span><button type="button" class="toggle" id="togWork" role="switch" aria-checked="false" aria-labelledby="lbl-togWork" onclick="toggleOpt('togWork')"><span class="tknob" aria-hidden="true"></span></button></div>
+          <div class="srow"><span class="sr-lbl" id="lbl-togSound">Sound Alerts</span><button type="button" class="toggle on" id="togSound" role="switch" aria-checked="true" aria-labelledby="lbl-togSound" onclick="toggleOpt('togSound')"><span class="tknob" aria-hidden="true"></span></button></div>
+          <div class="srow"><span class="sr-lbl" id="lbl-togNotif">Desktop Notifications</span><button type="button" class="toggle on" id="togNotif" role="switch" aria-checked="true" aria-labelledby="lbl-togNotif" onclick="toggleOpt('togNotif')"><span class="tknob" aria-hidden="true"></span></button></div>
+          <div class="srow"><span class="sr-lbl" id="lbl-togLink">Link Task to Session</span><button type="button" class="toggle on" id="togLink" role="switch" aria-checked="true" aria-labelledby="lbl-togLink" onclick="toggleOpt('togLink')"><span class="tknob" aria-hidden="true"></span></button></div>
           <div class="srow" style="flex-direction:column;align-items:flex-start;gap:6px;padding:12px 0 14px;border-bottom:1px solid var(--border)">
             <div style="display:flex;align-items:center;gap:8px;width:100%;justify-content:space-between">
               <span class="sr-lbl">Background Audio</span>
@@ -513,12 +545,12 @@
 
   <!-- Today's Stats (Data tab) -->
   <div class="panel panel-data" data-tab="data" data-data-section="stats">
-    <div class="shdr"><div class="sdot" style="background:var(--long)"></div><span class="slbl">Today's Stats</span><button class="small-btn" onclick="resetStats()">Reset Day</button></div>
-    <div class="stat-grid">
-      <div class="stat-box"><div class="stat-val wc" id="statPomos">0</div><div class="stat-lbl">Sessions</div></div>
-      <div class="stat-box"><div class="stat-val tc" id="statFocus">0m</div><div class="stat-lbl">Focus Time</div></div>
-      <div class="stat-box"><div class="stat-val bc" id="statBreaks">0</div><div class="stat-lbl">Breaks</div></div>
-    </div>
+    <div class="shdr"><div class="sdot" style="background:var(--long)"></div><h2 class="slbl">Today's Stats</h2><button class="small-btn" onclick="resetStats()">Reset Day</button></div>
+    <dl class="stat-grid">
+      <div class="stat-box"><dd class="stat-val wc" id="statPomos">0</dd><dt class="stat-lbl">Sessions</dt></div>
+      <div class="stat-box"><dd class="stat-val tc" id="statFocus">0m</dd><dt class="stat-lbl">Focus Time</dt></div>
+      <div class="stat-box"><dd class="stat-val bc" id="statBreaks">0</dd><dt class="stat-lbl">Breaks</dt></div>
+    </dl>
     <div class="history" id="historyBlocks"></div>
     <div class="stats-by-area" id="statsByArea" style="display:none"></div>
     <div class="focus-streak" id="focusStreak" style="display:none"></div>
@@ -526,13 +558,13 @@
 
   <!-- Time Log (Data tab) — sessions in chronological order. -->
   <div class="panel panel-data" data-tab="data" data-data-section="log">
-    <div class="shdr"><div class="sdot" style="background:var(--long)"></div><span class="slbl">Time Log</span><button class="small-btn" onclick="clearLog()">Clear</button></div>
+    <div class="shdr"><div class="sdot" style="background:var(--long)"></div><h2 class="slbl">Time Log</h2><button class="small-btn" onclick="clearLog()">Clear</button></div>
     <div class="log-list" id="logList"><div class="log-empty" id="logEmpty">Completed sessions appear here</div></div>
   </div>
 
   <!-- Past Days Archive (Data tab) -->
   <div class="panel panel-data" data-tab="data" data-data-section="archive">
-    <div class="shdr"><div class="sdot" style="background:#8e44ad"></div><span class="slbl">Past Days</span><span class="scnt" id="archiveCount">0 days</span></div>
+    <div class="shdr"><div class="sdot" style="background:#8e44ad"></div><h2 class="slbl">Past Days</h2><span class="scnt" id="archiveCount">0 days</span></div>
     <div id="archiveList" class="archive-list"><div class="iempty" id="archiveEmpty">History will appear here after each day</div></div>
     <div class="archive-actions">
       <button class="export-btn export-csv" onclick="exportAllCSV()">Export All History (.csv)</button>
@@ -542,7 +574,7 @@
 
   <!-- Export & Backup (Data tab) — own panel so the Stats panel stays scannable. -->
   <div class="panel panel-data" data-tab="data" data-data-section="export">
-    <div class="shdr"><div class="sdot" style="background:#3d8bcc"></div><span class="slbl">Export &amp; Backup</span></div>
+    <div class="shdr"><div class="sdot" style="background:#3d8bcc"></div><h2 class="slbl">Export &amp; Backup</h2></div>
 
     <!-- Daily report — human-readable summary -->
     <div class="export-section">
@@ -694,7 +726,7 @@
       <button type="button" class="mfoot-btn mfoot-save" id="appPromptOk" onclick="submitAppPrompt()">OK</button>
     </div>
   </div>
-</div>
+</main>
 
 <!-- Task Detail Modal -->
 <div class="modal-overlay" id="taskModal" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle" onclick="if(event.target===this)closeTaskDetail()">
@@ -893,6 +925,7 @@
 <script src="js/config.js"></script>
 <script src="js/icons.js"></script>
 <script src="js/utils.js"></script>
+<script src="js/ui-flip.js"></script>
 <script src="js/storage.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/timer.js"></script>
