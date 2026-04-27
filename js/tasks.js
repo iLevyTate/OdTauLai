@@ -221,10 +221,15 @@ async function addTask(){
     props = p.props;
   }
   if(!name){ name = raw; props = {}; }
+  // Merge in any explicit field values the user set via the configurable
+  // "More options" panel. Quick-add tokens in `props` take precedence so
+  // typing "@urgent" still wins over a panel-set priority — explicit text
+  // input is the most recent intent.
+  const panelVals=(typeof window!=='undefined'&&window._quickAddValues)?window._quickAddValues:null;
   const _newT=Object.assign({
     id:++taskIdCtr,name,totalSec:0,sessions:0,created:timeNowFull(),
     parentId:null,collapsed:false
-  },defaultTaskProps(),props);
+  },defaultTaskProps(),panelVals||{},props);
   tasks.push(_newT);
   _taskIndexRegister(_newT);
   inp.value='';
@@ -240,6 +245,12 @@ async function addTask(){
     if(cfg.qaHintTaskCount>=3) cfg.qaHintHidden=true;
   }
   if(typeof syncQaHintVisibility==='function') syncQaHintVisibility();
+  // Reset configurable quick-add panel selections once the task lands so the
+  // next one starts blank. Panel stays open so a brain-dump session can keep
+  // reusing the same field set if desired — but the user re-applies values
+  // explicitly each time.
+  if(typeof window!=='undefined'){window._quickAddValues=null}
+  if(typeof renderQuickAddPanel==='function') renderQuickAddPanel();
   // Hint to renderTaskItem: animate this card on the upcoming render and
   // scroll it into view. The flag self-clears in the renderer.
   window._lastAddedTaskId=_newT.id;
@@ -426,6 +437,7 @@ function openBulkImportModal(items, skippedLong){
   }
   if(hint) hint.innerHTML = hintHtml;
   _updateBulkImportButtonState();
+  _syncBulkImportAutoToggle();
   ta.oninput = _updateBulkImportButtonState;
   ov.classList.add('open');
   setTimeout(() => ta.focus(), 30);
@@ -464,14 +476,110 @@ function closeBulkImportModal(){
   }
 }
 
+/**
+ * Show the Auto-organize toggle iff at least one of the on-device models is
+ * ready. The hint text reflects which path will run (embeddings vs LLM)
+ * so the user knows what they're opting into. Hidden entirely if neither
+ * model is loaded — toggling it would do nothing useful.
+ */
+function _syncBulkImportAutoToggle(){
+  const wrap = gid('bulkImportAutoWrap');
+  const hint = gid('bulkImportAutoHint');
+  const cb = gid('bulkImportAuto');
+  if(!wrap || !cb) return;
+  const intelOk = (typeof isIntelReady === 'function') && isIntelReady();
+  const genOk = (typeof isGenReady === 'function') && isGenReady();
+  if(!intelOk && !genOk){
+    wrap.style.display = 'none';
+    cb.checked = false;
+    return;
+  }
+  wrap.style.display = '';
+  if(hint){
+    if(intelOk) hint.textContent = 'Route each task to the right list and fill in life area / priority via on-device embeddings (instant).';
+    else hint.textContent = 'Embeddings not ready — falling back to the on-device LLM (slower, may take a few seconds per task).';
+  }
+}
+
+/**
+ * Enrich a single bulk-imported task with predicted metadata. Returns an
+ * object of fields to merge onto the task. Embeddings preferred (fast);
+ * the LLM is the fallback when embeddings haven't been built yet.
+ */
+async function _bulkEnrichOne(name){
+  const out = {};
+  // Embedding-based path — produces category, priority, effort, energy, tags
+  // via kNN over existing tasks. List + due date come from separate
+  // embedding-driven helpers (predictListId, predictDueDate).
+  if(typeof isIntelReady === 'function' && isIntelReady() && typeof predictMetadata === 'function'){
+    try{
+      const pred = await predictMetadata(name, 5);
+      if(pred){
+        if(pred.category) out.category = pred.category;
+        if(pred.priority && pred.priority !== 'normal') out.priority = pred.priority;
+        if(pred.effort) out.effort = pred.effort;
+        if(pred.energyLevel) out.energyLevel = pred.energyLevel;
+        if(Array.isArray(pred.tags) && pred.tags.length) out.tags = pred.tags;
+      }
+      // List routing — only meaningful with multiple lists; predictListId
+      // returns null when scores are below confidence floor.
+      if(typeof predictListId === 'function'){
+        try{
+          const lid = await predictListId(name);
+          if(lid != null) out.listId = lid;
+        }catch(_){ /* skip */ }
+      }
+      // Due-date kNN — needs a quorum of similar past tasks with dueDates.
+      if(typeof predictDueDate === 'function'){
+        try{
+          const dd = await predictDueDate(name, 5);
+          if(dd) out.dueDate = dd;
+        }catch(_){ /* skip */ }
+      }
+      return out;
+    }catch(e){ /* fall through to LLM */ }
+  }
+  // LLM fallback — produces priority/dueDate/effort/tags from freeform text.
+  if(typeof isGenReady === 'function' && isGenReady() && typeof genParseFreeform === 'function'){
+    try{
+      const parsed = await genParseFreeform(name);
+      if(parsed && typeof parsed === 'object'){
+        if(parsed.priority && parsed.priority !== 'normal') out.priority = parsed.priority;
+        if(parsed.dueDate) out.dueDate = parsed.dueDate;
+        if(parsed.effort) out.effort = parsed.effort;
+        if(Array.isArray(parsed.tags) && parsed.tags.length) out.tags = parsed.tags;
+      }
+    }catch(e){ /* swallow — bulk import shouldn't fail because one task didn't enrich */ }
+  }
+  return out;
+}
+
+function _setBulkProgress(text){
+  const el = gid('bulkImportProgress');
+  if(!el) return;
+  if(!text){ el.hidden = true; el.textContent = ''; return; }
+  el.hidden = false;
+  el.textContent = text;
+}
+
 async function confirmBulkImport(){
   const ta = gid('bulkImportTextarea');
   if(!ta) return;
   const lines = ta.value.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   if(!lines.length) return;
   ensureDefaultList();
-  closeBulkImportModal();
-  for(const line of lines){
+  const auto = gid('bulkImportAuto');
+  const autoOn = !!(auto && auto.checked);
+  // Disable the confirm button while enrichment runs so the user can't
+  // double-fire and so they SEE that work is happening.
+  const btn = gid('bulkImportConfirm');
+  if(btn) btn.disabled = true;
+  // Build all tasks first (parse pass), then optionally enrich (slow pass),
+  // then close the modal — this way the progress UI stays visible during
+  // the slow path instead of blocking on a closed modal.
+  const built = [];
+  for(let i = 0; i < lines.length; i++){
+    const line = lines[i];
     let name, props;
     if(typeof parseQuickAddAsync === 'function'){
       const parsed = await parseQuickAddAsync(line);
@@ -483,13 +591,31 @@ async function confirmBulkImport(){
       props = p.props;
     }
     if(!name){ name = line; props = {}; }
-    const _bt=Object.assign({
-      id:++taskIdCtr,name,totalSec:0,sessions:0,created:timeNowFull(),
-      parentId:null,collapsed:false
-    },defaultTaskProps(),props);
+    built.push({ name, props });
+  }
+  // Enrichment pass — only when the user opted in. Quick-add tokens (props)
+  // win over predicted metadata so explicit "@urgent" beats a model guess.
+  if(autoOn){
+    const total = built.length;
+    for(let i = 0; i < total; i++){
+      _setBulkProgress('Auto-organizing ' + (i + 1) + ' / ' + total + '…');
+      const enriched = await _bulkEnrichOne(built[i].name);
+      // Predicted fields go in FIRST, explicit quick-add tokens overlay on top.
+      built[i].props = Object.assign({}, enriched, built[i].props);
+    }
+    _setBulkProgress(null);
+  }
+  // Persist phase — single render + save at the end.
+  for(const b of built){
+    const _bt = Object.assign({
+      id:++taskIdCtr, name:b.name, totalSec:0, sessions:0, created:timeNowFull(),
+      parentId:null, collapsed:false
+    }, defaultTaskProps(), b.props);
     tasks.push(_bt);
     _taskIndexRegister(_bt);
   }
+  if(btn) btn.disabled = false;
+  closeBulkImportModal();
   const inp = gid('taskInput');
   if(inp) inp.value = '';
   maybeShowSwipeTip();
@@ -498,6 +624,8 @@ async function confirmBulkImport(){
   if(typeof maybeShowEnhanceBtn === 'function') maybeShowEnhanceBtn();
   if(typeof scheduleIntelDupRefresh === 'function') scheduleIntelDupRefresh();
 }
+
+window._syncBulkImportAutoToggle = _syncBulkImportAutoToggle;
 
 window.closeBulkImportModal = closeBulkImportModal;
 window.confirmBulkImport = confirmBulkImport;
@@ -1868,6 +1996,63 @@ function renderChecklist(taskId){
   });
 }
 
+// ========== DRAG-DROP REORDER (Sortable.js) ==========
+// Single Sortable instance bound to #taskList. Replaced the per-task
+// HTML5 native drag handlers (which silently failed on iOS Safari and were
+// inconsistent on Android). Sortable normalises mouse + touch with a
+// synthetic drag image, so reorder finally works on phones.
+let _taskListSortable = null;
+function _initTaskListSortable(){
+  if(_taskListSortable) return; // idempotent: SW + module reloads can call twice
+  if(typeof window === 'undefined' || typeof window.Sortable !== 'function') return;
+  const list = document.getElementById('taskList');
+  if(!list) return;
+  _taskListSortable = new window.Sortable(list, {
+    // Anchor the gesture to the explicit drag-handle so swipe-to-complete
+    // and tap-to-open don't fight with reorder. Without this, every touch
+    // on a card races between Sortable and our touchstart/end handlers.
+    handle: '.drag-handle',
+    // Fall back to whole-card drag on desktop where the handle is hover-only,
+    // because mouse users don't expect a tiny handle target. .task-action
+    // is the action-buttons cluster and must remain clickable.
+    filter: '.task-action,button,input,.task-checkbox,.task-play,.task-rm,.task-star,.task-chevron',
+    preventOnFilter: false,
+    animation: 150,
+    ghostClass: 'task-item--ghost',
+    chosenClass: 'task-item--chosen',
+    dragClass: 'task-item--dragging',
+    // Force fallback mode on touch — uses a synthetic drag image instead of
+    // the broken iOS native one. Mouse continues to use HTML5 native.
+    forceFallback: false,
+    fallbackOnBody: true,
+    swapThreshold: 0.65,
+    onEnd: function(evt){
+      // Read new DOM order, persist as t.order. Force manual sort so the
+      // user-driven order survives across renders that would otherwise
+      // re-sort by smart heuristics.
+      const items = list.querySelectorAll('.task-item');
+      let dirty = false;
+      items.forEach((el, i) => {
+        const id = parseInt(el.dataset.taskId || '', 10);
+        if(!Number.isFinite(id)) return;
+        const t = (typeof findTask === 'function') ? findTask(id) : null;
+        if(!t) return;
+        const newOrder = i * 10;
+        if(t.order !== newOrder){ t.order = newOrder; dirty = true; }
+      });
+      if(dirty){
+        if(typeof taskSortBy !== 'undefined' && taskSortBy !== 'manual'){
+          taskSortBy = 'manual';
+          const sel = document.getElementById('taskSortSel');
+          if(sel) sel.value = 'manual';
+        }
+        if(typeof saveState === 'function') saveState('user');
+      }
+    },
+  });
+}
+window._initTaskListSortable = _initTaskListSortable;
+
 // ========== TASK NOTES ==========
 let _noteIdCtr=0;
 /**
@@ -2026,3 +2211,253 @@ window.getHabitLoggedSecTotal = getHabitLoggedSecTotal;
 window.dismissSwipeTip = dismissSwipeTip;
 window.snoozeTodayBanner = snoozeTodayBanner;
 window.clearTaskSearch = clearTaskSearch;
+
+// ─── Configurable quick-add panel ──────────────────────────────────────────
+// Inline panel beneath the task input. Field set is user-configurable in
+// Settings → Quick-add fields. Default fields: list + due. Each field's
+// chosen value is staged in window._quickAddValues until the user submits.
+const QUICK_ADD_FIELDS = {
+  list: { label: 'List', render: _renderQAList },
+  due:  { label: 'Due date', render: _renderQADue },
+  category: { label: 'Life area', render: _renderQACategory },
+  priority: { label: 'Priority', render: _renderQAPriority },
+  type: { label: 'Type', render: _renderQAType },
+  recur: { label: 'Repeats', render: _renderQARecur },
+  star: { label: 'Star', render: _renderQAStar },
+  tags: { label: 'Tags', render: _renderQATags },
+};
+
+function _qaVal(){ return (window._quickAddValues = window._quickAddValues || {}); }
+function _qaSet(key, val){
+  const v = _qaVal();
+  if(val == null || val === '' || (Array.isArray(val) && !val.length)) delete v[key];
+  else v[key] = val;
+}
+
+function _renderQAList(wrap){
+  wrap.appendChild(_qaLbl('List'));
+  const ctl = document.createElement('div');
+  ctl.className = 'qa-more-field-control';
+  const sel = document.createElement('select');
+  sel.className = 'mfield-in';
+  sel.style.maxWidth = '100%';
+  const optDefault = document.createElement('option');
+  optDefault.value = ''; optDefault.textContent = '— default —';
+  sel.appendChild(optDefault);
+  if(typeof lists !== 'undefined' && Array.isArray(lists)){
+    lists.forEach(L => {
+      const o = document.createElement('option');
+      o.value = String(L.id); o.textContent = L.name;
+      sel.appendChild(o);
+    });
+  }
+  if(_qaVal().listId != null) sel.value = String(_qaVal().listId);
+  sel.onchange = () => _qaSet('listId', sel.value ? parseInt(sel.value,10) : null);
+  ctl.appendChild(sel);
+  wrap.appendChild(ctl);
+}
+
+function _renderQADue(wrap){
+  wrap.appendChild(_qaLbl('Due date'));
+  const ctl = document.createElement('div');
+  ctl.className = 'qa-more-field-control';
+  const inp = document.createElement('input');
+  inp.type = 'date'; inp.className = 'mfield-in';
+  inp.value = _qaVal().dueDate || '';
+  inp.onchange = () => _qaSet('dueDate', inp.value || null);
+  ctl.appendChild(inp);
+  const mkBtn = (label, daysOffset) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'qd-btn'; b.textContent = label;
+    b.onclick = () => {
+      if(daysOffset === 'clear'){ inp.value=''; _qaSet('dueDate', null); return; }
+      const d = new Date(); d.setDate(d.getDate()+daysOffset);
+      const iso = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+      inp.value = iso; _qaSet('dueDate', iso);
+    };
+    return b;
+  };
+  ctl.appendChild(mkBtn('Today', 0));
+  ctl.appendChild(mkBtn('Tomorrow', 1));
+  ctl.appendChild(mkBtn('+1 wk', 7));
+  ctl.appendChild(mkBtn('Clear', 'clear'));
+  wrap.appendChild(ctl);
+}
+
+function _renderQAChips(wrap, label, key, options){
+  wrap.appendChild(_qaLbl(label));
+  const ctl = document.createElement('div');
+  ctl.className = 'qa-more-field-control';
+  options.forEach(([val, lbl]) => {
+    const b = document.createElement('button');
+    b.type='button'; b.className='mfield-chip-btn';
+    b.textContent = lbl;
+    if(_qaVal()[key] === val) b.classList.add('active');
+    b.onclick = () => {
+      const cur = _qaVal()[key];
+      if(cur === val){ _qaSet(key, null); b.classList.remove('active'); }
+      else{
+        Array.from(ctl.querySelectorAll('.mfield-chip-btn')).forEach(c=>c.classList.remove('active'));
+        b.classList.add('active');
+        _qaSet(key, val);
+      }
+    };
+    ctl.appendChild(b);
+  });
+  wrap.appendChild(ctl);
+}
+function _renderQACategory(wrap){
+  const cats = (typeof getCategoryDefs === 'function') ? getCategoryDefs() : [];
+  const opts = cats.map(c => [c.id, c.label]);
+  if(!opts.length) opts.push(['general','General']);
+  _renderQAChips(wrap, 'Life area', 'category', opts);
+}
+function _renderQAPriority(wrap){
+  _renderQAChips(wrap, 'Priority', 'priority', [
+    ['urgent','Urgent'],['high','High'],['normal','Normal'],['low','Low']
+  ]);
+}
+function _renderQAType(wrap){
+  _renderQAChips(wrap, 'Type', 'type', [
+    ['task','Task'],['waiting','Waiting'],['bug','Bug'],['idea','Idea'],['errand','Errand']
+  ]);
+}
+function _renderQARecur(wrap){
+  wrap.appendChild(_qaLbl('Repeats'));
+  const ctl = document.createElement('div');
+  ctl.className='qa-more-field-control';
+  const sel = document.createElement('select');
+  sel.className='mfield-in';
+  [['','None'],['daily','Daily'],['weekly','Weekly'],['monthly','Monthly']].forEach(([v,l])=>{
+    const o=document.createElement('option');o.value=v;o.textContent=l;sel.appendChild(o);
+  });
+  sel.value = _qaVal().recur || '';
+  sel.onchange = () => _qaSet('recur', sel.value || null);
+  ctl.appendChild(sel);
+  wrap.appendChild(ctl);
+}
+function _renderQAStar(wrap){
+  wrap.appendChild(_qaLbl('Star'));
+  const ctl = document.createElement('div');
+  ctl.className='qa-more-field-control';
+  const b = document.createElement('button');
+  b.type='button'; b.className='mfield-chip-btn'+(_qaVal().starred?' active':'');
+  b.textContent = _qaVal().starred ? 'Starred' : 'Not starred';
+  b.onclick = () => {
+    const next = !_qaVal().starred;
+    _qaSet('starred', next || null);
+    b.classList.toggle('active', next);
+    b.textContent = next ? 'Starred' : 'Not starred';
+  };
+  ctl.appendChild(b);
+  wrap.appendChild(ctl);
+}
+function _renderQATags(wrap){
+  wrap.appendChild(_qaLbl('Tags'));
+  const ctl = document.createElement('div');
+  ctl.className='qa-more-field-control';
+  const inp = document.createElement('input');
+  inp.type='text'; inp.className='mfield-in';
+  inp.placeholder='comma-separated';
+  inp.value = (_qaVal().tags || []).join(', ');
+  inp.oninput = () => {
+    const tags = inp.value.split(',').map(s=>s.trim()).filter(Boolean);
+    _qaSet('tags', tags);
+  };
+  ctl.appendChild(inp);
+  wrap.appendChild(ctl);
+}
+function _qaLbl(text){
+  const l = document.createElement('span');
+  l.className='qa-more-field-lbl';
+  l.textContent = text;
+  return l;
+}
+
+function renderQuickAddPanel(){
+  const panel = document.getElementById('qaMorePanel');
+  if(!panel) return;
+  const enabled = (typeof cfg==='object' && cfg && Array.isArray(cfg.quickAddFields))
+    ? cfg.quickAddFields
+    : ['list','due'];
+  panel.replaceChildren();
+  if(!enabled.length){
+    const p = document.createElement('p');
+    p.className = 'qa-more-empty';
+    const a = document.createElement('a');
+    a.textContent = 'Pick fields in Settings';
+    a.onclick = () => { if(typeof showTab==='function') showTab('settings'); };
+    p.append('No fields enabled — ', a, '.');
+    panel.appendChild(p);
+    return;
+  }
+  enabled.forEach(key => {
+    const def = QUICK_ADD_FIELDS[key];
+    if(!def) return;
+    const f = document.createElement('div');
+    f.className = 'qa-more-field';
+    def.render(f);
+    panel.appendChild(f);
+  });
+}
+
+function toggleQuickAddPanel(){
+  const btn = document.getElementById('qaMoreToggle');
+  const panel = document.getElementById('qaMorePanel');
+  if(!btn || !panel) return;
+  const willOpen = panel.hidden;
+  btn.setAttribute('aria-expanded', String(willOpen));
+  panel.hidden = !willOpen;
+  if(willOpen) renderQuickAddPanel();
+}
+
+window.QUICK_ADD_FIELDS = QUICK_ADD_FIELDS;
+window.renderQuickAddPanel = renderQuickAddPanel;
+window.toggleQuickAddPanel = toggleQuickAddPanel;
+
+// Settings → Quick-add fields picker. Renders one checkbox per field so the
+// user can choose which subset appears in the inline "More options" panel.
+function renderQaFieldsCfg(){
+  const root = document.getElementById('qaFieldsCfg');
+  if(!root) return;
+  root.replaceChildren();
+  const enabledArr = (typeof cfg==='object' && cfg && Array.isArray(cfg.quickAddFields))
+    ? cfg.quickAddFields
+    : ['list','due'];
+  const enabled = new Set(enabledArr);
+  // Preserve declared order from QUICK_ADD_FIELDS so the picker is stable.
+  Object.entries(QUICK_ADD_FIELDS).forEach(([key, def]) => {
+    const lbl = document.createElement('label');
+    lbl.style.display = 'inline-flex';
+    lbl.style.alignItems = 'center';
+    lbl.style.gap = '6px';
+    lbl.style.fontSize = '12px';
+    lbl.style.color = 'var(--text-2)';
+    lbl.style.cursor = 'pointer';
+    lbl.style.padding = '6px 10px';
+    lbl.style.background = 'var(--bg-2)';
+    lbl.style.borderRadius = 'var(--r-sm)';
+    lbl.style.border = '1px solid var(--border)';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = enabled.has(key);
+    cb.style.cursor = 'pointer';
+    cb.onchange = () => {
+      if(cb.checked) enabled.add(key); else enabled.delete(key);
+      // Persist in declared order so the panel renders predictably.
+      const ordered = Object.keys(QUICK_ADD_FIELDS).filter(k => enabled.has(k));
+      if(typeof cfg === 'object' && cfg){
+        cfg.quickAddFields = ordered;
+        if(typeof saveState === 'function') saveState('user');
+      }
+      // If the inline panel is currently open, re-render so the change is
+      // visible immediately.
+      const panel = document.getElementById('qaMorePanel');
+      if(panel && !panel.hidden) renderQuickAddPanel();
+    };
+    lbl.appendChild(cb);
+    lbl.append(' ' + def.label);
+    root.appendChild(lbl);
+  });
+}
+window.renderQaFieldsCfg = renderQaFieldsCfg;

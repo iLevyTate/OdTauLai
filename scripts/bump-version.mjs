@@ -44,6 +44,18 @@ swSrc = swSrc.replace(
 );
 writeFileSync(swPath, swSrc, 'utf-8');
 
+// ── Update js/pwa.js inline-SW fallback string ────────────────────────────
+// The version-sync test asserts this stays in lock-step with version.js, so
+// keep it bumped alongside sw.js to avoid red CI on every release.
+const pwaPath = resolve(root, 'js/pwa.js');
+let pwaSrc = readFileSync(pwaPath, 'utf-8');
+pwaSrc = pwaSrc.replace(
+  /:\s*'odtaulai-v[^']+'/,
+  `: '${cacheName}'`
+);
+writeFileSync(pwaPath, pwaSrc, 'utf-8');
+
 console.log(`✅ Bumped to ${version}`);
 console.log(`   js/version.js  → version:'${version}', swCache:'${cacheName}', buildDate:'${buildDate}'`);
 console.log(`   sw.js           → CACHE_NAME:'${cacheName}'`);
+console.log(`   js/pwa.js       → inline fallback:'${cacheName}'`);

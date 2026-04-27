@@ -470,6 +470,15 @@ if(typeof renderSyncPanel==='function') renderSyncPanel();
 if(typeof renderAIPanel==='function') renderAIPanel();
 if(typeof renderGenSettings==='function') renderGenSettings();
 if(typeof syncAskPromoChip==='function') syncAskPromoChip();
+// Bottom-sheet swipe-to-dismiss on the task detail modal (mobile only).
+if(typeof _initTaskModalSwipeDismiss==='function') _initTaskModalSwipeDismiss();
+// Drag-drop reorder via Sortable.js — replaces the broken native HTML5 drag
+// path on touch devices. Single binding on #taskList; survives renders.
+if(typeof _initTaskListSortable==='function') _initTaskListSortable();
+// Settings → Quick-add fields picker. Render at init so the checkboxes
+// reflect the user's saved cfg.quickAddFields the first time they open
+// Settings (rather than on first re-render).
+if(typeof renderQaFieldsCfg==='function') renderQaFieldsCfg();
 
 // Init calendar feeds panel + auto-refresh on boot
 if(typeof renderCalFeedsPanel==='function') renderCalFeedsPanel();

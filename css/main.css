@@ -7,18 +7,22 @@
      viewport) and fall back to 100vh for browsers that don't support dvh. */
   body{min-height:100vh;min-height:100dvh;display:flex;flex-direction:column;align-items:center;padding:24px 16px 88px;background:var(--bg-0);color:var(--text-1);font-family:var(--font-sans);font-size:var(--fs-14);line-height:1.5;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
   button{cursor:pointer;font-family:inherit;border:none;-webkit-tap-highlight-color:transparent}button:hover{filter:brightness(1.12)}
-  /* Keyboard-focus outline tracks the element's rounded corners instead of
-     rendering a sharp rectangle on rounded controls. */
-  :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:inherit}
+  /* Keyboard-focus outline. Modern browsers render `outline` so it follows
+     the focused element's own `border-radius` automatically — no need (or
+     correctness) in setting `border-radius:inherit` here, which would
+     override each rounded control's own corners with the parent's (usually
+     zero) value, producing a sharp rectangle on focused chips/pills. */
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
   input,select,textarea{font-family:inherit}
   ::selection{background:rgba(106,168,255,.25);color:var(--text-1)}
-  /* Scrollbar */
+  /* Scrollbar — themed via tokens; light-theme override at body.light-theme below.
+     A second hardcoded ::-webkit-scrollbar rule used to live below this and silently
+     shadowed it at equal specificity (4px wide, hex color); removed so this wins. */
   *::-webkit-scrollbar{width:8px;height:8px}
   *::-webkit-scrollbar-track{background:transparent}
   *::-webkit-scrollbar-thumb{background:var(--bg-3);border-radius:4px}
   *::-webkit-scrollbar-thumb:hover{background:var(--border-strong)}
   input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none}input[type=number]{-moz-appearance:textfield}
-  ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:0 0}::-webkit-scrollbar-thumb{background:#1a2a3a;border-radius:4px}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.55}}
   @keyframes pop{0%{transform:scale(1)}50%{transform:scale(1.15)}100%{transform:scale(1)}}
   @keyframes slideIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
@@ -111,6 +115,24 @@
     --shadow-1:0 1px 2px rgba(0,0,0,.3);
     --shadow-2:0 4px 12px rgba(0,0,0,.25);
     --shadow-3:0 12px 32px rgba(0,0,0,.45);
+    /* Z-index stratification. Migrate hardcoded values as surfaces are touched.
+       Dialog sits above modal so app-confirm/prompt overlays render over a task
+       detail modal. Toast sits above dialog so destructive-action toasts remain
+       visible. Cmdk sits above toast so the palette never gets occluded. */
+    --z-sticky:5;
+    --z-popover:100;
+    --z-fab:500;
+    --z-modal:1000;
+    --z-dialog:1100;
+    --z-toast:1200;
+    --z-overlay:1450;
+    --z-cmdk:1500;
+    --z-skip-link:9999;
+    /* Ring-time warn/done — token-driven so light-theme can override them.
+       Dark values match the prior hardcoded #e8a838 / #ff5c4d that already
+       cleared AA against the dark --work-bg. */
+    --ring-warn-color:#e8a838;
+    --ring-done-color:#ff5c4d;
     color-scheme:dark;
   }
   body.light-theme{
@@ -130,6 +152,10 @@
     --cat-interests:#2563eb;
     --cat-personalCare:#db2777;
     --cat-general:#64748b;
+    /* Ring-time on light --work-bg (#f0f6fd) needs deeper hues to clear AA at
+       large-text thresholds (3:1). Burnt orange + brick red both pass. */
+    --ring-warn-color:#b45309;
+    --ring-done-color:#b91c1c;
   }
 
   .tabs{display:flex;gap:2px;margin-bottom:16px;background:#0a1320;border-radius:10px;padding:3px;border:1px solid #152238}
@@ -143,7 +169,12 @@
   .ring-bg{fill:none;stroke:var(--bg-3);stroke-width:6}.ring-fg{fill:none;stroke-width:6;stroke-linecap:round;transition:stroke-dashoffset .9s linear,stroke .4s}
   .ring-center{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;display:flex;flex-direction:column;align-items:center}
   /* Done state lifted from #e74c3c to #ff5c4d for AA contrast on --work-bg. */
-  .ring-time{font-size:48px;font-weight:800;letter-spacing:3px;transition:color .4s}.ring-time.warn{color:#e8a838!important;animation:pulse 1s infinite}.ring-time.done{color:#ff5c4d!important}
+  .ring-time{font-size:48px;font-weight:800;letter-spacing:3px;transition:color .4s}
+  /* Warn/done states use semantic tokens so light-theme can override without
+     fighting !important. Previously these were hardcoded #e8a838/#ff5c4d which
+     failed WCAG AA on the light --work-bg. */
+  .ring-time.warn{color:var(--ring-warn-color);animation:pulse 1s infinite}
+  .ring-time.done{color:var(--ring-done-color)}
   .ring-label{font-size:10px;letter-spacing:3px;text-transform:uppercase;margin-top:2px;transition:color .4s}
   .pips{display:flex;justify-content:center;gap:8px;margin-bottom:18px}
   .pip{width:12px;height:12px;border-radius:50%;border:2px solid #2a3a4a;background:0 0;transition:.3s;cursor:pointer}
@@ -371,14 +402,14 @@
   .task-item.completed .task-name{text-decoration:line-through}
   .task-item.overdue{border-left-color:#c0392b!important}
   .task-meta-row{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px}
-  .task-checkbox{width:18px;height:18px;border-radius:4px;border:2px solid #2a4a6a;background:transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:.15s;padding:0}
-  .task-checkbox:hover{border-color:#3d8bcc}
-  .task-checkbox.checked{background:linear-gradient(135deg,#1a5a2a,#228b3b);border-color:#228b3b;color:#fff;font-size:10px}
+  /* .task-checkbox is defined further below in the themed component block —
+     the legacy 18px/hex-bordered rule that used to live here was dead code
+     (shadowed by source order) and has been removed. */
   .task-estimate{font-size:9px;color:#5a6a7a;letter-spacing:.5px}
   .task-desc-preview{font-size:10px;color:#5a6a7a;font-style:italic;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
 
   /* Task Detail Modal */
-  .modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.75);backdrop-filter:blur(4px);z-index:1000;display:none;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto}
+  .modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.75);backdrop-filter:blur(4px);z-index:var(--z-modal);display:none;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto}
   .modal-overlay.open{display:flex;animation:fadeIn .2s}
   @keyframes fadeIn{from{opacity:0}to{opacity:1}}
   .modal{background:#0d1a2d;border:1px solid #1a2d44;border-radius:14px;width:100%;max-width:560px;box-shadow:0 20px 60px rgba(0,0,0,.6);animation:modalSlide .25s}
@@ -507,7 +538,7 @@
   .recur-opt:hover:not(.active){color:#c8d6e5;border-color:#2a4a6e}
 
   /* Floating Mini Timer (shown on all tabs except Timer tab) */
-  .mini-timer{position:fixed;bottom:16px;right:16px;z-index:500;display:none;align-items:center;gap:10px;padding:10px 14px;background:rgba(13,26,45,.95);backdrop-filter:blur(8px);border:1px solid #1a2d44;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.5);transition:.2s;font-family:inherit;cursor:pointer;user-select:none}
+  .mini-timer{position:fixed;bottom:16px;right:16px;z-index:var(--z-fab);display:none;align-items:center;gap:10px;padding:10px 14px;background:rgba(13,26,45,.95);backdrop-filter:blur(8px);border:1px solid #1a2d44;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,.5);transition:.2s;font-family:inherit;cursor:pointer;user-select:none}
   .mini-timer.visible{display:flex;animation:fadeIn .25s}
   .mini-timer:hover{border-color:#2a4a6a;transform:translateY(-1px)}
   .mini-timer.work{border-left:3px solid #3d8bcc}
@@ -521,8 +552,10 @@
   .mt-info{display:flex;flex-direction:column;gap:1px;min-width:0}
   .mt-label{font-size:8px;color:#5a8ab5;letter-spacing:1.5px;text-transform:uppercase;font-weight:700}
   .mt-time{font-size:16px;font-weight:800;color:#e2e8f0;font-variant-numeric:tabular-nums;letter-spacing:1px}
-  .mt-time.warn{color:#e8a838;animation:pulse 1s infinite}
-  .mt-time.done{color:#e74c3c}
+  /* Warn/done use the same themed tokens as .ring-time so light-mode contrast
+     stays readable; previously hardcoded to dark-mode-tuned hex values. */
+  .mt-time.warn{color:var(--ring-warn-color);animation:pulse 1s infinite}
+  .mt-time.done{color:var(--ring-done-color)}
   .mt-btn{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:none;font-size:11px;cursor:pointer;transition:.15s;flex-shrink:0;color:#fff;font-family:inherit}
   .mt-play{background:linear-gradient(135deg,#1a5a2a,#228b3b)}
   .mt-pause{background:linear-gradient(135deg,#2471a3,#3d8bcc)}
@@ -653,13 +686,22 @@
   .what-next-pill:hover{background:rgba(61,139,204,.12);border-color:rgba(61,139,204,.35)}
 
   /* Header AI status — model load / ready */
-  .ai-chip{position:relative;display:inline-flex;align-items:center;gap:5px;flex-shrink:0;height:38px;padding:0 10px;border-radius:var(--r-sm);border:1px solid var(--border);background:var(--bg-1);color:var(--text-2);font-size:11px;font-weight:600;font-family:inherit;cursor:pointer;transition:background .15s,border-color .15s}
+  /* Outer min-width pins the chip to its widest realistic state. The widest
+     label content is "100%" (4 chars, tabular-nums) which measures ~26px at
+     the chip's 11px font. With 7px dot + 5px gap + 20px horizontal padding +
+     2px border, that's ~62px. Use 64px to absorb sub-pixel rounding so the
+     content swap from "100%" → "AI" → "✓" never reflows the .header-utils
+     row, which would shift the theme toggle and Cmd-K button.  */
+  .ai-chip{position:relative;display:inline-flex;align-items:center;justify-content:center;gap:5px;flex-shrink:0;height:38px;min-width:64px;padding:0 10px;border-radius:var(--r-sm);border:1px solid var(--border);background:var(--bg-1);color:var(--text-2);font-size:11px;font-weight:600;font-family:inherit;cursor:pointer;transition:background .15s,border-color .15s}
   .ai-chip:hover{background:var(--bg-2);border-color:var(--border-strong)}
   .ai-chip-dot{width:7px;height:7px;border-radius:50%;background:var(--text-4);flex-shrink:0}
   .ai-chip--syncing .ai-chip-dot{background:var(--warning);animation:pulse 1.2s infinite}
   .ai-chip--ok .ai-chip-dot{background:var(--success)}
   .ai-chip--err .ai-chip-dot{background:var(--danger)}
-  .ai-chip-label{font-variant-numeric:tabular-nums;min-width:1.2em;text-align:center}
+  /* Inner label uses a 4ch reservation (matches "100%") so content swaps
+     don't shrink the chip below the outer min-width and produce a visible
+     label-jitter even within the pinned shell. */
+  .ai-chip-label{font-variant-numeric:tabular-nums;min-width:4ch;text-align:center}
   .ai-chip-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;clip-path:inset(50%)}
   .sys-info-ok{color:var(--success)}
   .sys-info-warn{color:var(--warning)}
@@ -776,6 +818,53 @@
   .qa-hint-tokens{display:inline-flex;flex-wrap:wrap;gap:var(--space-2);align-items:center}
   /* Legacy code-tag styling preserved for any other surfaces still using it. */
   .qa-hint code{background:var(--bg-2);color:var(--text-2);padding:2px 6px;border-radius:4px;font-size:11px;border:1px solid var(--border)}
+  /* Disclosure button shown when the syntax hint is hidden (default state).
+     Subtle text-link styling — discoverable but doesn't clutter the form. */
+  .qa-hint-reveal{
+    background:transparent;border:none;padding:6px 2px;margin:0;
+    color:var(--text-3);font-family:inherit;font-size:var(--fs-12);
+    cursor:pointer;text-decoration:underline;text-decoration-color:var(--border-strong);
+    text-underline-offset:3px;text-decoration-thickness:1px;
+    transition:color .12s,text-decoration-color .12s;
+  }
+  .qa-hint-reveal:hover{color:var(--text-1);text-decoration-color:var(--accent)}
+  .qa-hint-reveal:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+
+  /* "More options" disclosure: opens the configurable inline quick-add panel.
+     Subtle until tapped — the form should read as one-line by default. */
+  .qa-more-toggle{
+    display:inline-flex;align-items:center;gap:4px;
+    background:transparent;border:none;padding:6px 2px;margin:0;
+    color:var(--text-3);font-family:inherit;font-size:var(--fs-12);
+    cursor:pointer;
+  }
+  .qa-more-toggle:hover{color:var(--text-1)}
+  .qa-more-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+  .qa-more-chevron{font-size:9px;line-height:1;transition:transform .2s}
+  .qa-more-toggle[aria-expanded="true"] .qa-more-chevron{transform:rotate(180deg)}
+
+  /* Configurable quick-add panel — fields are rendered by renderQuickAddPanel().
+     Hidden until user expands. Each field is its own sub-block separated by a
+     dashed rule for clean delimitation. */
+  .qa-more-panel{
+    display:flex;flex-direction:column;gap:var(--space-5);
+    padding:var(--space-6) var(--space-4);
+    margin:var(--space-3) 0 var(--space-2);
+    background:var(--bg-1);border:1px solid var(--border-subtle);
+    border-radius:var(--r-md);
+  }
+  .qa-more-panel[hidden]{display:none}
+  .qa-more-field{display:flex;flex-direction:column;gap:var(--space-3)}
+  .qa-more-field-lbl{
+    font-size:var(--fs-12);color:var(--text-3);
+    letter-spacing:.04em;text-transform:uppercase;font-weight:600;
+  }
+  .qa-more-field-control{display:flex;flex-wrap:wrap;gap:var(--space-3);align-items:center}
+  .qa-more-empty{
+    color:var(--text-4);font-size:var(--fs-12);font-style:italic;
+    margin:0;padding:var(--space-3) 0;
+  }
+  .qa-more-empty a{color:var(--accent);text-decoration:underline;cursor:pointer}
 
   /* Live parse-token preview — visible while user is typing, shows what
      quick-add tokens were detected so users trust the parser. */
@@ -1021,9 +1110,16 @@
   /* Drag-and-drop */
   .task-item[draggable="true"]{cursor:grab}
   .task-item[draggable="true"]:active{cursor:grabbing}
-  .task-item.dragging{opacity:.4}
-  .task-item.drop-above{box-shadow:0 -2px 0 var(--accent) inset,0 -3px 12px rgba(106,168,255,.3) inset;border-top:2px solid var(--accent)}
-  .task-item.drop-below{box-shadow:0 2px 0 var(--accent) inset,0 3px 12px rgba(106,168,255,.3) inset;border-bottom:2px solid var(--accent)}
+  /* Legacy native-drag visuals (.dragging, .drop-above, .drop-below) replaced
+     by Sortable.js classes: .task-item--ghost (placeholder slot in flow),
+     .task-item--chosen (the row your finger is on), .task-item--dragging
+     (the floating ghost while moving). The legacy classes are kept defined
+     in case any external integration still adds them, but they now point at
+     the Sortable equivalents so we don't carry dead styles. */
+  .task-item.dragging,
+  .task-item--dragging{opacity:.85;box-shadow:var(--shadow-3);transform:scale(1.02)}
+  .task-item--ghost{opacity:.35;background:var(--accent-bg)!important;border:1px dashed var(--accent-border)!important}
+  .task-item--chosen{box-shadow:0 0 0 2px var(--accent-border) inset}
   .board-col.drop-target{background:var(--accent-bg);border-color:var(--accent-border)}
   .drag-handle{cursor:grab;color:var(--text-4);font-size:14px;padding:0 2px;flex-shrink:0;user-select:none;width:12px;display:flex;align-items:center;justify-content:center}
   .drag-handle:hover{color:var(--text-2)}
@@ -1112,7 +1208,7 @@
   .cal-task-more{font-size:10px;color:var(--text-3);text-align:center;padding:2px}
 
   /* Command Palette (Cmd+K) */
-  .cmdk-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(6px);z-index:1500;display:none;align-items:flex-start;justify-content:center;padding:80px 16px 16px}
+  .cmdk-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(6px);z-index:var(--z-cmdk);display:none;align-items:flex-start;justify-content:center;padding:80px 16px 16px}
   .cmdk-overlay.open{display:flex;animation:fadeIn .15s}
   .cmdk-panel{background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-lg);width:100%;max-width:560px;box-shadow:var(--shadow-3);overflow:hidden;max-height:min(90vh, 90dvh)}
   .cmdk-input{width:100%;padding:16px 18px;background:transparent;border:none;color:var(--text-1);font-size:15px;font-family:inherit;outline:0;border-bottom:1px solid var(--border)}
@@ -1480,15 +1576,18 @@
     .tb-lbl{font-size:10px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .tb-divider{display:none!important}
 
-    /* Smart views - horizontal scroll instead of wrap */
-    .smart-views{padding:4px;overflow-x:auto;flex-wrap:nowrap!important;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+    /* Smart views - horizontal scroll instead of wrap. mask-image fades the
+       right edge so users SEE that more chips exist beyond the viewport;
+       without it, "Fo..." cut-offs read as visual bugs rather than scroll
+       affordances. */
+    .smart-views{padding:4px;overflow-x:auto;flex-wrap:nowrap!important;scrollbar-width:none;-webkit-overflow-scrolling:touch;-webkit-mask-image:linear-gradient(90deg,#000 0,#000 calc(100% - 28px),transparent 100%);mask-image:linear-gradient(90deg,#000 0,#000 calc(100% - 28px),transparent 100%)}
     .smart-views::-webkit-scrollbar{display:none}
     .sv-chip{white-space:nowrap;flex-shrink:0;padding:10px 12px;min-height:40px;font-size:13px}
     .sv-icon{font-size:14px}
     .sv-count{font-size:11px;padding:1px 7px}
 
-    /* Lists bar - horizontal scroll */
-    .lists-bar{overflow-x:auto;flex-wrap:nowrap!important;scrollbar-width:none;gap:6px;padding:8px}
+    /* Lists bar - horizontal scroll, same fade affordance as smart-views. */
+    .lists-bar{overflow-x:auto;flex-wrap:nowrap!important;scrollbar-width:none;gap:6px;padding:8px;-webkit-mask-image:linear-gradient(90deg,#000 0,#000 calc(100% - 28px),transparent 100%);mask-image:linear-gradient(90deg,#000 0,#000 calc(100% - 28px),transparent 100%)}
     .lists-bar::-webkit-scrollbar{display:none}
     .list-chip{white-space:nowrap;flex-shrink:0;padding:8px 12px;min-height:40px;font-size:13px}
     .list-add{flex-shrink:0;padding:8px 12px;min-height:40px;font-size:13px}
@@ -1541,7 +1640,16 @@
     .modal-overlay{align-items:flex-end;padding:0!important}
     .modal{width:100%!important;max-width:100%!important;max-height:92vh;border-radius:16px 16px 0 0;animation:slideUp .25s ease-out}
     @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
-    .modal-head{padding:14px 16px;position:sticky;top:0;background:var(--bg-1);z-index:2;border-bottom:1px solid var(--border)}
+    /* Bottom-sheet drag-handle affordance — telegraphs "swipe down to close"
+       on mobile per iOS / Android sheet conventions. The header wears the
+       handle so dragging the body's scroll area doesn't dismiss accidentally. */
+    .modal-head{padding:18px 16px 14px;position:sticky;top:0;background:var(--bg-1);z-index:2;border-bottom:1px solid var(--border);touch-action:none;cursor:grab}
+    .modal-head::before{
+      content:"";position:absolute;top:6px;left:50%;transform:translateX(-50%);
+      width:36px;height:4px;border-radius:999px;background:var(--border-strong);
+      opacity:.7;
+    }
+    .modal-head:active{cursor:grabbing}
     .modal-body{padding:14px 16px;padding-bottom:calc(100px + env(safe-area-inset-bottom,0px));-webkit-overflow-scrolling:touch}
     .modal-foot{position:sticky;bottom:0;background:var(--bg-1);padding:12px 16px calc(12px + env(safe-area-inset-bottom,0px));z-index:2;border-top:1px solid var(--border);box-shadow:0 -4px 12px rgba(0,0,0,.3);flex-wrap:wrap;gap:6px}
     .mfoot-btn{flex:1;min-height:44px;font-size:14px;padding:11px 14px}
@@ -1651,8 +1759,10 @@
     .nav-tab{min-height:44px}
     .tb-num{font-size:20px!important}
     .tb-lbl{font-size:9px!important}
-    .task-add span{display:none}
-    .task-add::before{content:'+';font-size:18px;font-weight:700}
+    /* Earlier passes attempted an icon-only Add by hiding `.task-add span` and
+       injecting `+` via ::before — but the button label is bare text, not a
+       span, so the hide-rule was dead and the ::before stacked on top of the
+       existing "+ Add" producing "+ + Add" at <360px. Keep the full label. */
     .view-toggle button{font-size:12px;padding:6px 8px}
   }
 
@@ -1691,8 +1801,13 @@
     .sv-icon{font-size:13px}
     .sv-count{font-size:10px;min-width:14px;text-align:center}
 
-    /* === LISTS BAR: horizontal scroll === */
-    .lists-bar{overflow-x:auto;flex-wrap:nowrap!important;scrollbar-width:none;gap:4px;padding:6px}
+    /* === LISTS BAR: horizontal scroll, same edge-fade as smart-views above
+       so the cutoff reads as scrollable rather than broken. === */
+    .lists-bar{
+      overflow-x:auto;flex-wrap:nowrap!important;scrollbar-width:none;gap:4px;padding:6px;
+      mask-image:linear-gradient(to right,transparent 0,#000 8px,#000 calc(100% - 20px),transparent 100%);
+      -webkit-mask-image:linear-gradient(to right,transparent 0,#000 8px,#000 calc(100% - 20px),transparent 100%);
+    }
     .lists-bar::-webkit-scrollbar{display:none}
     /* Touch target: 44px min so list chips comfortably tap on mobile */
     .list-chip,.list-add{flex-shrink:0;padding:10px 12px;min-height:44px;font-size:13px}
@@ -1842,21 +1957,9 @@
     .header h1{font-size:15px}
   }
 
-  /* === Classification editor (Settings → Classifications): stack form controls vertically on mobile === */
-  @media (max-width:640px){
-    .class-mgr-row{
-      display:grid;
-      grid-template-columns:repeat(3, 1fr);
-      gap:8px;
-    }
-    .class-mgr-row > *{width:100%}
-    .class-mgr-in, .class-mgr-sel, .class-mgr-sel-color, .class-mgr-id{
-      grid-column:1 / -1;
-      max-width:100%;
-    }
-    .class-mgr-id{text-align:center}
-    .class-mgr-btn{min-height:40px;padding:8px 4px;font-size:13px}
-  }
+  /* Classification editor mobile rules live further down (after base styles)
+     so the cascade resolves the way you'd expect. See the @media block
+     near the .class-mgr-* base rules. */
 
   /* === Native form controls: keep date/time/datetime pickers inside their containers ===
      Android Chrome's native picker is wider than the input by default, which can
@@ -2131,7 +2234,7 @@
 .intel-progress-bar{height:100%;background:var(--accent);border-radius:999px;transition:width .3s}
 .intel-progress-info{font-size:11px;color:var(--text-3);display:flex;gap:8px;justify-content:space-between}
 /* Generative LLM download / rehydrate — visible on every tab */
-.gen-load-ribbon{position:fixed;left:50%;bottom:max(12px,env(safe-area-inset-bottom));transform:translateX(-50%);z-index:1200;display:flex;flex-direction:column;gap:8px;min-width:min(440px,94vw);max-width:94vw;padding:11px 15px;border-radius:12px;background:var(--bg-1);border:1px solid var(--border-strong);box-shadow:0 10px 36px rgba(0,0,0,.22)}
+.gen-load-ribbon{position:fixed;left:50%;bottom:max(12px,env(safe-area-inset-bottom));transform:translateX(-50%);z-index:var(--z-toast);display:flex;flex-direction:column;gap:8px;min-width:min(440px,94vw);max-width:94vw;padding:11px 15px;border-radius:12px;background:var(--bg-1);border:1px solid var(--border-strong);box-shadow:0 10px 36px rgba(0,0,0,.22)}
 .gen-load-ribbon[hidden]{display:none!important}
 .gen-load-ribbon__track{position:relative;height:7px;background:var(--bg-3);border-radius:999px;overflow:hidden}
 .gen-load-ribbon__bar{height:100%;width:0%;background:var(--accent);border-radius:999px;transition:width .22s ease-out}
@@ -2155,6 +2258,23 @@
 .bulk-import-label{display:block;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);margin-bottom:6px}
 .bulk-import-textarea{min-height:220px;font-family:var(--font-mono);font-size:12px;line-height:1.45}
 .bulk-import-modal .modal-body{padding-top:8px}
+/* Auto-organize toggle row — sits between the textarea and the modal footer
+   so it reads as an option that affects the next click of "Add tasks". */
+.bulk-import-auto{
+  display:flex;align-items:flex-start;gap:10px;margin:12px 0 0;padding:10px;
+  border-radius:var(--r-sm);border:1px solid var(--border);background:var(--bg-2);
+  cursor:pointer;font-size:12px;color:var(--text-2);
+}
+.bulk-import-auto input[type=checkbox]{margin-top:2px;flex-shrink:0;cursor:pointer}
+.bulk-import-auto-text{display:flex;flex-direction:column;gap:2px}
+.bulk-import-auto-text strong{color:var(--text-1);font-size:13px;font-weight:600}
+.bulk-import-auto-hint{font-size:11px;color:var(--text-3);line-height:1.4}
+.bulk-import-progress{
+  margin-top:10px;padding:8px 10px;border-radius:var(--r-sm);
+  background:var(--accent-bg);border:1px solid var(--accent-border);color:var(--accent);
+  font-size:12px;font-weight:600;
+}
+.bulk-import-progress[hidden]{display:none}
 #bulkImportConfirm:disabled{opacity:.45;cursor:not-allowed}
 .intel-dup-section{font-size:12px;margin-top:8px;padding:8px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;max-height:200px;overflow-y:auto}
 .intel-dup-hdr{font-weight:700;margin-bottom:6px;color:var(--text-2)}
@@ -2203,7 +2323,7 @@
 .task-search-semantic{font-size:11px;color:var(--text-3);display:flex;align-items:center;gap:5px;white-space:nowrap;cursor:pointer;user-select:none}
 .task-search-semantic--disabled{opacity:.65;cursor:not-allowed}
 .task-search-semantic--disabled input{cursor:not-allowed}
-.what-next-overlay{position:fixed;inset:0;background:rgba(5,10,18,.72);z-index:1450;display:flex;align-items:flex-start;justify-content:center;padding:max(16px, env(safe-area-inset-top)) 12px 24px;overflow:auto}
+.what-next-overlay{position:fixed;inset:0;background:rgba(5,10,18,.72);z-index:var(--z-overlay);display:flex;align-items:flex-start;justify-content:center;padding:max(16px, env(safe-area-inset-top)) 12px 24px;overflow:auto}
 .what-next-panel{background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-lg);max-width:440px;width:100%;padding:16px 18px;box-shadow:var(--shadow-1);margin-top:8vh}
 .what-next-hdr{display:flex;justify-content:space-between;align-items:center;font-weight:700;font-size:15px;margin-bottom:6px}
 .what-next-x{background:none;border:none;color:var(--text-3);cursor:pointer;font-size:16px;padding:4px}
@@ -2218,6 +2338,10 @@
 .md-similar-wrap{margin-top:4px}
 .similar-acc-trigger{width:100%;display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-1);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}
 .similar-acc-chevron{font-size:10px;opacity:.7;transition:transform .2s}
+/* Rotation tracks the sibling panel's `.open` state. The toggle JS only
+   touches the panel — without this, the chevron had a transition declared
+   but no state ever firing it. */
+.md-similar-wrap:has(.similar-acc-panel.open) .similar-acc-chevron{transform:rotate(180deg)}
 .similar-acc-panel{display:none;max-height:200px;overflow-y:auto;margin-top:6px}
 .similar-acc-panel.open{display:block}
 .md-similar-tasks{display:flex;flex-direction:column;gap:4px}
@@ -2622,8 +2746,21 @@ body:has(.offline-indicator:not([style*="display:none"])){ padding-top:30px; }
 .set-section-sum,.md-section-sum{
   font-size:13px;font-weight:600;color:var(--text-1);
   padding:12px 14px;cursor:pointer;list-style:none;
+  display:flex;align-items:center;
 }
 .set-section-sum::-webkit-details-marker,.md-section-sum::-webkit-details-marker{display:none}
+/* Disclosure chevron — matches .views-accordion-summary pattern. The native
+   <details> marker was disabled above; without this, the summary read as a
+   static heading rather than a collapsible disclosure. Rotates 180° when open. */
+.set-section-sum::after,.md-section-sum::after{
+  content:"";width:0;height:0;margin-left:auto;
+  border-left:4px solid transparent;border-right:4px solid transparent;
+  border-top:5px solid var(--text-3);
+  transition:transform .2s;
+}
+.set-section[open] .set-section-sum::after,.md-section[open] .md-section-sum::after{
+  transform:rotate(180deg);
+}
 .set-section-body,.md-section-body{padding:4px 14px 14px}
 .set-section-body .srow:first-child{margin-top:0}
 .md-section-body .mfield:first-child{margin-top:0}
@@ -2632,18 +2769,68 @@ body:has(.offline-indicator:not([style*="display:none"])){ padding-top:30px; }
 .class-mgr-hdr{font-size:11px;font-weight:700;letter-spacing:.06em;color:var(--text-3);text-transform:uppercase;margin-bottom:8px}
 .class-mgr-row{
   display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:8px;
-  padding:8px;border-radius:var(--r-sm);background:var(--bg-2);border:1px solid var(--border);
+  padding:10px;border-radius:var(--r-sm);background:var(--bg-2);border:1px solid var(--border);
 }
 .class-mgr-row--hidden{opacity:.55}
-.class-mgr-in{flex:1 1 120px;min-width:0;padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-1);color:var(--text-1);font-family:inherit;font-size:12px}
-.class-mgr-sel{padding:6px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-1);color:var(--text-1);font-size:11px;max-width:140px}
-.class-mgr-sel-color{flex:1 1 200px;max-width:min(100%,260px);font-size:10px}
+/* Desktop control sizing — consistent 13px font + 32px min-height across
+   input/selects/buttons so the row reads as a single component. The label
+   input gets a touch more prominence via slightly larger font + weight,
+   matching the mobile hierarchy. */
+.class-mgr-in{flex:1 1 160px;min-width:0;padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg-1);color:var(--text-1);font-family:inherit;font-size:14px;font-weight:500;min-height:34px}
+.class-mgr-sel{padding:7px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg-1);color:var(--text-1);font-size:13px;font-family:inherit;min-height:34px;max-width:140px}
+.class-mgr-sel-color{flex:1 1 180px;max-width:min(100%,240px);font-size:13px}
 .class-mgr-btn{
-  padding:4px 10px;font-size:11px;border-radius:6px;border:1px solid var(--border);
+  padding:7px 12px;font-size:13px;border-radius:6px;border:1px solid var(--border);
   background:var(--bg-1);color:var(--text-2);cursor:pointer;font-family:inherit;
+  min-height:34px;
 }
 .class-mgr-btn:hover{border-color:var(--accent-border);color:var(--text-1)}
-.class-mgr-id{font-size:10px;color:var(--text-4);padding:2px 6px;background:var(--bg-3);border-radius:4px}
+.class-mgr-id{font-size:11px;color:var(--text-4);padding:3px 8px;background:var(--bg-3);border-radius:4px;font-family:var(--font-mono);letter-spacing:.02em}
+
+/* === Classification editor on mobile (must come AFTER the base flex rules
+   above so this @media block actually wins the cascade — earlier mobile
+   override sat above the base rule and was silently overridden) ===
+   7 children get grouped into 4 logical rows by functional role so the
+   surface has clear hierarchy:
+     Row 1 — label              (identity, prominent: 15px / 600)
+     Row 2 — icon + color       (appearance, 1fr + 2fr split)
+     Row 3 — Hide / ↑ / ↓       (actions, 3 equal columns)
+     Row 4 — id badge           (metadata footnote, subtle, centered)
+   Heights normalized to 40/44px so touch targets are consistent and the
+   row reads as one coherent component instead of seven stacked. */
+@media (max-width:640px){
+  .class-mgr-cat{margin-bottom:12px}
+  .class-mgr-row{
+    display:grid;
+    grid-template-columns:1fr 1fr 1fr;
+    gap:8px;
+    padding:12px;
+  }
+  .class-mgr-row > *{max-width:none;min-width:0}
+  .class-mgr-row > .class-mgr-in{
+    grid-column:1 / -1;
+    font-size:15px;font-weight:600;
+    min-height:44px;padding:10px 12px;
+  }
+  .class-mgr-row > .class-mgr-sel:not(.class-mgr-sel-color){
+    grid-column:1 / 2;
+    font-size:13px;min-height:40px;padding:8px 10px;
+  }
+  .class-mgr-row > .class-mgr-sel-color{
+    grid-column:2 / -1;
+    font-size:13px;min-height:40px;padding:8px 10px;
+  }
+  .class-mgr-row > .class-mgr-btn{
+    grid-column:span 1;
+    min-height:40px;padding:8px 4px;font-size:13px;
+  }
+  .class-mgr-row > .class-mgr-id{
+    grid-column:1 / -1;
+    justify-self:center;
+    font-size:11px;padding:4px 10px;
+    opacity:.7;
+  }
+}
 .class-mgr-add{margin-top:4px}
 .class-mgr-cat{margin-bottom:8px}
 .class-mgr-cat--hidden{opacity:0.55}
@@ -2694,6 +2881,27 @@ body:has(.offline-indicator:not([style*="display:none"])){ padding-top:30px; }
   font-variant-numeric:tabular-nums;
 }
 .habit-log-list li:last-child{border-bottom:none}
+
+/* Per-task session history list — one row per timer session recorded into
+   t.sessionEntries. Visually parallel to .habit-log-list so the two
+   read as siblings inside the Tracking section. */
+.md-sessions{font-size:12px;color:var(--text-2)}
+.md-sessions-list{list-style:none;margin:0;padding:0;max-height:200px;overflow-y:auto}
+.md-sessions-item{
+  display:flex;align-items:center;gap:10px;padding:6px 0;
+  border-bottom:1px solid var(--border-subtle);
+  font-variant-numeric:tabular-nums;
+}
+.md-sessions-item:last-child{border-bottom:none}
+.md-sessions-ts{flex:1;color:var(--text-2);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.md-sessions-dur{font-weight:600;color:var(--text-1)}
+.md-sessions-tag{
+  font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
+  padding:2px 6px;border-radius:999px;
+  background:var(--warning-bg);color:var(--warning);border:1px solid var(--warning-border);
+}
+.md-sessions-item--partial .md-sessions-dur{color:var(--warning)}
+.md-sessions-more{padding:6px 0;color:var(--text-3);font-size:11px;font-style:italic;text-align:center}
 
 .iprev .ui-ic{width:16px;height:16px}
 
@@ -2780,7 +2988,7 @@ body:has(.offline-indicator:not([style*="display:none"])){ padding-top:30px; }
   }
 
   /* Skip-to-content: hidden until a keyboard user tabs into it from page load. */
-  .skip-link{position:absolute;inset-block-start:-44px;inset-inline-start:8px;background:var(--accent);color:var(--bg-0);padding:8px 14px;border-radius:var(--r-sm);font-weight:700;font-size:13px;letter-spacing:.02em;z-index:9999;transition:inset-block-start .15s;text-decoration:none}
+  .skip-link{position:absolute;inset-block-start:-44px;inset-inline-start:8px;background:var(--accent);color:var(--bg-0);padding:8px 14px;border-radius:var(--r-sm);font-weight:700;font-size:13px;letter-spacing:.02em;z-index:var(--z-skip-link);transition:inset-block-start .15s;text-decoration:none}
   .skip-link:focus,.skip-link:focus-visible{inset-block-start:8px;outline:2px solid var(--text-1);outline-offset:2px}
 .drag-handle{cursor:grab;color:var(--text-4);font-size:15px;padding:0 2px;user-select:none;line-height:1;flex-shrink:0}
 @media (prefers-reduced-motion: reduce){
@@ -3009,7 +3217,7 @@ button.hist-day{display:block;width:100%;font:inherit;cursor:pointer;background:
 .task-toolbar-display{align-items:center;gap:8px;flex-wrap:wrap}
 .app-dlg{max-width:420px}
 .app-dlg-msg{color:var(--text-1)}
-.app-dlg-overlay{z-index:1100}
+.app-dlg-overlay{z-index:var(--z-dialog)}
 
 
 /* ───── G-17 stats-by-life-area ───── */

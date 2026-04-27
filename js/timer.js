@@ -14,7 +14,7 @@ function toggleSettings(){
 }
 
 // ========== STATE ==========
-let cfg={work:25,short:5,long:15,cycle:4,autoBreak:true,autoWork:false,sound:true,linkTask:true,notif:true,timerSub:'pomo',hideHabitsInMainViews:true,askSessionNote:true,focusListMode:false,phasePreset:'classic'};
+let cfg={work:25,short:5,long:15,cycle:4,autoBreak:true,autoWork:false,sound:true,linkTask:true,notif:true,timerSub:'pomo',hideHabitsInMainViews:true,askSessionNote:true,focusListMode:false,phasePreset:'classic',qaHintHidden:true,askPromoHidden:true,quickAddFields:['list','due']};
 
 /** Named Pomodoro phase presets — applies to cfg.work/short/cycle on selection. */
 const PHASE_PRESETS = {
@@ -133,10 +133,24 @@ function onPhaseComplete(){
   let completedTaskIdForNote = null;
   if(phase==='work'){pomosInCycle++;totalPomos++;totalFocusSec+=totalDuration;sessionHistory.push({type:'work'});
     const pips=gid('pips').children;if(pips[pomosInCycle-1])pips[pomosInCycle-1].classList.add('done','pop');
-    if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000);t.sessions++;taskStartedAt=null;addLog(t.name,totalDuration,'work');completedTaskIdForNote=t.id}}else addLog('Focus',totalDuration,'work')
+    if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){
+      const sessSec=Math.floor((Date.now()-taskStartedAt)/1000);
+      t.totalSec+=sessSec;t.sessions++;taskStartedAt=null;
+      // Per-session log on the task itself so the detail modal can show every
+      // timer event distinctly, not just the rolling total + counter. Each
+      // entry is small (4 fields) so storage growth is bounded by usage.
+      if(!Array.isArray(t.sessionEntries)) t.sessionEntries=[];
+      t.sessionEntries.push({ts:timeNowFull(),durationSec:sessSec,type:'work',phase:'work'});
+      addLog(t.name,totalDuration,'work');completedTaskIdForNote=t.id;
+    }}else addLog('Focus',totalDuration,'work')
   }else{totalBreaks++;sessionHistory.push({type:phase});addLog(getPL(phase),getPS(phase),phase)}
   if(completedTaskIdForNote && cfg.askSessionNote && typeof showSessionNotePrompt === 'function'){
     showSessionNotePrompt(completedTaskIdForNote);
+  }
+  // If the task detail modal happens to be open on the just-completed task,
+  // refresh its tracking display so the new session shows up live.
+  if(completedTaskIdForNote && typeof refreshOpenTaskModalIfMatches === 'function'){
+    refreshOpenTaskModalIfMatches(completedTaskIdForNote);
   }
   // Scheduled audio already fired at the right moment; only play manually if scheduling failed
   if(cfg.sound&&!audioScheduled)(phase==='work'?playTransition:playBreakEnd)();
@@ -149,7 +163,43 @@ function onPhaseComplete(){
   else if(phase!=='work'&&cfg.autoWork)setTimeout(()=>{if(finished)advancePhase()},1500)
 }
 function advancePhase(){if(phase==='work')phase=pomosInCycle>=cfg.cycle?'long':'short';else{if(phase==='long')pomosInCycle=0;phase='work'}finished=false;fireCounts={};setPhaseTime();renderAll();if((phase!=='work'&&cfg.autoBreak)||(phase==='work'&&cfg.autoWork))setTimeout(startTimer,300)}
-function skipPhase(){const wasRunning=running;running=false;clearInterval(tickId);cancelScheduledAudio();const el=wasRunning?Math.floor((Date.now()-startedAt)/1000):0;remaining=Math.max(0,pausedRemaining-el);const worked=totalDuration-remaining;if(phase==='work'){if(worked>30)totalFocusSec+=worked;if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000);t.sessions++;taskStartedAt=null;addLog(t.name,worked,'work')}}else if(worked>30){addLog('Focus (partial)',worked,'work')}if(worked>30){pomosInCycle++;totalPomos++;sessionHistory.push({type:'work'});const pips=gid('pips').children;if(pips[pomosInCycle-1])pips[pomosInCycle-1].classList.add('done','pop')}}else{totalBreaks++;sessionHistory.push({type:phase});addLog(getPL(phase),worked||getPS(phase),phase)}if(cfg.sound)(phase==='work'?playTransition:playBreakEnd)();notify(getPL(phase)+' Skipped','Moving to next phase.');finished=true;gid('display').className='ring-time done';gid('display').textContent='00:00';gid('phaseLabel').textContent=getPL(phase)+' Complete';renderStats();renderCtrls();renderTaskList();updateTitle();saveState('user');if(phase==='work'&&cfg.autoBreak)setTimeout(()=>{if(finished)advancePhase()},1500);else if(phase!=='work'&&cfg.autoWork)setTimeout(()=>{if(finished)advancePhase()},1500)}
+function skipPhase(){
+  const wasRunning=running;running=false;clearInterval(tickId);cancelScheduledAudio();
+  const el=wasRunning?Math.floor((Date.now()-startedAt)/1000):0;
+  remaining=Math.max(0,pausedRemaining-el);
+  const worked=totalDuration-remaining;
+  let _skippedTaskId=null;
+  if(phase==='work'){
+    if(worked>30)totalFocusSec+=worked;
+    if(activeTaskId&&taskStartedAt){
+      const t=findTask(activeTaskId);
+      if(t){
+        const sessSec=Math.floor((Date.now()-taskStartedAt)/1000);
+        t.totalSec+=sessSec;t.sessions++;taskStartedAt=null;
+        addLog(t.name,worked,'work');
+        // Same per-session log as completion, marked partial so detail UI can
+        // distinguish a finished pomodoro from a skip.
+        if(sessSec>0){
+          if(!Array.isArray(t.sessionEntries)) t.sessionEntries=[];
+          t.sessionEntries.push({ts:timeNowFull(),durationSec:sessSec,type:'work-partial',phase:'work'});
+        }
+        _skippedTaskId=t.id;
+      }
+    }else if(worked>30){addLog('Focus (partial)',worked,'work')}
+    if(worked>30){pomosInCycle++;totalPomos++;sessionHistory.push({type:'work'});const pips=gid('pips').children;if(pips[pomosInCycle-1])pips[pomosInCycle-1].classList.add('done','pop')}
+  }else{
+    totalBreaks++;sessionHistory.push({type:phase});addLog(getPL(phase),worked||getPS(phase),phase);
+  }
+  if(cfg.sound)(phase==='work'?playTransition:playBreakEnd)();
+  notify(getPL(phase)+' Skipped','Moving to next phase.');
+  finished=true;gid('display').className='ring-time done';gid('display').textContent='00:00';gid('phaseLabel').textContent=getPL(phase)+' Complete';
+  renderStats();renderCtrls();renderTaskList();updateTitle();saveState('user');
+  if(_skippedTaskId && typeof refreshOpenTaskModalIfMatches === 'function'){
+    refreshOpenTaskModalIfMatches(_skippedTaskId);
+  }
+  if(phase==='work'&&cfg.autoBreak)setTimeout(()=>{if(finished)advancePhase()},1500);
+  else if(phase!=='work'&&cfg.autoWork)setTimeout(()=>{if(finished)advancePhase()},1500);
+}
 function resetAll(){running=false;finished=false;clearInterval(tickId);cancelScheduledAudio();phase='work';pomosInCycle=0;fireCounts={};if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000);taskStartedAt=null}}setPhaseTime();renderAll();saveState('user')}
 
 // ========== STOPWATCH ==========

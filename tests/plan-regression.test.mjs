@@ -11,9 +11,12 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 test('timer: skipPhase does not count elapsed when paused (wasRunning guard)', () => {
   const src = readFileSync(join(root, 'js', 'timer.js'), 'utf8');
+  // Whitespace-tolerant regex: still asserts the semantic guarantee
+  // (wasRunning captured BEFORE running is mutated, then el derived from
+  // the captured wasRunning) without locking in a specific code-layout.
   assert.match(
     src,
-    /function skipPhase\(\)\{const wasRunning=running[^}]*const el=wasRunning\?Math\.floor/,
+    /function skipPhase\(\)\s*\{\s*const wasRunning\s*=\s*running\s*;[\s\S]*?const el\s*=\s*wasRunning\s*\?\s*Math\.floor/,
     'skipPhase should derive el only when wasRunning',
   );
 });

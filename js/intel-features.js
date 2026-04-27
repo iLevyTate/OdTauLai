@@ -870,6 +870,39 @@ async function predictDueDate(taskName, k){
 }
 if(typeof window !== 'undefined') window.predictDueDate = predictDueDate;
 
+/**
+ * Predict the best-fitting list for a freeform task name via embeddings.
+ * Mirrors the matcher inside autoOrganizeIntoLists() but for a single
+ * unsaved task (so it works in the bulk-import flow before tasks land in
+ * the store). Returns the list id or null when:
+ *   - fewer than 2 lists exist
+ *   - the cosine score is below the routing minimum
+ *   - the margin to the runner-up is too small (avoids low-confidence picks)
+ */
+async function predictListId(taskName, opts){
+  const o = opts || {};
+  const minScore = o.minScore == null ? 0.45 : o.minScore;
+  const minMargin = o.minMargin == null ? 0.04 : o.minMargin;
+  if(typeof lists === 'undefined' || !Array.isArray(lists) || lists.length < 2) return null;
+  if(typeof embedText !== 'function' || typeof cosine !== 'function') return null;
+  const listVecs = await _getListVectors();
+  if(!listVecs || listVecs.size < 2) return null;
+  let q;
+  try{ q = await embedText(taskName); }catch(e){ return null; }
+  if(!q) return null;
+  let best = null, second = null;
+  for(const [lid, lv] of listVecs){
+    if(!lv || lv.length !== q.length) continue;
+    const sim = cosine(q, lv);
+    if(!best || sim > best.sim){ second = best; best = { lid, sim }; }
+    else if(!second || sim > second.sim){ second = { lid, sim }; }
+  }
+  if(!best || best.sim < minScore) return null;
+  if(second && (best.sim - second.sim) < minMargin) return null;
+  return best.lid;
+}
+if(typeof window !== 'undefined') window.predictListId = predictListId;
+
 async function semanticSearch(query, limit){
   const lim = limit || 20;
   const q = await embedText(query);
