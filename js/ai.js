@@ -2098,6 +2098,7 @@ function openWhatNext(){
       : '<span style="color:var(--text-3);font-size:12px">Nothing queued — add tasks or clear filters.</span>';
   }
   o.style.display = '';
+  if(typeof openFocusTrap === 'function') openFocusTrap(o);
 
   // Opt-in LLM rationale for the top pick. Runs after the modal is visible
   // so the user sees the ranking instantly; explanation appears when ready.
@@ -2118,6 +2119,7 @@ function openWhatNext(){
 function closeWhatNext(){
   const o = document.getElementById('whatNextOverlay');
   if(o) o.style.display = 'none';
+  if(typeof closeFocusTrap === 'function') closeFocusTrap();
 }
 
 function toggleTaskSearchSemantic(){
