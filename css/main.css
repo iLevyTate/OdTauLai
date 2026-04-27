@@ -373,7 +373,7 @@
   .modal-close:hover{color:#c0392b;border-color:#3a1a1a}
   .modal-body{padding:16px 18px;max-height:70vh;overflow-y:auto}
   .mfield{margin-bottom:14px}
-  .mfield-lbl{font-size:9px;color:#5a8ab5;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px}
+  .mfield-lbl{display:block;font-size:9px;color:#5a8ab5;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px}
   .mfield-in{width:100%;padding:8px 12px;background:#071019;border:1px solid #1a2840;border-radius:8px;color:#e2e8f0;font-size:12px;font-family:inherit;outline:0;box-sizing:border-box}
   .mfield-in:focus{border-color:#2a4a6a}
   .mfield-textarea{width:100%;padding:8px 12px;background:#071019;border:1px solid #1a2840;border-radius:8px;color:#c8d6e5;font-size:11px;font-family:inherit;outline:0;box-sizing:border-box;min-height:80px;resize:vertical;line-height:1.5}
@@ -1829,10 +1829,18 @@
 
   /* === Classification editor (Settings → Classifications): stack form controls vertically on mobile === */
   @media (max-width:640px){
-    .class-mgr-row{flex-direction:column;align-items:stretch;gap:8px}
+    .class-mgr-row{
+      display:grid;
+      grid-template-columns:repeat(3, 1fr);
+      gap:8px;
+    }
     .class-mgr-row > *{width:100%}
-    .class-mgr-sel,.class-mgr-sel-color,.class-mgr-in{max-width:100%}
-    .class-mgr-btn{min-height:40px;padding:8px 12px;font-size:13px}
+    .class-mgr-in, .class-mgr-sel, .class-mgr-sel-color, .class-mgr-id{
+      grid-column:1 / -1;
+      max-width:100%;
+    }
+    .class-mgr-id{text-align:center}
+    .class-mgr-btn{min-height:40px;padding:8px 4px;font-size:13px}
   }
 
   /* === Native form controls: keep date/time/datetime pickers inside their containers ===

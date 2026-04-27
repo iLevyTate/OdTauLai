@@ -682,7 +682,7 @@
 </div>
 
 <!-- Bulk import (paste multiple lines) -->
-<div class="modal-overlay" id="bulkImportModal" onclick="if(event.target===this)closeBulkImportModal()">
+<div class="modal-overlay" id="bulkImportModal" role="dialog" aria-modal="true" aria-labelledby="bulkImportTitle" onclick="if(event.target===this)closeBulkImportModal()">
   <div class="modal bulk-import-modal" onclick="event.stopPropagation()">
     <div class="modal-head">
       <span id="bulkImportTitle">Import tasks</span>
@@ -719,7 +719,7 @@
     <div class="modal-body">
       <label id="appPromptLabel" for="appPromptInput" class="app-dlg-msg" style="display:block;margin:0 0 10px;font-size:13px;white-space:pre-wrap;line-height:1.45"></label>
       <input type="text" class="mfield-in" id="appPromptInput" style="width:100%" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();submitAppPrompt()}">
-      <textarea class="mfield-textarea" id="appPromptTextarea" style="width:100%;min-height:88px;display:none" rows="4" spellcheck="true"></textarea>
+      <textarea class="mfield-textarea" id="appPromptTextarea" aria-labelledby="appPromptLabel" style="width:100%;min-height:88px;display:none" rows="4" spellcheck="true"></textarea>
     </div>
     <div class="modal-foot">
       <button type="button" class="mfoot-btn mfoot-cancel" onclick="closeAppPrompt(null)">Cancel</button>
@@ -742,18 +742,18 @@
 
       <div class="mfield-row">
         <div class="mfield">
-          <div class="mfield-lbl">Status</div>
-          <div class="mfield-chips" id="mdStatusChips"></div>
+          <div class="mfield-lbl" id="mdStatusLbl">Status</div>
+          <div class="mfield-chips" id="mdStatusChips" role="group" aria-labelledby="mdStatusLbl"></div>
         </div>
         <div class="mfield">
-          <div class="mfield-lbl">Priority</div>
-          <div class="mfield-chips" id="mdPriorityChips"></div>
+          <div class="mfield-lbl" id="mdPriorityLbl">Priority</div>
+          <div class="mfield-chips" id="mdPriorityChips" role="group" aria-labelledby="mdPriorityLbl"></div>
         </div>
       </div>
 
       <div class="mfield-row">
         <div class="mfield">
-          <div class="mfield-lbl">Due Date</div>
+          <label class="mfield-lbl" for="mdDue">Due Date</label>
           <input type="date" class="mfield-in" id="mdDue">
           <div class="quick-dates">
             <button type="button" class="qd-btn" onclick="setQuickDate(0)">Today</button>
@@ -763,7 +763,7 @@
           </div>
         </div>
         <div class="mfield">
-          <div class="mfield-lbl">Remind me at</div>
+          <label class="mfield-lbl" for="mdRemindAt">Remind me at</label>
           <input type="datetime-local" class="mfield-in" id="mdRemindAt">
           <div class="quick-dates">
             <button type="button" class="qd-btn" onclick="setQuickReminder(0,9)">9am</button>
@@ -777,7 +777,7 @@
 
       <div class="mfield-row">
         <div class="mfield">
-          <div class="mfield-lbl">Snooze (hide until)</div>
+          <label class="mfield-lbl" for="mdSnoozeUntil">Snooze (hide until)</label>
           <input type="date" class="mfield-in" id="mdSnoozeUntil" title="Hide this task from main views until this date. Distinct from due date — snoozing does not move the deadline.">
           <div class="quick-dates">
             <button type="button" class="qd-btn" onclick="setQuickSnooze(1)">+1 day</button>
@@ -787,13 +787,13 @@
           </div>
         </div>
         <div class="mfield">
-          <div class="mfield-lbl">Type</div>
-          <div class="mfield-chips" id="mdTypeChips"></div>
+          <div class="mfield-lbl" id="mdTypeLbl">Type</div>
+          <div class="mfield-chips" id="mdTypeChips" role="group" aria-labelledby="mdTypeLbl"></div>
         </div>
       </div>
 
       <div class="mfield">
-        <div class="mfield-lbl">Description</div>
+        <label class="mfield-lbl" for="mdDesc">Description</label>
         <textarea class="mfield-textarea" id="mdDesc" placeholder="Acceptance criteria, links, notes…"></textarea>
       </div>
 
@@ -801,20 +801,20 @@
         <summary class="md-section-sum">Tags &amp; list</summary>
         <div class="md-section-body">
           <div class="mfield">
-            <div class="mfield-lbl">Repeat</div>
-            <div class="recur-options" id="mdRecur"></div>
+            <div class="mfield-lbl" id="mdRecurLbl">Repeat</div>
+            <div class="recur-options" id="mdRecur" role="group" aria-labelledby="mdRecurLbl"></div>
           </div>
           <div class="mfield">
-            <div class="mfield-lbl">Tags</div>
-            <div class="tags-editor" id="mdTagsEditor"></div>
+            <div class="mfield-lbl" id="mdTagsLbl">Tags</div>
+            <div class="tags-editor" id="mdTagsEditor" role="group" aria-labelledby="mdTagsLbl"></div>
           </div>
           <div class="mfield-row">
             <div class="mfield">
-              <div class="mfield-lbl">List</div>
+              <label class="mfield-lbl" for="mdList">List</label>
               <select class="mfield-in" id="mdList"></select>
             </div>
             <div class="mfield">
-              <div class="mfield-lbl">Start Date</div>
+              <label class="mfield-lbl" for="mdStartDate">Start Date</label>
               <input type="date" class="mfield-in" id="mdStartDate">
             </div>
           </div>
@@ -826,21 +826,21 @@
         <div class="md-section-body">
           <div class="mfield-row">
             <div class="mfield">
-              <div class="mfield-lbl">Time Estimate (min)</div>
+              <label class="mfield-lbl" for="mdEstimate">Time Estimate (min)</label>
               <input type="number" class="mfield-in" id="mdEstimate" placeholder="0" min="0">
             </div>
             <div class="mfield">
-              <div class="mfield-lbl">Time Tracked</div>
-              <div class="mfield-in mfield--readonly" id="mdTracked">—</div>
+              <div class="mfield-lbl" id="mdTrackedLbl">Time Tracked</div>
+              <div class="mfield-in mfield--readonly" id="mdTracked" aria-labelledby="mdTrackedLbl">—</div>
             </div>
           </div>
           <div class="mfield" id="mdCompletionNoteWrap">
-            <div class="mfield-lbl">Completion note</div>
+            <label class="mfield-lbl" for="mdCompletionNote">Completion note</label>
             <textarea class="mfield-textarea" id="mdCompletionNote" rows="2" placeholder="What actually happened…"></textarea>
           </div>
           <div class="mfield">
-            <div class="mfield-lbl">Completion history (repeating tasks)</div>
-            <div id="mdHabitLog" class="md-habit-log"></div>
+            <div class="mfield-lbl" id="mdHabitLogLbl">Completion history (repeating tasks)</div>
+            <div id="mdHabitLog" class="md-habit-log" role="group" aria-labelledby="mdHabitLogLbl"></div>
           </div>
         </div>
       </details>
@@ -849,18 +849,18 @@
         <summary class="md-section-sum">Classification</summary>
         <div class="md-section-body">
           <div class="mfield">
-            <div class="mfield-lbl">Life area</div>
-            <div class="mfield-chips" id="mdCategoryChips"></div>
+            <div class="mfield-lbl" id="mdCategoryLbl">Life area</div>
+            <div class="mfield-chips" id="mdCategoryChips" role="group" aria-labelledby="mdCategoryLbl"></div>
             <div id="mdValuesNote" style="font-size:11px;color:var(--text-3);margin-top:4px;font-style:italic"></div>
           </div>
           <div class="mfield-row">
             <div class="mfield">
-              <div class="mfield-lbl">Effort</div>
-              <div class="mfield-chips" id="mdEffortChips"></div>
+              <div class="mfield-lbl" id="mdEffortLbl">Effort</div>
+              <div class="mfield-chips" id="mdEffortChips" role="group" aria-labelledby="mdEffortLbl"></div>
             </div>
             <div class="mfield">
-              <div class="mfield-lbl">Energy</div>
-              <div class="mfield-chips" id="mdEnergyChips"></div>
+              <div class="mfield-lbl" id="mdEnergyLbl">Energy</div>
+              <div class="mfield-chips" id="mdEnergyChips" role="group" aria-labelledby="mdEnergyLbl"></div>
             </div>
           </div>
           <div class="mfield">
@@ -872,12 +872,12 @@
         <summary class="md-section-sum">Links &amp; more</summary>
         <div class="md-section-body">
           <div class="mfield">
-            <div class="mfield-lbl">Reference URL</div>
+            <label class="mfield-lbl" for="mdUrl">Reference URL</label>
             <input type="url" class="mfield-in" id="mdUrl" placeholder="https://…">
           </div>
           <div class="mfield">
-            <div class="mfield-lbl">Waiting on (blocked by)</div>
-            <div id="mdBlockedBy"></div>
+            <div class="mfield-lbl" id="mdBlockedByLbl">Waiting on (blocked by)</div>
+            <div id="mdBlockedBy" role="group" aria-labelledby="mdBlockedByLbl"></div>
           </div>
           <div class="mfield md-similar-wrap" id="mdBreakdownWrap" style="display:none">
             <button type="button" class="similar-acc-trigger" id="mdBreakdownTrigger" onclick="toggleBreakdownAccordion()">
@@ -896,12 +896,12 @@
             </div>
           </div>
           <div class="mfield">
-            <div class="mfield-lbl">Checklist</div>
-            <div id="mdChecklist"></div>
+            <div class="mfield-lbl" id="mdChecklistLbl">Checklist</div>
+            <div id="mdChecklist" role="group" aria-labelledby="mdChecklistLbl"></div>
           </div>
           <div class="mfield">
-            <div class="mfield-lbl">Timestamped Notes</div>
-            <div id="mdNotes"></div>
+            <div class="mfield-lbl" id="mdNotesLbl">Timestamped Notes</div>
+            <div id="mdNotes" role="group" aria-labelledby="mdNotesLbl"></div>
           </div>
         </div>
       </details>
