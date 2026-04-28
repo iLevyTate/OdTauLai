@@ -230,6 +230,128 @@ function exportClipboard(){const content=buildReport('txt');navigator.clipboard.
 
 // v16 migration (WebLLM removal) — removed in v32; all active users migrated.
 
+// ========== Delegated handler wrappers ==========
+// Named functions for the cases the migration script left behind: multi-
+// statement bodies, conditionals, this.value/this.files lookups, and modal
+// backdrop dismiss. Replaces the corresponding inline onclick="..." handlers
+// in index.html. All defined as window.X so the document-level dispatcher
+// in js/event-delegation.js can resolve them by name.
+window.taskInputLiveUpdate = function(){
+  if(typeof maybeShowEnhanceBtn === 'function') maybeShowEnhanceBtn();
+  if(typeof updateLiveParsePreview === 'function') updateLiveParsePreview();
+};
+window.addTaskOrApplyPreview = function(){
+  if(window._smartAddPreview && typeof applySmartAddAndSubmit === 'function') applySmartAddAndSubmit();
+  else if(typeof addTask === 'function') addTask();
+};
+window.setTaskViewMobile = function(view){
+  if(typeof setTaskView === 'function') setTaskView(view);
+  if(typeof updateMobileViewToggle === 'function') updateMobileViewToggle();
+};
+window.qtLabelEnterKey = function(e){
+  if(e && e.key === 'Enter' && typeof addQuickTimer === 'function') addQuickTimer();
+};
+window.intervalChimePreview = function(){
+  const v = gid('intChime'); if(v && typeof playChime === 'function') playChime(v.value);
+};
+window.applyPhasePresetFromSelect = function(e){
+  if(typeof applyPhasePreset === 'function') applyPhasePreset(e && e.target ? e.target.value : '');
+};
+window.refreshSystemInfoQuota = function(){
+  if(typeof checkStorageQuota !== 'function' || typeof renderSystemInfo !== 'function') return;
+  checkStorageQuota().then(renderSystemInfo).catch(() => {});
+};
+function _fileInputDispatch(fn, e){
+  const input = e && e.target;
+  if(!input || !input.files || !input.files[0] || typeof fn !== 'function') return;
+  fn(input.files[0]);
+  input.value = '';
+}
+window.importTasksFromInput          = function(e){ _fileInputDispatch(window.importTasks, e); };
+window.importDataFromInput           = function(e){ _fileInputDispatch(window.importData, e); };
+window.importDataEncryptedFromInput  = function(e){ _fileInputDispatch(window.importDataEncrypted, e); };
+function _backdropClose(closeFn){
+  return function(e){ if(e && e.target === this && typeof closeFn === 'function') closeFn(); };
+}
+window.closeWhatNextOnBackdrop        = _backdropClose(() => closeWhatNext());
+window.closeCmdKOnBackdrop            = _backdropClose(() => closeCmdK());
+window.closeBulkImportModalOnBackdrop = _backdropClose(() => closeBulkImportModal());
+window.closeAppConfirmOnBackdrop      = _backdropClose(() => closeAppConfirm(false));
+window.closeAppPromptOnBackdrop       = _backdropClose(() => closeAppPrompt(null));
+window.closeTaskDetailOnBackdrop      = _backdropClose(() => closeTaskDetail());
+window.appPromptInputKey = function(e){
+  if(e && e.key === 'Enter' && typeof submitAppPrompt === 'function'){
+    e.preventDefault();
+    submitAppPrompt();
+  }
+};
+window.openTaskDetailAndCloseWhatNext = function(id){
+  if(typeof openTaskDetail === 'function') openTaskDetail(Number(id));
+  if(typeof closeWhatNext === 'function') closeWhatNext();
+};
+window.selectGenModelFromSelect = function(){
+  if(typeof selectGenModel === 'function') selectGenModel(this.value);
+};
+window.setGenTimeoutFromInput = function(){
+  if(typeof setGenTimeout === 'function') setGenTimeout(this.value);
+};
+window.checklistAddOnEnter = function(e){
+  if(!e || e.key !== 'Enter') return;
+  const taskId = Number(this.dataset.taskId);
+  if(typeof addChecklistItem === 'function') addChecklistItem(taskId, this.value);
+  this.value = '';
+};
+window.checklistAddFromButton = function(){
+  const inp = document.getElementById('clInput');
+  if(!inp) return;
+  const taskId = Number(this.dataset.taskId);
+  if(typeof addChecklistItem === 'function') addChecklistItem(taskId, inp.value);
+  inp.value = '';
+};
+window.taskNoteAddFromButton = function(){
+  const inp = document.getElementById('noteInput');
+  if(!inp) return;
+  const taskId = Number(this.dataset.taskId);
+  if(typeof addTaskNote === 'function') addTaskNote(taskId, inp.value);
+  inp.value = '';
+};
+window.taskBlockerAddFromSelect = function(){
+  const sel = document.getElementById('blockerSel');
+  if(!sel) return;
+  const taskId = Number(this.dataset.taskId);
+  if(typeof addBlockedBy === 'function') addBlockedBy(taskId, sel.value);
+};
+window.classificationSetLabelFromInput = function(){
+  const idx = Number(this.dataset.idx);
+  if(typeof classificationSetLabel === 'function') classificationSetLabel(idx, this.value);
+};
+window.classificationSetIconFromSelect = function(){
+  const idx = Number(this.dataset.idx);
+  if(typeof classificationSetIcon === 'function') classificationSetIcon(idx, this.value);
+};
+window.classificationSetColorFromSelect = function(){
+  const idx = Number(this.dataset.idx);
+  if(typeof classificationSetColor === 'function') classificationSetColor(idx, this.value);
+};
+window.syncCopyMyCode = function(){
+  const el = document.getElementById('syncMyCode');
+  const txt = el ? (el.textContent || '') : '';
+  if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).catch(() => {});
+};
+window.syncOnCodeInputFromInput = function(){
+  if(typeof syncOnCodeInput === 'function') syncOnCodeInput(this);
+};
+window.syncConnectInputKey = function(e){
+  if(e && e.key === 'Enter' && typeof syncConnectFromInput === 'function') syncConnectFromInput();
+};
+window.calFeedModeFromButton = function(){
+  if(typeof calFeedMode === 'function') calFeedMode(this, this.dataset.mode);
+};
+window.hideWorkerInstructions = function(){
+  const el = document.getElementById('workerInstructions');
+  if(el) el.style.display = 'none';
+};
+
 // ========== INIT ==========
 loadState();
 if(typeof setHeaderDate==='function') setHeaderDate();
@@ -394,18 +516,8 @@ updateMiniTimer();
 // Apply saved active tab without scroll
 document.querySelectorAll('[data-tab]').forEach(el=>{el.style.display=el.dataset.tab===activeTab?'':'none'});
 document.querySelectorAll('.nav-tab').forEach(el=>{const on=el.dataset.navtab===activeTab;el.classList.toggle('active',on);el.setAttribute('aria-selected',on?'true':'false')});
-// Delegated nav-tab click handler — replaces the per-button inline onclick
-// shipped in earlier versions. Uses data-navtab to dispatch.
-(function bindNavTabs(){
-  const root = document.getElementById('navTabs');
-  if(!root) return;
-  root.addEventListener('click', e => {
-    const btn = e.target.closest('.nav-tab[data-navtab]');
-    if(!btn || !root.contains(btn)) return;
-    const t = btn.dataset.navtab;
-    if(t && typeof showTab === 'function') showTab(t);
-  });
-})();
+// Nav-tab clicks are routed by the document-level dispatcher in
+// js/event-delegation.js via data-action="showTab" data-arg="<tab>".
 if(activeTab==='focus'&&typeof setTimerSub==='function') setTimerSub(cfg.timerSub||'pomo');
 if(typeof syncQaHintVisibility==='function') syncQaHintVisibility();
 if(activeTab==='settings'){

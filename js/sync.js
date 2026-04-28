@@ -631,7 +631,7 @@ function renderSyncPanel() {
         <p class="sync-desc" style="font-size:10px;color:var(--text-4);margin-top:-4px">
           ℹ Best effort: works reliably on same WiFi; may fail on some cellular networks due to NAT restrictions.
         </p>
-        <button class="btn-primary" onclick="syncEnable()">Enable Sync</button>
+        <button class="btn-primary" data-action="syncEnable">Enable Sync</button>
       </div>`;
     return;
   }
@@ -646,8 +646,8 @@ function renderSyncPanel() {
         <label>Your code</label>
         <div class="sync-code" id="syncMyCode">${_myRoomCode || '…'}</div>
         <div class="sync-code-actions">
-          <button class="btn-ghost btn-sm" onclick="navigator.clipboard?.writeText(document.getElementById('syncMyCode')?.textContent||'')">Copy</button>
-          <button class="btn-ghost btn-sm" onclick="syncRegenerateCode()" title="Mint a new pairing code (unpairs this device)">Regenerate</button>
+          <button class="btn-ghost btn-sm" data-action="syncCopyMyCode">Copy</button>
+          <button class="btn-ghost btn-sm" data-action="syncRegenerateCode" title="Mint a new pairing code (unpairs this device)">Regenerate</button>
         </div>
       </div>
       <div class="sync-connect-block">
@@ -655,13 +655,13 @@ function renderSyncPanel() {
         <div class="sync-input-row">
           <input id="syncCodeInput" type="text" placeholder="STU-XXX-XXX" maxlength="11"
                  autocomplete="off" autocapitalize="characters" spellcheck="false"
-                 oninput="syncOnCodeInput(this)"
-                 onkeydown="if(event.key==='Enter')syncConnectFromInput()">
-          <button class="btn-primary btn-sm" id="syncConnectBtn" onclick="syncConnectFromInput()" disabled>Connect</button>
+                 data-oninput="syncOnCodeInputFromInput"
+                 data-onkeydown="syncConnectInputKey">
+          <button class="btn-primary btn-sm" id="syncConnectBtn" data-action="syncConnectFromInput" disabled>Connect</button>
         </div>
         <div class="sync-input-hint" id="syncInputHint">Enter the 6-character code shown on the other device (e.g. <code>STU-AB3-C9D</code>).</div>
       </div>
-      <button class="btn-ghost btn-sm sync-disable" onclick="syncDisconnect()">Disable sync</button>
+      <button class="btn-ghost btn-sm sync-disable" data-action="syncDisconnect">Disable sync</button>
     </div>`;
 
   _setSyncStatus(_syncStatus);

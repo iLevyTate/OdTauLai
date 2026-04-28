@@ -21,10 +21,10 @@ function renderCalendar(visibleTasks){
   const byDate={};
   visibleTasks.forEach(t=>{if(t.dueDate){(byDate[t.dueDate]=byDate[t.dueDate]||[]).push(t)}});
   let html='<div class="calendar"><div class="cal-head">'
-    +'<button class="cal-nav" onclick="calNav(-1)" title="Previous month">‹</button>'
+    +'<button class="cal-nav" data-action="calNav" data-args="[-1]" title="Previous month">‹</button>'
     +'<div class="cal-title">'+monthName+'</div>'
-    +'<button class="cal-today-btn" onclick="calToday()">Today</button>'
-    +'<button class="cal-nav" onclick="calNav(1)" title="Next month">›</button>'
+    +'<button class="cal-today-btn" data-action="calToday">Today</button>'
+    +'<button class="cal-nav" data-action="calNav" data-args="[1]" title="Next month">›</button>'
     +'</div><div class="cal-weekdays">';
   ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(w=>{html+='<div class="cal-weekday">'+w+'</div>'});
   html+='</div><div class="cal-grid">';
@@ -62,7 +62,7 @@ function renderCalendar(visibleTasks){
       const srcId=parseInt(e.dataTransfer.getData('text/plain'));const src=findTask(srcId);
       if(src){src.dueDate=el.dataset.date;renderTaskList();saveState('user')}
     };
-    el.onclick=function(e){if(e.target.closest('.cal-task'))return;
+    el.onclick=function(e){if(e.target.closest('.cal-task')||e.target.closest('[data-action]'))return;
       const inp=gid('taskInput');if(inp){inp.value='';inp.focus();}
       // Pre-set the date when user presses Enter
       const date=el.dataset.date;
@@ -90,7 +90,7 @@ function renderCalTasks(arr, isoDate){
     html += showEvs.map(ev => {
       const uid = String(ev.uid || '');
       const mk = uid && typeof createTaskFromCalEvent === 'function'
-        ? `<button type="button" class="cal-ev-mk-task" title="Create task from this event" aria-label="Create task from event" onclick="event.stopPropagation();if(typeof createTaskFromCalEvent==='function')createTaskFromCalEvent(${JSON.stringify(String(ev.feedId))},${JSON.stringify(uid)})">+Task</button>`
+        ? `<button type="button" class="cal-ev-mk-task" title="Create task from this event" aria-label="Create task from event" data-action="createTaskFromCalEvent" data-args='${JSON.stringify([String(ev.feedId), uid])}'>+Task</button>`
         : '';
       return `<div class="cal-task cal-feed-event" style="border-left-color:${sanitizeListColor(ev.feedColor)}" title="${esc(ev.feedLabel)}: ${esc(ev.title)}${ev.time?' at '+esc(String(ev.time)):''}${ev.location?' — '+esc(ev.location):''}">`
         + mk
@@ -220,7 +220,7 @@ function _renderAskStatus(state,msg){
         <div class="cmdk-ask-row">
           <span class="cmdk-ask-spinner" aria-hidden="true"></span>
           <span class="cmdk-ask-label" id="cmdkAskLabel">Thinking on-device…</span>
-          <button type="button" class="cmdk-ask-stop" onclick="cmdkAskStop()">Stop</button>
+          <button type="button" class="cmdk-ask-stop" data-action="cmdkAskStop">Stop</button>
         </div>
         <details class="cmdk-ask-details">
           <summary>Show raw output</summary>
@@ -242,11 +242,11 @@ function _renderAskStatus(state,msg){
     if(loading){
       inner = 'Local LLM is still loading — give it a moment and try again.';
     }else if(!cfg || !cfg.enabled){
-      inner = 'Local LLM is off. <button type="button" class="btn-ghost btn-sm" onclick="openGenSettingsFromAsk()">Enable in Settings</button> to turn it on and download weights.';
+      inner = 'Local LLM is off. <button type="button" class="btn-ghost btn-sm" data-action="openGenSettingsFromAsk">Enable in Settings</button> to turn it on and download weights.';
     }else if(cached){
-      inner = 'Local LLM is enabled but not loaded yet. <button type="button" class="btn-ghost btn-sm" onclick="openGenSettingsFromAsk()">Open Settings</button> and click Load.';
+      inner = 'Local LLM is enabled but not loaded yet. <button type="button" class="btn-ghost btn-sm" data-action="openGenSettingsFromAsk">Open Settings</button> and click Load.';
     }else{
-      inner = 'Local LLM weights aren’t downloaded on this device. <button type="button" class="btn-ghost btn-sm" onclick="openGenSettingsFromAsk()">Open Settings</button> to download.';
+      inner = 'Local LLM weights aren’t downloaded on this device. <button type="button" class="btn-ghost btn-sm" data-action="openGenSettingsFromAsk">Open Settings</button> to download.';
     }
     reply.innerHTML = '<div class="cmdk-ask-error">' + inner + '</div>';
   }
@@ -446,7 +446,7 @@ function renderCmdK(){
     const active=itemIdx===cmdkActiveIdx;
     const cur=itemIdx++;
     const kbd=i.kbd?'<span class="cmdk-kbd">'+i.kbd+'</span>':(i.desc?'<span class="cmdk-desc">'+esc(i.desc)+'</span>':'');
-    return '<div class="cmdk-item'+(active?' active':'')+'" data-idx="'+cur+'" onclick="cmdkRun('+cur+')"><span class="cmdk-icon">'+i.icon+'</span><span>'+esc(i.label)+'</span>'+kbd+'</div>';
+    return '<div class="cmdk-item'+(active?' active':'')+'" data-idx="'+cur+'" data-action="cmdkRun" data-arg="+cur+"><span class="cmdk-icon">'+i.icon+'</span><span>'+esc(i.label)+'</span>'+kbd+'</div>';
   }).join('');
 }
 function cmdkRun(idx){
@@ -616,7 +616,7 @@ function renderTaskItem(t,depth){
   // reorder; .drop-above/.drop-below visual hints are no longer used because
   // Sortable provides its own ghost/placeholder.
   d.onclick=function(e){
-    if(e.target.closest('button')||e.target.closest('.task-chevron')||e.target.closest('.drag-handle'))return;
+    if(e.target.closest('button')||e.target.closest('.task-chevron')||e.target.closest('.drag-handle')||e.target.closest('[data-action]'))return;
     if(typeof isBulkMode === 'function' && isBulkMode()){
       bulkToggleSelect(t.id);
       d.classList.toggle('task-bulk-selected', _bulkSelectedIds.has(t.id));
@@ -659,9 +659,9 @@ function renderTaskItem(t,depth){
 
   // At rest: due chip (overdue / today / soon only) + subtask progress. Habits view: ↻ + streak. Rest on hover.
   const chevron=kids
-    ?'<button class="task-chevron'+(t.collapsed?' collapsed':'')+'" onclick="toggleCollapse('+t.id+')" title="'+(t.collapsed?'Expand':'Collapse')+'">▸</button>'
+    ?'<button class="task-chevron'+(t.collapsed?' collapsed':'')+'" data-action="toggleCollapse" data-arg="+t.id+" title="'+(t.collapsed?'Expand':'Collapse')+'">▸</button>'
     :'<span class="task-chevron-spacer"></span>';
-  const checkbox='<button class="task-checkbox'+(isDone?' checked':'')+'" onclick="toggleTaskDoneQuick('+t.id+')" title="Mark done" aria-label="Mark task done">'+(isDone?'✓':'')+'</button>';
+  const checkbox='<button class="task-checkbox'+(isDone?' checked':'')+'" data-action="toggleTaskDoneQuick" data-arg="+t.id+" title="Mark done" aria-label="Mark task done">'+(isDone?'✓':'')+'</button>';
 
   let signalChips='';
   if(t.dueDate&&!isDone){
@@ -682,17 +682,17 @@ function renderTaskItem(t,depth){
 
   const status=STATUSES[t.status||'open'];
   const showStatusOnHover=(t.status&&t.status!=='open')?'':'hidden-status';
-  const statusBadge='<span class="status-badge '+status.cls+' '+showStatusOnHover+'" onclick="event.stopPropagation();cycleStatus('+t.id+')" title="Click to cycle status">'+status.label+'</span>';
+  const statusBadge='<span class="status-badge '+status.cls+' '+showStatusOnHover+'" data-action="cycleStatus" data-args="['+t.id+']" title="Click to cycle status">'+status.label+'</span>';
   const tagsVisible=(t.tags||[]).slice(0,3).map(tg=>'<span class="tag-chip">'+esc(tg)+'</span>').join('');
   const descPrev=(t.description&&t.description.length>0)?'<span class="task-desc-inline">'+esc(t.description.slice(0,50))+(t.description.length>50?'…':'')+'</span>':'';
 
   const actions=t.archived
-    ?'<button class="ta-btn ta-restore" onclick="event.stopPropagation();restoreTask('+t.id+')" title="Restore">↺</button>'
-     +'<button class="ta-btn ta-del" onclick="event.stopPropagation();removeTask('+t.id+')" title="Delete permanently">×</button>'
-    :'<button class="ta-btn ta-star'+(t.starred?' on':'')+'" onclick="event.stopPropagation();toggleStar('+t.id+')" title="'+(t.starred?'Unpin':'Pin to top')+'">'+(t.starred?'★':'☆')+'</button>'
-     +'<button class="ta-btn ta-play '+(isActive?'on':'')+'" onclick="event.stopPropagation();toggleTask('+t.id+')" title="'+(isActive?'Stop timer':'Start timer')+'">'+(isActive?'■':'▶')+'</button>'
-     +'<button class="ta-btn ta-sub" onclick="event.stopPropagation();addSubtaskPrompt('+t.id+')" title="Add subtask">+</button>'
-     +'<button class="ta-btn ta-del" onclick="event.stopPropagation();removeTask('+t.id+')" title="Archive">×</button>';
+    ?'<button type="button" class="ta-btn ta-restore" data-action="restoreTask" data-args="['+t.id+']" title="Restore">↺</button>'
+     +'<button type="button" class="ta-btn ta-del" data-action="removeTask" data-args="['+t.id+']" title="Delete permanently">×</button>'
+    :'<button type="button" class="ta-btn ta-star'+(t.starred?' on':'')+'" data-action="toggleStar" data-args="['+t.id+']" title="'+(t.starred?'Unpin':'Pin to top')+'">'+(t.starred?'★':'☆')+'</button>'
+     +'<button type="button" class="ta-btn ta-play '+(isActive?'on':'')+'" data-action="toggleTask" data-args="['+t.id+']" title="'+(isActive?'Stop timer':'Start timer')+'">'+(isActive?'■':'▶')+'</button>'
+     +'<button type="button" class="ta-btn ta-sub" data-action="addSubtaskPrompt" data-args="['+t.id+']" title="Add subtask">+</button>'
+     +'<button type="button" class="ta-btn ta-del" data-action="removeTask" data-args="['+t.id+']" title="Archive">×</button>';
 
   // Star pin — shown prominently only if starred (otherwise hidden in hover actions)
   const starPin=t.starred?'<span class="star-pin" title="Pinned">★</span>':'';

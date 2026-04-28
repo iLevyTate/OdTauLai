@@ -29,9 +29,15 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="application-name" content="OdTauLai">
 <!-- CSP: script-src / object-src / base-uri are the hard security boundaries.
-     connect-src uses http:/https: broadly because calfeeds.js allows user-configured CORS proxy URLs.
+     'unsafe-inline' was dropped from script-src after the H-2 migration —
+     all inline event handlers go through the document-level dispatcher in
+     js/event-delegation.js (data-action / data-on<event> attributes).
+     style-src keeps 'unsafe-inline' because many components style via
+     inline `style="..."` attributes; that's a separate cleanup.
+     connect-src uses http:/https: broadly because calfeeds.js allows
+     user-configured CORS proxy URLs.
      wss: entries are required for PeerJS WebRTC signalling. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' http: https: wss://*.peerjs.com wss://0.peerjs.com wss://1.peerjs.com wss://peerjs.com;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' http: https: wss://*.peerjs.com wss://0.peerjs.com wss://1.peerjs.com wss://peerjs.com;">
 
 <!-- Icons -->
 <link rel="manifest" href="manifest.json" id="pwa-manifest">
@@ -43,6 +49,10 @@
 <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
 
 <script src="js/version.js"></script>
+<!-- Delegated event dispatcher — must load before any data-action element is
+     rendered or clicked. Replaces inline onclick/onchange/etc., enabling
+     CSP without script-src 'unsafe-inline'. -->
+<script src="js/event-delegation.js"></script>
 <!-- PWA bootstrap (SW registration, install prompt, file:// fallback) -->
 <script src="js/pwa.js"></script>
 
@@ -93,7 +103,7 @@
     </h1>
     <div class="header-mid">
       <div class="header-date" id="headerDate"></div>
-      <button type="button" class="what-next-pill" id="whatNextBtn" onclick="openWhatNext()" title="Top-ranked next actions">What next?</button>
+      <button type="button" class="what-next-pill" id="whatNextBtn" data-action="openWhatNext" title="Top-ranked next actions">What next?</button>
     </div>
   </header>
 
@@ -109,35 +119,35 @@
   <!-- Main Nav Tabs -->
   <nav class="header-nav-bar" aria-label="Primary">
     <div class="nav-tabs" id="navTabs" role="tablist" aria-label="Main">
-    <button type="button" class="nav-tab active" data-navtab="tasks" role="tab" aria-selected="true" id="navTab-tasks">
+    <button type="button" class="nav-tab active" data-navtab="tasks" data-action="showTab" data-arg="tasks" role="tab" aria-selected="true" id="navTab-tasks">
       <span class="nav-tab-icon" aria-hidden="true">☰</span>
       <span>Tasks</span>
     </button>
-    <button type="button" class="nav-tab" data-navtab="focus" role="tab" aria-selected="false" id="navTab-focus">
+    <button type="button" class="nav-tab" data-navtab="focus" data-action="showTab" data-arg="focus" role="tab" aria-selected="false" id="navTab-focus">
       <span class="nav-tab-icon" aria-hidden="true">◉</span>
       <span>Timer</span>
     </button>
-    <button type="button" class="nav-tab" data-navtab="tools" role="tab" aria-selected="false" id="navTab-tools">
+    <button type="button" class="nav-tab" data-navtab="tools" data-action="showTab" data-arg="tools" role="tab" aria-selected="false" id="navTab-tools">
       <span class="nav-tab-icon" aria-hidden="true">✦</span>
       <span>Tools</span>
     </button>
-    <button type="button" class="nav-tab" data-navtab="data" role="tab" aria-selected="false" id="navTab-data">
+    <button type="button" class="nav-tab" data-navtab="data" data-action="showTab" data-arg="data" role="tab" aria-selected="false" id="navTab-data">
       <span class="nav-tab-icon" aria-hidden="true">▤</span>
       <span>Data</span>
     </button>
-    <button type="button" class="nav-tab" data-navtab="settings" role="tab" aria-selected="false" id="navTab-settings">
+    <button type="button" class="nav-tab" data-navtab="settings" data-action="showTab" data-arg="settings" role="tab" aria-selected="false" id="navTab-settings">
       <span class="nav-tab-icon" aria-hidden="true">⚙</span>
       <span>Settings</span>
     </button>
     </div>
     <div class="header-utils">
-    <button type="button" id="headerAIChip" class="ai-chip ai-chip--idle" onclick="headerAIClick()" title="Task understanding — opens Tools">
+    <button type="button" id="headerAIChip" class="ai-chip ai-chip--idle" data-action="headerAIClick" title="Task understanding — opens Tools">
       <span class="ai-chip-dot" aria-hidden="true"></span>
       <span class="ai-chip-label" aria-hidden="true">AI</span>
       <span id="aiChipLive" class="ai-chip-sr" aria-live="polite"></span>
     </button>
-    <button type="button" id="themeToggleBtn" class="header-icon-btn" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme"><span data-icon="moon" data-icon-size="16" aria-hidden="true"></span></button>
-    <button type="button" id="cmdKBtn" class="header-icon-btn header-icon-btn--cmdk" onclick="openCmdK()" title="Search, quick actions, and Ask" aria-label="Open menu: search, quick actions, and Ask">
+    <button type="button" id="themeToggleBtn" class="header-icon-btn" data-action="toggleTheme" title="Toggle theme" aria-label="Toggle theme"><span data-icon="moon" data-icon-size="16" aria-hidden="true"></span></button>
+    <button type="button" id="cmdKBtn" class="header-icon-btn header-icon-btn--cmdk" data-action="openCmdK" title="Search, quick actions, and Ask" aria-label="Open menu: search, quick actions, and Ask">
       <span class="cmdk-btn-ic" data-icon="sparkSearch" data-icon-size="16" aria-hidden="true"></span>
       <span class="cmdk-btn-txt">Menu</span>
       <span class="cmdk-btn-kbd" aria-hidden="true">⌘K</span>
@@ -160,13 +170,13 @@
         <input class="task-input" id="taskInput" placeholder="Add a task… or paste multiple lines to import"
           autocomplete="off" autocorrect="on" autocapitalize="sentences" spellcheck="true"
           enterkeyhint="send"
-          oninput="maybeShowEnhanceBtn();updateLiveParsePreview()"
-          onkeydown="onTaskInputKey(event)">
-        <button class="task-enhance-btn" id="taskEnhanceBtn" onclick="smartAddEnhance()" style="display:none" title="Suggest metadata from your task history (embeddings)" data-icon="sparkles" aria-label="Smart-add suggestions"></button>
-        <button class="task-enhance-btn task-enhance-btn--llm" id="taskParseBtn" onclick="smartAddParseWithLLM()" style="display:none" title="Parse this freeform sentence with the on-device LLM" data-icon="wand" aria-label="Parse with LLM"></button>
-        <button class="task-enhance-btn task-voice-btn" id="taskVoiceBtn" onclick="toggleVoiceInput()" style="display:none" title="Voice input (on-device speech recognition)" data-icon="mic" aria-label="Voice input"></button>
+          data-oninput="taskInputLiveUpdate"
+          data-onkeydown="onTaskInputKey">
+        <button class="task-enhance-btn" id="taskEnhanceBtn" data-action="smartAddEnhance" style="display:none" title="Suggest metadata from your task history (embeddings)" data-icon="sparkles" aria-label="Smart-add suggestions"></button>
+        <button class="task-enhance-btn task-enhance-btn--llm" id="taskParseBtn" data-action="smartAddParseWithLLM" style="display:none" title="Parse this freeform sentence with the on-device LLM" data-icon="wand" aria-label="Parse with LLM"></button>
+        <button class="task-enhance-btn task-voice-btn" id="taskVoiceBtn" data-action="toggleVoiceInput" style="display:none" title="Voice input (on-device speech recognition)" data-icon="mic" aria-label="Voice input"></button>
       </div>
-      <button class="task-add" onclick="if(window._smartAddPreview){applySmartAddAndSubmit()}else{addTask()}">+ Add</button>
+      <button class="task-add" data-action="addTaskOrApplyPreview">+ Add</button>
     </div>
     <div id="smartAddPreview" class="smart-add-preview" style="display:none"></div>
     <!-- Live parse preview: chips reflect quick-add tokens parsed from current
@@ -188,18 +198,18 @@
         <span class="qpc qpc--recur"  title="Recurrence">~daily</span>
       </span>
     </div>
-    <button type="button" class="qa-hint-reveal" id="qa-hint-reveal" onclick="showQaHint()">Show quick-add syntax</button>
+    <button type="button" class="qa-hint-reveal" id="qa-hint-reveal" data-action="showQaHint">Show quick-add syntax</button>
     <!-- Configurable inline quick-add panel. Hidden by default; user toggles via
          'More options' chevron. Field set is user-configurable in Settings.
          Default: list + due. -->
     <button type="button" class="qa-more-toggle" id="qaMoreToggle"
       aria-expanded="false" aria-controls="qaMorePanel"
-      onclick="toggleQuickAddPanel()">
+      data-action="toggleQuickAddPanel">
       <span class="qa-more-chevron" aria-hidden="true">▾</span>
       <span class="qa-more-label">More options</span>
     </button>
     <div class="qa-more-panel" id="qaMorePanel" hidden></div>
-    <button type="button" id="askPromoChip" class="ask-promo-chip" style="display:none" onclick="openAskMode()" aria-label="Ask the on-device AI about your tasks" title="Ask the on-device AI">
+    <button type="button" id="askPromoChip" class="ask-promo-chip" style="display:none" data-action="openAskMode" aria-label="Ask the on-device AI about your tasks" title="Ask the on-device AI">
       <span class="ask-promo-ic" data-icon="spark" data-icon-size="14" aria-hidden="true"></span>
       <span class="ask-promo-label ask-promo-label--kbd">Ask · <kbd>Ctrl/⌘+K</kbd> then <kbd>?</kbd></span>
       <span class="ask-promo-label ask-promo-label--touch">Ask the on-device AI</span>
@@ -216,40 +226,40 @@
         <!-- Tags / Categories (prominent placement) -->
         <div class="tags-bar-wrap" id="tagsBarWrap" style="margin-bottom:8px;">
           <label class="sr-only" for="filterCategory">Filter by category</label>
-          <select class="task-tb-sel" id="filterCategory" onchange="updateTaskFilters()" style="display:none;margin:0;">
+          <select class="task-tb-sel" id="filterCategory" data-onchange="updateTaskFilters" style="display:none;margin:0;">
             <option value="all">Any category</option>
           </select>
           <div class="smart-views" id="tagsBar">
-            <button class="sv-chip active" onclick="setFilterCategory('all')">All Tags</button>
+            <button class="sv-chip active" data-action="setFilterCategory" data-arg="all">All Tags</button>
           </div>
         </div>
 
         <!-- Smart views -->
         <div class="smart-views" id="smartViews">
-          <button class="sv-chip active" data-view="all" onclick="setSmartView('all')"><span class="sv-icon" data-icon="list"></span>All<span class="sv-count" id="svcAll">0</span></button>
-          <button class="sv-chip" data-view="inbox" onclick="setSmartView('inbox')" title="Untriaged — no list, no category, no due date, no tags"><span class="sv-icon" data-icon="inbox"></span>Inbox<span class="sv-count" id="svcInbox">0</span></button>
-          <button class="sv-chip" data-view="today" onclick="setSmartView('today')"><span class="sv-icon" data-icon="calendar"></span>Today<span class="sv-count" id="svcToday">0</span></button>
-          <button class="sv-chip" data-view="week" onclick="setSmartView('week')"><span class="sv-icon" data-icon="calendarWeek"></span>Week<span class="sv-count" id="svcWeek">0</span></button>
-          <button class="sv-chip" data-view="overdue" onclick="setSmartView('overdue')"><span class="sv-icon" data-icon="alertTriangle"></span>Overdue<span class="sv-count" id="svcOverdue">0</span></button>
-          <button class="sv-chip" data-view="unscheduled" onclick="setSmartView('unscheduled')"><span class="sv-icon" data-icon="circleDashed"></span>Unscheduled<span class="sv-count" id="svcUnscheduled">0</span></button>
-          <button class="sv-chip" data-view="starred" onclick="setSmartView('starred')"><span class="sv-icon" data-icon="star"></span>Starred<span class="sv-count" id="svcStarred">0</span></button>
-          <button class="sv-chip" data-view="impact" onclick="setSmartView('impact')" title="Top ~20% by leverage — derived from priority, due, effort, unblocks, values, star"><span class="sv-icon" data-icon="zap"></span>Impact<span class="sv-count" id="svcImpact">0</span></button>
-          <button class="sv-chip" data-view="waiting" onclick="setSmartView('waiting')" title="Tasks blocked on someone else (type = waiting)"><span class="sv-icon" data-icon="hourglass"></span>Waiting<span class="sv-count" id="svcWaiting">0</span></button>
-          <button class="sv-chip" data-view="stuck" onclick="setSmartView('stuck')" title="Open tasks untouched for 14+ days"><span class="sv-icon" data-icon="alertCircle"></span>Stuck<span class="sv-count" id="svcStuck">0</span></button>
-          <button class="sv-chip" data-view="snoozed" onclick="setSmartView('snoozed')" title="Tasks hidden until a date (snoozed)"><span class="sv-icon" data-icon="moon"></span>Snoozed<span class="sv-count" id="svcSnoozed">0</span></button>
-          <button class="sv-chip" data-view="habits" onclick="setSmartView('habits')" title="Recurring &amp; habits"><span class="sv-icon" data-icon="refresh"></span>Habits<span class="sv-count" id="svcHabits">0</span></button>
-          <button class="sv-chip" data-view="completed" onclick="setSmartView('completed')"><span class="sv-icon" data-icon="checkCircle"></span>Done<span class="sv-count" id="svcCompleted">0</span></button>
-          <button class="sv-chip" data-view="archived" onclick="setSmartView('archived')"><span class="sv-icon" data-icon="archive"></span>Archive<span class="sv-count" id="svcArchived">0</span></button>
+          <button class="sv-chip active" data-view="all" data-action="setSmartView" data-arg="all"><span class="sv-icon" data-icon="list"></span>All<span class="sv-count" id="svcAll">0</span></button>
+          <button class="sv-chip" data-view="inbox" data-action="setSmartView" data-arg="inbox" title="Untriaged — no list, no category, no due date, no tags"><span class="sv-icon" data-icon="inbox"></span>Inbox<span class="sv-count" id="svcInbox">0</span></button>
+          <button class="sv-chip" data-view="today" data-action="setSmartView" data-arg="today"><span class="sv-icon" data-icon="calendar"></span>Today<span class="sv-count" id="svcToday">0</span></button>
+          <button class="sv-chip" data-view="week" data-action="setSmartView" data-arg="week"><span class="sv-icon" data-icon="calendarWeek"></span>Week<span class="sv-count" id="svcWeek">0</span></button>
+          <button class="sv-chip" data-view="overdue" data-action="setSmartView" data-arg="overdue"><span class="sv-icon" data-icon="alertTriangle"></span>Overdue<span class="sv-count" id="svcOverdue">0</span></button>
+          <button class="sv-chip" data-view="unscheduled" data-action="setSmartView" data-arg="unscheduled"><span class="sv-icon" data-icon="circleDashed"></span>Unscheduled<span class="sv-count" id="svcUnscheduled">0</span></button>
+          <button class="sv-chip" data-view="starred" data-action="setSmartView" data-arg="starred"><span class="sv-icon" data-icon="star"></span>Starred<span class="sv-count" id="svcStarred">0</span></button>
+          <button class="sv-chip" data-view="impact" data-action="setSmartView" data-arg="impact" title="Top ~20% by leverage — derived from priority, due, effort, unblocks, values, star"><span class="sv-icon" data-icon="zap"></span>Impact<span class="sv-count" id="svcImpact">0</span></button>
+          <button class="sv-chip" data-view="waiting" data-action="setSmartView" data-arg="waiting" title="Tasks blocked on someone else (type = waiting)"><span class="sv-icon" data-icon="hourglass"></span>Waiting<span class="sv-count" id="svcWaiting">0</span></button>
+          <button class="sv-chip" data-view="stuck" data-action="setSmartView" data-arg="stuck" title="Open tasks untouched for 14+ days"><span class="sv-icon" data-icon="alertCircle"></span>Stuck<span class="sv-count" id="svcStuck">0</span></button>
+          <button class="sv-chip" data-view="snoozed" data-action="setSmartView" data-arg="snoozed" title="Tasks hidden until a date (snoozed)"><span class="sv-icon" data-icon="moon"></span>Snoozed<span class="sv-count" id="svcSnoozed">0</span></button>
+          <button class="sv-chip" data-view="habits" data-action="setSmartView" data-arg="habits" title="Recurring &amp; habits"><span class="sv-icon" data-icon="refresh"></span>Habits<span class="sv-count" id="svcHabits">0</span></button>
+          <button class="sv-chip" data-view="completed" data-action="setSmartView" data-arg="completed"><span class="sv-icon" data-icon="checkCircle"></span>Done<span class="sv-count" id="svcCompleted">0</span></button>
+          <button class="sv-chip" data-view="archived" data-action="setSmartView" data-arg="archived"><span class="sv-icon" data-icon="archive"></span>Archive<span class="sv-count" id="svcArchived">0</span></button>
         </div>
 
         <div class="task-search-bar">
           <div class="task-search-row">
             <label class="sr-only" for="taskSearch">Search tasks</label>
-            <input type="text" class="task-search" id="taskSearch" placeholder="Search tasks…" aria-label="Search tasks" oninput="updateTaskFilters()" autocomplete="off">
-            <button type="button" class="task-search-clear" id="taskSearchClear" onclick="clearTaskSearch()" style="display:none" aria-label="Clear search">×</button>
+            <input type="text" class="task-search" id="taskSearch" placeholder="Search tasks…" aria-label="Search tasks" data-oninput="updateTaskFilters" autocomplete="off">
+            <button type="button" class="task-search-clear" id="taskSearchClear" data-action="clearTaskSearch" style="display:none" aria-label="Clear search">×</button>
             <span class="task-search-mode-pill" id="taskSearchSemanticPill" style="display:none">Semantic</span>
             <label class="task-search-semantic" title="Rank by meaning (requires model loaded)">
-              <input type="checkbox" id="taskSearchSemantic" onchange="toggleTaskSearchSemantic()"> Semantic
+              <input type="checkbox" id="taskSearchSemantic" data-onchange="toggleTaskSearchSemantic"> Semantic
             </label>
           </div>
         </div>
@@ -257,12 +267,12 @@
         <!-- Compact control bar: view toggle + filters button -->
         <div class="task-controlbar">
           <div class="view-toggle">
-            <button class="active" id="viewList" onclick="setTaskView('list')">List</button>
-            <button id="viewBoard" onclick="setTaskView('board')">Board</button>
-            <button id="viewCal" onclick="setTaskView('calendar')">Cal</button>
+            <button class="active" id="viewList" data-action="setTaskView" data-arg="list">List</button>
+            <button id="viewBoard" data-action="setTaskView" data-arg="board">Board</button>
+            <button id="viewCal" data-action="setTaskView" data-arg="calendar">Cal</button>
           </div>
           <span class="filters-summary" id="filtersSummary" aria-live="polite"></span>
-          <button type="button" class="filters-toggle" id="filtersToggle" onclick="toggleFiltersPanel()" title="Filters & sort" aria-expanded="false" aria-controls="filtersPanel">
+          <button type="button" class="filters-toggle" id="filtersToggle" data-action="toggleFiltersPanel" title="Filters & sort" aria-expanded="false" aria-controls="filtersPanel">
             <span class="ft-icon">⚙</span>
             <span class="ft-label">Filters</span>
             <span class="ft-count" id="filtersActiveCount" style="display:none">0</span>
@@ -273,14 +283,14 @@
         <div class="task-toolbar" id="filtersPanel" style="display:none">
           <!-- View selector (mobile-only, when controlbar view-toggle is hidden) -->
           <div class="view-toggle mobile-view-toggle" style="width:100%">
-            <button id="viewListMobile" class="active" onclick="setTaskView('list');updateMobileViewToggle()" style="flex:1"><span class="mv-ic" data-icon="list"></span> List</button>
-            <button id="viewBoardMobile" onclick="setTaskView('board');updateMobileViewToggle()" style="flex:1"><span class="mv-ic" data-icon="grid"></span> Board</button>
-            <button id="viewCalMobile" onclick="setTaskView('calendar');updateMobileViewToggle()" style="flex:1"><span class="mv-ic" data-icon="calendar"></span> Cal</button>
+            <button id="viewListMobile" class="active" data-action="setTaskViewMobile" data-arg="list" style="flex:1"><span class="mv-ic" data-icon="list"></span> List</button>
+            <button id="viewBoardMobile" data-action="setTaskViewMobile" data-arg="board" style="flex:1"><span class="mv-ic" data-icon="grid"></span> Board</button>
+            <button id="viewCalMobile" data-action="setTaskViewMobile" data-arg="calendar" style="flex:1"><span class="mv-ic" data-icon="calendar"></span> Cal</button>
           </div>
           <fieldset class="task-toolbar-row" style="border:0;padding:0;margin:0;display:flex;gap:8px;flex-wrap:wrap">
             <legend class="sr-only">Filter tasks</legend>
             <label class="sr-only" for="filterStatus">Filter by status</label>
-            <select class="task-tb-sel" id="filterStatus" onchange="updateTaskFilters()">
+            <select class="task-tb-sel" id="filterStatus" data-onchange="updateTaskFilters">
               <option value="all">All status</option>
               <option value="open">Open</option>
               <option value="progress">In Progress</option>
@@ -290,7 +300,7 @@
               <option value="active">Not Done</option>
             </select>
             <label class="sr-only" for="filterPriority">Filter by priority</label>
-            <select class="task-tb-sel" id="filterPriority" onchange="updateTaskFilters()">
+            <select class="task-tb-sel" id="filterPriority" data-onchange="updateTaskFilters">
               <option value="all">Any priority</option>
               <option value="urgent">Urgent</option>
               <option value="high">High</option>
@@ -301,7 +311,7 @@
           <fieldset class="task-toolbar-row" style="border:0;padding:0;margin:0;display:flex;gap:8px;flex-wrap:wrap">
             <legend class="sr-only">Sort and group tasks</legend>
             <label class="sr-only" for="taskSortSel">Sort tasks by</label>
-            <select class="task-tb-sel" id="taskSortSel" onchange="updateTaskFilters()">
+            <select class="task-tb-sel" id="taskSortSel" data-onchange="updateTaskFilters">
               <option value="manual">Sort: Manual</option>
               <option value="smart">Sort: Smart (starred, due, priority)</option>
               <option value="impact">Sort: Impact (Pareto 80/20)</option>
@@ -312,7 +322,7 @@
               <option value="time">Sort: Time tracked</option>
             </select>
             <label class="sr-only" for="groupBySel">Group tasks by</label>
-            <select class="task-tb-sel" id="groupBySel" onchange="updateTaskFilters()">
+            <select class="task-tb-sel" id="groupBySel" data-onchange="updateTaskFilters">
               <option value="none">Group: None</option>
               <option value="priority">Group: Priority</option>
               <option value="status">Group: Status</option>
@@ -323,15 +333,15 @@
           <div class="task-toolbar-row task-toolbar-display">
             <span class="filter-display-lbl">Display</span>
             <div class="density-seg" role="radiogroup" aria-label="Card density">
-              <button type="button" class="density-seg-btn" data-density="comfortable" role="radio" aria-checked="false" onclick="setCardDensity('comfortable')" title="Roomy padding, easier scanning">Comfortable</button>
-              <button type="button" class="density-seg-btn" data-density="cozy" role="radio" aria-checked="true" onclick="setCardDensity('cozy')" title="Default — balanced">Cozy</button>
-              <button type="button" class="density-seg-btn" data-density="compact" role="radio" aria-checked="false" onclick="setCardDensity('compact')" title="Tight rows — fit more on screen">Compact</button>
+              <button type="button" class="density-seg-btn" data-density="comfortable" role="radio" aria-checked="false" data-action="setCardDensity" data-arg="comfortable" title="Roomy padding, easier scanning">Comfortable</button>
+              <button type="button" class="density-seg-btn" data-density="cozy" role="radio" aria-checked="true" data-action="setCardDensity" data-arg="cozy" title="Default — balanced">Cozy</button>
+              <button type="button" class="density-seg-btn" data-density="compact" role="radio" aria-checked="false" data-action="setCardDensity" data-arg="compact" title="Tight rows — fit more on screen">Compact</button>
             </div>
             <label class="task-tb-check" title="When on, recurring tasks only appear in the Habits view">
-              <input type="checkbox" id="hideHabitsInMain" checked onchange="onHideHabitsToggle()"> Hide recurring from main
+              <input type="checkbox" id="hideHabitsInMain" checked data-onchange="onHideHabitsToggle"> Hide recurring from main
             </label>
             <label class="task-tb-check" title="Include completed tasks in the All view">
-              <input type="checkbox" id="showCompletedAll" onchange="onShowCompletedToggle()"> Show completed
+              <input type="checkbox" id="showCompletedAll" data-onchange="onShowCompletedToggle"> Show completed
             </label>
           </div>
         </div>
@@ -351,18 +361,18 @@
       <div class="tb-item"><div class="tb-num" id="tbWeek">0</div><div class="tb-lbl">Week</div></div>
       <div class="tb-divider"></div>
       <div class="tb-item"><div class="tb-num done" id="tbDoneToday">0</div><div class="tb-lbl">Done</div></div>
-      <button type="button" class="tb-snooze" onclick="snoozeTodayBanner()" title="Hide this banner until tomorrow">Snooze</button>
+      <button type="button" class="tb-snooze" data-action="snoozeTodayBanner" title="Hide this banner until tomorrow">Snooze</button>
     </div>
 
     <div id="swipeTipBanner" class="swipe-tip-banner" style="display:none" role="status">
       <span class="swipe-tip-msg">Tip: swipe right on a task to mark done · swipe left to archive</span>
-      <button type="button" class="swipe-tip-dismiss" onclick="dismissSwipeTip()">Got it</button>
+      <button type="button" class="swipe-tip-dismiss" data-action="dismissSwipeTip">Got it</button>
     </div>
 
     <!-- Archived notice (only shown in archive view) -->
     <div class="archived-notice" id="archivedNotice" style="display:none">
       <span class="archived-notice-inner"><span class="archived-notice-ic" data-icon="archive"></span>Viewing archived tasks — click the restore button (<span class="archived-notice-restore" data-icon="rotateCcw"></span>) to bring them back</span>
-      <button type="button" onclick="emptyArchiveWithConfirm()">Empty Archive</button>
+      <button type="button" data-action="emptyArchiveWithConfirm">Empty Archive</button>
     </div>
 
     <!-- List view (default) -->
@@ -379,10 +389,10 @@
   </div>
 
   <div class="timer-subnav" data-tab="focus">
-    <button type="button" class="timer-sub-btn active" data-sub="pomo" onclick="setTimerSub('pomo')">Pomodoro</button>
-    <button type="button" class="timer-sub-btn" data-sub="quick" onclick="setTimerSub('quick')">Quick</button>
-    <button type="button" class="timer-sub-btn" data-sub="sw" onclick="setTimerSub('sw')">Stopwatch</button>
-    <button type="button" class="timer-sub-btn" data-sub="chimes" onclick="setTimerSub('chimes')">Chimes</button>
+    <button type="button" class="timer-sub-btn active" data-sub="pomo" data-action="setTimerSub" data-arg="pomo">Pomodoro</button>
+    <button type="button" class="timer-sub-btn" data-sub="quick" data-action="setTimerSub" data-arg="quick">Quick</button>
+    <button type="button" class="timer-sub-btn" data-sub="sw" data-action="setTimerSub" data-arg="sw">Stopwatch</button>
+    <button type="button" class="timer-sub-btn" data-sub="chimes" data-action="setTimerSub" data-arg="chimes">Chimes</button>
   </div>
   <!-- Pomodoro Focus Timer -->
   <div class="panel timer-sub-panel" data-tab="focus" data-timer-sub="pomo" style="padding:20px">
@@ -392,9 +402,9 @@
       <span class="scnt" id="pomoCycleLabel">Pomodoro</span>
     </div>
     <div class="tabs" id="tabs">
-      <button class="tab active work" onclick="switchPhase('work')">Focus</button>
-      <button class="tab" onclick="switchPhase('short')">Short Break</button>
-      <button class="tab" onclick="switchPhase('long')">Long Break</button>
+      <button class="tab active work" data-action="switchPhase" data-arg="work">Focus</button>
+      <button class="tab" data-action="switchPhase" data-arg="short">Short Break</button>
+      <button class="tab" data-action="switchPhase" data-arg="long">Long Break</button>
     </div>
     <div class="card" id="mainCard" style="background:var(--work-bg);border:1px solid var(--work-border);margin-top:12px">
       <div class="ring-wrap">
@@ -405,7 +415,7 @@
         </div>
       </div>
       <div class="pips" id="pips"></div>
-      <div class="ctrls" id="ctrls"><button class="btn btn-primary" onclick="startTimer()">Start</button></div>
+      <div class="ctrls" id="ctrls"><button class="btn btn-primary" data-action="startTimer">Start</button></div>
     </div>
     <div class="phase-nav-hint">Tap a phase to switch · Tap a pip to jump in cycle</div>
   </div>
@@ -418,21 +428,21 @@
       <span class="scnt" id="qtCount">0 timers</span>
     </div>
     <div class="qt-form">
-      <div style="flex:1 1 120px"><label class="fl">Label</label><input class="fi fi-w" id="qtLabel" placeholder="e.g. Tea steep" onkeydown="if(event.key==='Enter')addQuickTimer()"></div>
+      <div style="flex:1 1 120px"><label class="fl">Label</label><input class="fi fi-w" id="qtLabel" placeholder="e.g. Tea steep" data-onkeydown="qtLabelEnterKey"></div>
       <div style="display:flex;gap:6px"><div><label class="fl">Min</label><input type="number" class="fi fi-n" id="qtMin" value="5" min="0" max="999"></div><div><label class="fl">Sec</label><input type="number" class="fi fi-n" id="qtSec" value="0" min="0" max="59"></div></div>
       <div><label class="fl">Sound</label><select class="fi fi-s" id="qtSound"><option value="bell">Bell</option><option value="ping">Ping</option><option value="buzz">Buzz</option><option value="chord">Chord</option><option value="alarm">Alarm</option></select></div>
-      <button class="iadd" onclick="addQuickTimer()">+ ADD</button>
+      <button class="iadd" data-action="addQuickTimer">+ ADD</button>
     </div>
     <div class="qt-presets">
-      <button class="qt-preset" onclick="addQuickPreset(1,0,'1m')">1m</button>
-      <button class="qt-preset" onclick="addQuickPreset(3,0,'3m')">3m</button>
-      <button class="qt-preset" onclick="addQuickPreset(5,0,'5m')">5m</button>
-      <button class="qt-preset" onclick="addQuickPreset(10,0,'10m')">10m</button>
-      <button class="qt-preset" onclick="addQuickPreset(15,0,'15m')">15m</button>
-      <button class="qt-preset" onclick="addQuickPreset(20,0,'20m')">20m</button>
-      <button class="qt-preset" onclick="addQuickPreset(30,0,'30m')">30m</button>
-      <button class="qt-preset" onclick="addQuickPreset(45,0,'45m')">45m</button>
-      <button class="qt-preset" onclick="addQuickPreset(60,0,'1h')">1h</button>
+      <button class="qt-preset" data-action="addQuickPreset" data-args='[1,0,"1m"]'>1m</button>
+      <button class="qt-preset" data-action="addQuickPreset" data-args='[3,0,"3m"]'>3m</button>
+      <button class="qt-preset" data-action="addQuickPreset" data-args='[5,0,"5m"]'>5m</button>
+      <button class="qt-preset" data-action="addQuickPreset" data-args='[10,0,"10m"]'>10m</button>
+      <button class="qt-preset" data-action="addQuickPreset" data-args='[15,0,"15m"]'>15m</button>
+      <button class="qt-preset" data-action="addQuickPreset" data-args='[20,0,"20m"]'>20m</button>
+      <button class="qt-preset" data-action="addQuickPreset" data-args='[30,0,"30m"]'>30m</button>
+      <button class="qt-preset" data-action="addQuickPreset" data-args='[45,0,"45m"]'>45m</button>
+      <button class="qt-preset" data-action="addQuickPreset" data-args='[60,0,"1h"]'>1h</button>
     </div>
     <div class="qt-list" id="qtList"><div class="iempty" id="qtEmpty">No quick timers — add one or tap a preset</div></div>
   </div>
@@ -443,9 +453,9 @@
     <div style="text-align:center">
       <div id="swDisplay" style="font-size:42px;font-weight:800;color:var(--text-1);letter-spacing:3px;font-variant-numeric:tabular-nums;margin-bottom:12px">00:00:00</div>
       <div style="display:flex;gap:10px;justify-content:center">
-        <button class="btn btn-primary" id="swStartBtn" onclick="swToggle()" style="padding:8px 20px;font-size:10px">Start</button>
-        <button class="btn btn-ghost" onclick="swLap()" style="padding:8px 20px;font-size:10px">Lap</button>
-        <button class="btn-danger" onclick="swReset()" style="padding:8px 16px">Reset</button>
+        <button class="btn btn-primary" id="swStartBtn" data-action="swToggle" style="padding:8px 20px;font-size:10px">Start</button>
+        <button class="btn btn-ghost" data-action="swLap" style="padding:8px 20px;font-size:10px">Lap</button>
+        <button class="btn-danger" data-action="swReset" style="padding:8px 16px">Reset</button>
       </div>
       <div id="swLaps" style="margin-top:10px;display:flex;flex-direction:column;gap:3px;max-height:120px;overflow-y:auto"></div>
     </div>
@@ -459,7 +469,7 @@
       <div style="display:flex;gap:6px;align-items:flex-end"><div><label class="fl">Min</label><input type="number" class="fi fi-n" id="intMin" value="5" min="0" max="999"></div><div><label class="fl">Sec</label><input type="number" class="fi fi-n" id="intSec" value="0" min="0" max="59"></div></div>
       <div><label class="fl">Sound</label><select class="fi fi-s" id="intChime"><option value="bell">Bell</option><option value="ping">Ping</option><option value="buzz">Buzz</option><option value="chord">Chord</option><option value="alarm">Alarm</option></select></div>
       <div><label class="fl">During</label><select class="fi fi-s" id="intTarget"><option value="pomo">Pomodoro</option><option value="quick">Quick Timers</option><option value="sw">Stopwatch</option></select></div>
-      <div style="display:flex;gap:5px"><button type="button" class="iprev" onclick="playChime(gid('intChime').value)" title="Preview" data-icon="play"></button><button class="iadd" onclick="addInterval()">+ ADD</button></div>
+      <div style="display:flex;gap:5px"><button type="button" class="iprev" data-action="intervalChimePreview" title="Preview" data-icon="play"></button><button class="iadd" data-action="addInterval">+ ADD</button></div>
     </div>
     <div class="ilist" id="intList"><div class="iempty" id="intEmpty">No chimes set</div></div>
   </div>
@@ -477,7 +487,7 @@
         <summary class="set-section-sum">General</summary>
         <div class="set-section-body">
           <div class="srow"><span class="sr-lbl">Preset</span>
-            <select class="sinput" id="cfgPreset" onchange="applyPhasePreset(this.value)" title="Switch to a named cadence; manually editing the durations below clears the preset">
+            <select class="sinput" id="cfgPreset" data-onchange="applyPhasePresetFromSelect" title="Switch to a named cadence; manually editing the durations below clears the preset">
               <option value="classic">Classic 25/5</option>
               <option value="short">Short 15/3</option>
               <option value="longfocus">Long focus 52/17</option>
@@ -485,16 +495,16 @@
               <option value="deepwork">Deep work 120/30</option>
             </select>
           </div>
-          <div class="srow"><span class="sr-lbl">Focus Duration</span><input type="number" inputmode="numeric" pattern="[0-9]*" class="sinput" id="cfgWork" value="25" min="1" max="120" onchange="updateConfig()"><span class="sunit">min</span></div>
-          <div class="srow"><span class="sr-lbl">Short Break</span><input type="number" inputmode="numeric" pattern="[0-9]*" class="sinput" id="cfgShort" value="5" min="1" max="30" onchange="updateConfig()"><span class="sunit">min</span></div>
-          <div class="srow"><span class="sr-lbl">Long Break</span><input type="number" inputmode="numeric" pattern="[0-9]*" class="sinput" id="cfgLong" value="15" min="1" max="60" onchange="updateConfig()"><span class="sunit">min</span></div>
-          <div class="srow"><span class="sr-lbl">Sessions / Cycle</span><input type="number" inputmode="numeric" pattern="[0-9]*" class="sinput" id="cfgCycle" value="4" min="2" max="10" onchange="updateConfig()"></div>
-          <div class="srow"><span class="sr-lbl" id="lbl-togSnpNote">Ask for session note</span><button type="button" class="toggle on" id="togSnpNote" role="switch" aria-checked="true" aria-labelledby="lbl-togSnpNote" onclick="toggleOpt('togSnpNote')"><span class="tknob" aria-hidden="true"></span></button></div>
-          <div class="srow"><span class="sr-lbl" id="lbl-togBreak">Auto-start Breaks</span><button type="button" class="toggle on" id="togBreak" role="switch" aria-checked="true" aria-labelledby="lbl-togBreak" onclick="toggleOpt('togBreak')"><span class="tknob" aria-hidden="true"></span></button></div>
-          <div class="srow"><span class="sr-lbl" id="lbl-togWork">Auto-start Focus</span><button type="button" class="toggle" id="togWork" role="switch" aria-checked="false" aria-labelledby="lbl-togWork" onclick="toggleOpt('togWork')"><span class="tknob" aria-hidden="true"></span></button></div>
-          <div class="srow"><span class="sr-lbl" id="lbl-togSound">Sound Alerts</span><button type="button" class="toggle on" id="togSound" role="switch" aria-checked="true" aria-labelledby="lbl-togSound" onclick="toggleOpt('togSound')"><span class="tknob" aria-hidden="true"></span></button></div>
-          <div class="srow"><span class="sr-lbl" id="lbl-togNotif">Desktop Notifications</span><button type="button" class="toggle on" id="togNotif" role="switch" aria-checked="true" aria-labelledby="lbl-togNotif" onclick="toggleOpt('togNotif')"><span class="tknob" aria-hidden="true"></span></button></div>
-          <div class="srow"><span class="sr-lbl" id="lbl-togLink">Link Task to Session</span><button type="button" class="toggle on" id="togLink" role="switch" aria-checked="true" aria-labelledby="lbl-togLink" onclick="toggleOpt('togLink')"><span class="tknob" aria-hidden="true"></span></button></div>
+          <div class="srow"><span class="sr-lbl">Focus Duration</span><input type="number" inputmode="numeric" pattern="[0-9]*" class="sinput" id="cfgWork" value="25" min="1" max="120" data-onchange="updateConfig"><span class="sunit">min</span></div>
+          <div class="srow"><span class="sr-lbl">Short Break</span><input type="number" inputmode="numeric" pattern="[0-9]*" class="sinput" id="cfgShort" value="5" min="1" max="30" data-onchange="updateConfig"><span class="sunit">min</span></div>
+          <div class="srow"><span class="sr-lbl">Long Break</span><input type="number" inputmode="numeric" pattern="[0-9]*" class="sinput" id="cfgLong" value="15" min="1" max="60" data-onchange="updateConfig"><span class="sunit">min</span></div>
+          <div class="srow"><span class="sr-lbl">Sessions / Cycle</span><input type="number" inputmode="numeric" pattern="[0-9]*" class="sinput" id="cfgCycle" value="4" min="2" max="10" data-onchange="updateConfig"></div>
+          <div class="srow"><span class="sr-lbl" id="lbl-togSnpNote">Ask for session note</span><button type="button" class="toggle on" id="togSnpNote" role="switch" aria-checked="true" aria-labelledby="lbl-togSnpNote" data-action="toggleOpt" data-arg="togSnpNote"><span class="tknob" aria-hidden="true"></span></button></div>
+          <div class="srow"><span class="sr-lbl" id="lbl-togBreak">Auto-start Breaks</span><button type="button" class="toggle on" id="togBreak" role="switch" aria-checked="true" aria-labelledby="lbl-togBreak" data-action="toggleOpt" data-arg="togBreak"><span class="tknob" aria-hidden="true"></span></button></div>
+          <div class="srow"><span class="sr-lbl" id="lbl-togWork">Auto-start Focus</span><button type="button" class="toggle" id="togWork" role="switch" aria-checked="false" aria-labelledby="lbl-togWork" data-action="toggleOpt" data-arg="togWork"><span class="tknob" aria-hidden="true"></span></button></div>
+          <div class="srow"><span class="sr-lbl" id="lbl-togSound">Sound Alerts</span><button type="button" class="toggle on" id="togSound" role="switch" aria-checked="true" aria-labelledby="lbl-togSound" data-action="toggleOpt" data-arg="togSound"><span class="tknob" aria-hidden="true"></span></button></div>
+          <div class="srow"><span class="sr-lbl" id="lbl-togNotif">Desktop Notifications</span><button type="button" class="toggle on" id="togNotif" role="switch" aria-checked="true" aria-labelledby="lbl-togNotif" data-action="toggleOpt" data-arg="togNotif"><span class="tknob" aria-hidden="true"></span></button></div>
+          <div class="srow"><span class="sr-lbl" id="lbl-togLink">Link Task to Session</span><button type="button" class="toggle on" id="togLink" role="switch" aria-checked="true" aria-labelledby="lbl-togLink" data-action="toggleOpt" data-arg="togLink"><span class="tknob" aria-hidden="true"></span></button></div>
           <!-- Quick-add fields picker — controls which fields appear in the
                inline "More options" panel under the task input. -->
           <div class="srow" style="flex-direction:column;align-items:flex-start;gap:6px;padding:12px 0 14px;border-top:1px solid var(--border);margin-top:6px">
@@ -529,7 +539,7 @@
             Flexible groupings &mdash; e.g. <em>Research</em>, <em>School</em>, <em>Side Project</em>. Lists are <strong>more flexible than life areas</strong> (which are themed buckets) and <strong>less ad-hoc than tags</strong>; they may overlap with life areas freely. Each list takes an optional description that feeds Auto-organize so new tasks route here automatically.
           </p>
           <div id="listsManager"></div>
-          <button type="button" class="btn-ghost btn-sm lists-mgr-add" onclick="addList()">+ Add list</button>
+          <button type="button" class="btn-ghost btn-sm lists-mgr-add" data-action="addList">+ Add list</button>
         </div>
       </details>
 
@@ -538,7 +548,7 @@
         <div class="set-section-body">
           <div class="srow" style="justify-content:space-between;gap:10px">
             <span class="sr-lbl" style="font-size:13px">Task understanding</span>
-            <button type="button" class="btn-ghost btn-sm" onclick="showTab('tools')" style="flex-shrink:0">Open in Tools</button>
+            <button type="button" class="btn-ghost btn-sm" data-action="showTab" data-arg="tools" style="flex-shrink:0">Open in Tools</button>
           </div>
           <div class="srow" style="flex-direction:column;align-items:flex-start;gap:10px;padding:14px 0 0;border-top:1px solid var(--border);margin-top:10px">
             <span class="sr-lbl" style="font-size:12px;letter-spacing:.06em">Generative AI (Beta)</span>
@@ -560,13 +570,13 @@
         <div class="set-section-body">
           <div class="srow" style="margin-top:0;padding-top:0;border-top:none">
             <span class="sr-lbl">Install as App</span>
-            <button id="installBtn" onclick="installPWA()" style="display:none;padding:8px 14px;background:var(--accent);color:#0a1320;border:none;border-radius:var(--r-sm);font-size:12px;font-weight:600;font-family:inherit;cursor:pointer">＋ Install</button>
+            <button id="installBtn" data-action="installPWA" style="display:none;padding:8px 14px;background:var(--accent);color:#0a1320;border:none;border-radius:var(--r-sm);font-size:12px;font-weight:600;font-family:inherit;cursor:pointer">＋ Install</button>
             <span id="pwaStatus" style="font-size:11px;color:var(--text-3);letter-spacing:0;text-align:right;max-width:200px"></span>
           </div>
           <div class="srow" style="flex-direction:column;align-items:stretch;gap:8px;padding:14px 0 10px;border-top:1px solid var(--border);margin-top:10px">
             <span class="sr-lbl" style="font-size:12px;letter-spacing:.06em">System</span>
             <div id="systemInfo" style="font-size:11px;color:var(--text-3);line-height:1.6;font-variant-numeric:tabular-nums">Loading…</div>
-            <button onclick="checkStorageQuota().then(renderSystemInfo)" style="align-self:flex-start;background:none;border:1px solid var(--border);color:var(--text-3);padding:4px 10px;border-radius:4px;font-size:10px;font-family:inherit;cursor:pointer">Refresh</button>
+            <button data-action="refreshSystemInfoQuota" style="align-self:flex-start;background:none;border:1px solid var(--border);color:var(--text-3);padding:4px 10px;border-radius:4px;font-size:10px;font-family:inherit;cursor:pointer">Refresh</button>
           </div>
         </div>
       </details>
@@ -575,7 +585,7 @@
 
   <!-- Today's Stats (Data tab) -->
   <div class="panel panel-data" data-tab="data" data-data-section="stats">
-    <div class="shdr"><div class="sdot" style="background:var(--long)"></div><h2 class="slbl">Today's Stats</h2><button class="small-btn" onclick="resetStats()">Reset Day</button></div>
+    <div class="shdr"><div class="sdot" style="background:var(--long)"></div><h2 class="slbl">Today's Stats</h2><button class="small-btn" data-action="resetStats">Reset Day</button></div>
     <dl class="stat-grid">
       <div class="stat-box"><dd class="stat-val wc" id="statPomos">0</dd><dt class="stat-lbl">Sessions</dt></div>
       <div class="stat-box"><dd class="stat-val tc" id="statFocus">0m</dd><dt class="stat-lbl">Focus Time</dt></div>
@@ -588,7 +598,7 @@
 
   <!-- Time Log (Data tab) — sessions in chronological order. -->
   <div class="panel panel-data" data-tab="data" data-data-section="log">
-    <div class="shdr"><div class="sdot" style="background:var(--long)"></div><h2 class="slbl">Time Log</h2><button class="small-btn" onclick="clearLog()">Clear</button></div>
+    <div class="shdr"><div class="sdot" style="background:var(--long)"></div><h2 class="slbl">Time Log</h2><button class="small-btn" data-action="clearLog">Clear</button></div>
     <div class="log-list" id="logList"><div class="log-empty" id="logEmpty">Completed sessions appear here</div></div>
   </div>
 
@@ -597,8 +607,8 @@
     <div class="shdr"><div class="sdot" style="background:#8e44ad"></div><h2 class="slbl">Past Days</h2><span class="scnt" id="archiveCount">0 days</span></div>
     <div id="archiveList" class="archive-list"><div class="iempty" id="archiveEmpty">History will appear here after each day</div></div>
     <div class="archive-actions">
-      <button class="export-btn export-csv" onclick="exportAllCSV()">Export All History (.csv)</button>
-      <button class="clear-hist-btn" onclick="clearArchive()">Clear History</button>
+      <button class="export-btn export-csv" data-action="exportAllCSV">Export All History (.csv)</button>
+      <button class="clear-hist-btn" data-action="clearArchive">Clear History</button>
     </div>
   </div>
 
@@ -611,9 +621,9 @@
       <div class="export-section-head">Daily report</div>
       <p class="export-section-desc">Human-readable summary of today's tasks, sessions, and time — for journaling or sharing.</p>
       <div class="export-row">
-        <button class="export-btn export-txt" onclick="exportFile('txt')">.txt</button>
-        <button class="export-btn export-md"  onclick="exportFile('md')">.md</button>
-        <button class="export-btn export-clip" id="exportClipBtn" onclick="exportClipboard()">Copy</button>
+        <button class="export-btn export-txt" data-action="exportFile" data-arg="txt">.txt</button>
+        <button class="export-btn export-md"  data-action="exportFile" data-arg="md">.md</button>
+        <button class="export-btn export-clip" id="exportClipBtn" data-action="exportClipboard">Copy</button>
       </div>
     </div>
 
@@ -622,12 +632,12 @@
       <div class="export-section-head">Tasks (export &amp; import)</div>
       <p class="export-section-desc">Unified task data — same fields in both CSV and JSON. CSV opens in Excel/Sheets, JSON preserves full fidelity (checklist, notes). Import auto-detects the format and merges by task id.</p>
       <div class="export-row">
-        <button class="export-btn export-csv" onclick="exportTasksCSV()">⬇ Tasks (.csv)</button>
-        <button class="export-btn export-json" onclick="exportTasksJSON()">⬇ Tasks (.json)</button>
-        <button class="export-btn export-ics" onclick="exportTasksICS()" title="Read-only feed of tasks-with-due-dates for Google/Apple Calendar etc.">⬇ Tasks (.ics)</button>
+        <button class="export-btn export-csv" data-action="exportTasksCSV">⬇ Tasks (.csv)</button>
+        <button class="export-btn export-json" data-action="exportTasksJSON">⬇ Tasks (.json)</button>
+        <button class="export-btn export-ics" data-action="exportTasksICS" title="Read-only feed of tasks-with-due-dates for Google/Apple Calendar etc.">⬇ Tasks (.ics)</button>
         <label class="export-btn export-import">
           ⬆ Import tasks
-          <input type="file" accept=".json,.csv" hidden onchange="importTasks(this.files[0]); this.value=''">
+          <input type="file" accept=".json,.csv" hidden data-onchange="importTasksFromInput">
         </label>
       </div>
     </div>
@@ -637,17 +647,17 @@
       <div class="export-section-head">Full backup</div>
       <p class="export-section-desc">Complete app snapshot including tasks, lists, settings, daily stats, and archive. Use this to move everything to another device or recover from data loss.</p>
       <div class="export-row">
-        <button class="export-btn export-backup" onclick="exportData()">⬇ Full backup (.json)</button>
+        <button class="export-btn export-backup" data-action="exportData">⬇ Full backup (.json)</button>
         <label class="export-btn export-restore">
           ⬆ Restore backup
-          <input type="file" accept=".json" hidden onchange="importData(this.files[0]); this.value=''">
+          <input type="file" accept=".json" hidden data-onchange="importDataFromInput">
         </label>
       </div>
       <div class="export-row export-row-secondary">
-        <button class="export-btn export-encrypted" onclick="exportDataEncrypted()" title="Encrypts the same backup with a passphrase (PBKDF2 + AES-GCM, in-browser only)">⬇ Encrypted backup (.json)</button>
+        <button class="export-btn export-encrypted" data-action="exportDataEncrypted" title="Encrypts the same backup with a passphrase (PBKDF2 + AES-GCM, in-browser only)">⬇ Encrypted backup (.json)</button>
         <label class="export-btn export-encrypted-restore">
           ⬆ Restore encrypted
-          <input type="file" accept=".json" hidden onchange="importDataEncrypted(this.files[0]); this.value=''">
+          <input type="file" accept=".json" hidden data-onchange="importDataEncryptedFromInput">
         </label>
       </div>
     </div>
@@ -659,27 +669,27 @@
 
 
 <!-- Floating Mini Timer -->
-<div class="mini-timer" id="miniTimer" onclick="if(!event.target.closest('.mt-btn')){showTab('focus')}">
+<div class="mini-timer" id="miniTimer" data-action="showTab" data-arg="focus">
   <div class="mt-phase-dot" id="mtDot"></div>
   <div class="mt-info">
     <div class="mt-label" id="mtLabel">FOCUS</div>
     <div class="mt-time" id="mtTime">25:00</div>
   </div>
-  <button class="mt-btn mt-play" id="mtToggle" aria-label="Play or pause focus timer" onclick="event.stopPropagation();miniTimerToggle()">▶</button>
+  <button class="mt-btn mt-play" id="mtToggle" aria-label="Play or pause focus timer" data-action="miniTimerToggle">▶</button>
   <div class="mt-open" id="mtTaskHint" style="display:none">⇢ open</div>
 </div>
 
 <!-- What next? overlay -->
-<div id="whatNextOverlay" class="what-next-overlay" style="display:none" onclick="if(event.target===this)closeWhatNext()">
-  <div class="what-next-panel" onclick="event.stopPropagation()">
+<div id="whatNextOverlay" class="what-next-overlay" style="display:none" data-action="closeWhatNextOnBackdrop">
+  <div class="what-next-panel">
     <div class="what-next-hdr">
       <span>What next?</span>
-      <button type="button" class="what-next-x" onclick="closeWhatNext()" aria-label="Close">✕</button>
+      <button type="button" class="what-next-x" data-action="closeWhatNext" aria-label="Close">✕</button>
     </div>
     <p class="what-next-sub">Ranked by priority, due date, energy fit, and blockers (no embeddings).</p>
     <div class="what-next-ctx">
       <label for="whatNextTime">Time available (min)</label>
-      <select id="whatNextTime" class="mfield-in" onchange="openWhatNext()">
+      <select id="whatNextTime" class="mfield-in" data-onchange="openWhatNext">
         <option value="0">Any</option>
         <option value="15">15</option>
         <option value="30">30</option>
@@ -687,7 +697,7 @@
         <option value="120">120</option>
       </select>
       <label for="whatNextEnergy">Energy</label>
-      <select id="whatNextEnergy" class="mfield-in" onchange="openWhatNext()">
+      <select id="whatNextEnergy" class="mfield-in" data-onchange="openWhatNext">
         <option value="">Any</option>
         <option value="high">High</option>
         <option value="low">Low</option>
@@ -698,11 +708,11 @@
 </div>
 
 <!-- Command Palette (Cmd+K) -->
-<div class="cmdk-overlay" id="cmdkOverlay" role="dialog" aria-modal="true" aria-label="Command palette" onclick="if(event.target===this)closeCmdK()">
+<div class="cmdk-overlay" id="cmdkOverlay" role="dialog" aria-modal="true" aria-label="Command palette" data-action="closeCmdKOnBackdrop">
   <div class="cmdk-panel">
     <div class="cmdk-input-row">
-      <input class="cmdk-input" id="cmdkInput" placeholder="Search tasks, actions, views… (? for Ask)" oninput="renderCmdK()" onkeydown="cmdkKeydown(event)">
-      <button type="button" id="cmdkAskToggle" class="cmdk-ask-toggle" onclick="cmdkToggleAsk()" title="Toggle Ask mode (prefix with ?)" aria-pressed="false">Ask</button>
+      <input class="cmdk-input" id="cmdkInput" placeholder="Search tasks, actions, views… (? for Ask)" data-oninput="renderCmdK" data-onkeydown="cmdkKeydown">
+      <button type="button" id="cmdkAskToggle" class="cmdk-ask-toggle" data-action="cmdkToggleAsk" title="Toggle Ask mode (prefix with ?)" aria-pressed="false">Ask</button>
     </div>
     <p class="cmdk-find-hint" id="cmdkFindHint" hidden>Quick actions &amp; search below · tap <strong>Ask</strong> or type <kbd>?</kbd> for the on-device AI</p>
     <div class="cmdk-ask-reply" id="cmdkAskReply" hidden></div>
@@ -712,11 +722,11 @@
 </div>
 
 <!-- Bulk import (paste multiple lines) -->
-<div class="modal-overlay" id="bulkImportModal" role="dialog" aria-modal="true" aria-labelledby="bulkImportTitle" onclick="if(event.target===this)closeBulkImportModal()">
-  <div class="modal bulk-import-modal" onclick="event.stopPropagation()">
+<div class="modal-overlay" id="bulkImportModal" role="dialog" aria-modal="true" aria-labelledby="bulkImportTitle" data-action="closeBulkImportModalOnBackdrop">
+  <div class="modal bulk-import-modal">
     <div class="modal-head">
       <span id="bulkImportTitle">Import tasks</span>
-      <button type="button" class="modal-close" onclick="closeBulkImportModal()" aria-label="Close">✕</button>
+      <button type="button" class="modal-close" data-action="closeBulkImportModal" aria-label="Close">✕</button>
     </div>
     <div class="modal-body">
       <p id="bulkImportHint" class="bulk-import-hint"></p>
@@ -735,48 +745,48 @@
       <div id="bulkImportProgress" class="bulk-import-progress" hidden role="status" aria-live="polite"></div>
     </div>
     <div class="modal-foot">
-      <button type="button" class="mfoot-btn mfoot-cancel" onclick="closeBulkImportModal()">Cancel</button>
-      <button type="button" class="mfoot-btn mfoot-save" id="bulkImportConfirm" onclick="confirmBulkImport()">Add tasks</button>
+      <button type="button" class="mfoot-btn mfoot-cancel" data-action="closeBulkImportModal">Cancel</button>
+      <button type="button" class="mfoot-btn mfoot-save" id="bulkImportConfirm" data-action="confirmBulkImport">Add tasks</button>
     </div>
   </div>
 </div>
 
 <!-- App confirm (replaces window.confirm) -->
-<div class="modal-overlay app-dlg-overlay" id="appConfirmModal" role="alertdialog" aria-modal="true" aria-labelledby="appConfirmMessage" onclick="if(event.target===this)closeAppConfirm(false)">
-  <div class="modal app-dlg" onclick="event.stopPropagation()">
+<div class="modal-overlay app-dlg-overlay" id="appConfirmModal" role="alertdialog" aria-modal="true" aria-labelledby="appConfirmMessage" data-action="closeAppConfirmOnBackdrop">
+  <div class="modal app-dlg">
     <div class="modal-body">
       <p id="appConfirmMessage" class="app-dlg-msg" style="margin:0;font-size:14px;line-height:1.5"></p>
     </div>
     <div class="modal-foot">
-      <button type="button" class="mfoot-btn mfoot-cancel" onclick="closeAppConfirm(false)">Cancel</button>
-      <button type="button" class="mfoot-btn mfoot-save" id="appConfirmOk" onclick="closeAppConfirm(true)">OK</button>
+      <button type="button" class="mfoot-btn mfoot-cancel" data-action="closeAppConfirm" data-args='[false]'>Cancel</button>
+      <button type="button" class="mfoot-btn mfoot-save" id="appConfirmOk" data-action="closeAppConfirm" data-args='[true]'>OK</button>
     </div>
   </div>
 </div>
 
 <!-- App prompt (replaces window.prompt) -->
-<div class="modal-overlay app-dlg-overlay" id="appPromptModal" role="dialog" aria-modal="true" aria-labelledby="appPromptLabel" onclick="if(event.target===this)closeAppPrompt(null)">
-  <div class="modal app-dlg" onclick="event.stopPropagation()">
+<div class="modal-overlay app-dlg-overlay" id="appPromptModal" role="dialog" aria-modal="true" aria-labelledby="appPromptLabel" data-action="closeAppPromptOnBackdrop">
+  <div class="modal app-dlg">
     <div class="modal-body">
       <label id="appPromptLabel" for="appPromptInput" class="app-dlg-msg" style="display:block;margin:0 0 10px;font-size:13px;white-space:pre-wrap;line-height:1.45"></label>
-      <input type="text" class="mfield-in" id="appPromptInput" style="width:100%" autocomplete="off" onkeydown="if(event.key==='Enter'){event.preventDefault();submitAppPrompt()}">
+      <input type="text" class="mfield-in" id="appPromptInput" style="width:100%" autocomplete="off" data-onkeydown="appPromptInputKey">
       <textarea class="mfield-textarea" id="appPromptTextarea" aria-labelledby="appPromptLabel" style="width:100%;min-height:88px;display:none" rows="4" spellcheck="true"></textarea>
     </div>
     <div class="modal-foot">
-      <button type="button" class="mfoot-btn mfoot-cancel" onclick="closeAppPrompt(null)">Cancel</button>
-      <button type="button" class="mfoot-btn mfoot-save" id="appPromptOk" onclick="submitAppPrompt()">OK</button>
+      <button type="button" class="mfoot-btn mfoot-cancel" data-action="closeAppPrompt" data-args='[null]'>Cancel</button>
+      <button type="button" class="mfoot-btn mfoot-save" id="appPromptOk" data-action="submitAppPrompt">OK</button>
     </div>
   </div>
 </main>
 
 <!-- Task Detail Modal -->
-<div class="modal-overlay" id="taskModal" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle" onclick="if(event.target===this)closeTaskDetail()">
+<div class="modal-overlay" id="taskModal" role="dialog" aria-modal="true" aria-labelledby="taskModalTitle" data-action="closeTaskDetailOnBackdrop">
   <div class="modal">
     <h2 class="sr-only" id="taskModalTitle">Task details</h2>
     <div class="modal-head">
-      <button type="button" class="task-checkbox" id="mdCheckbox" onclick="toggleTaskDone()"></button>
+      <button type="button" class="task-checkbox" id="mdCheckbox" data-action="toggleTaskDone"></button>
       <input class="mfield-in" id="mdName" style="flex:1;font-size:14px;font-weight:700" placeholder="Task name" aria-label="Task name">
-      <button type="button" class="modal-close" onclick="closeTaskDetail()" aria-label="Close task">✕</button>
+      <button type="button" class="modal-close" data-action="closeTaskDetail" aria-label="Close task">✕</button>
     </div>
     <div class="modal-body">
       <div class="modal-stat" id="mdStats"></div>
@@ -797,21 +807,21 @@
           <label class="mfield-lbl" for="mdDue">Due Date</label>
           <input type="date" class="mfield-in" id="mdDue">
           <div class="quick-dates">
-            <button type="button" class="qd-btn" onclick="setQuickDate(0)">Today</button>
-            <button type="button" class="qd-btn" onclick="setQuickDate(1)">Tomorrow</button>
-            <button type="button" class="qd-btn" onclick="setQuickDate(7)">+1 Week</button>
-            <button type="button" class="qd-btn" onclick="setQuickDate('clear')">Clear</button>
+            <button type="button" class="qd-btn" data-action="setQuickDate" data-args='[0]'>Today</button>
+            <button type="button" class="qd-btn" data-action="setQuickDate" data-args='[1]'>Tomorrow</button>
+            <button type="button" class="qd-btn" data-action="setQuickDate" data-args='[7]'>+1 Week</button>
+            <button type="button" class="qd-btn" data-action="setQuickDate" data-arg="clear">Clear</button>
           </div>
         </div>
         <div class="mfield">
           <label class="mfield-lbl" for="mdRemindAt">Remind me at</label>
           <input type="datetime-local" class="mfield-in" id="mdRemindAt">
           <div class="quick-dates">
-            <button type="button" class="qd-btn" onclick="setQuickReminder(0,9)">9am</button>
-            <button type="button" class="qd-btn" onclick="setQuickReminder(0,17)">5pm</button>
-            <button type="button" class="qd-btn" onclick="setQuickReminder(1,9)">Tmrw 9am</button>
-            <button type="button" class="qd-btn" onclick="setQuickReminder('due',9)">Due 9am</button>
-            <button type="button" class="qd-btn" onclick="setQuickReminder('clear')">Clear</button>
+            <button type="button" class="qd-btn" data-action="setQuickReminder" data-args='[0,9]'>9am</button>
+            <button type="button" class="qd-btn" data-action="setQuickReminder" data-args='[0,17]'>5pm</button>
+            <button type="button" class="qd-btn" data-action="setQuickReminder" data-args='[1,9]'>Tmrw 9am</button>
+            <button type="button" class="qd-btn" data-action="setQuickReminder" data-args='["due",9]'>Due 9am</button>
+            <button type="button" class="qd-btn" data-action="setQuickReminder" data-arg="clear">Clear</button>
           </div>
         </div>
       </div>
@@ -821,10 +831,10 @@
           <label class="mfield-lbl" for="mdSnoozeUntil">Snooze (hide until)</label>
           <input type="date" class="mfield-in" id="mdSnoozeUntil" title="Hide this task from main views until this date. Distinct from due date — snoozing does not move the deadline.">
           <div class="quick-dates">
-            <button type="button" class="qd-btn" onclick="setQuickSnooze(1)">+1 day</button>
-            <button type="button" class="qd-btn" onclick="setQuickSnooze(3)">+3 days</button>
-            <button type="button" class="qd-btn" onclick="setQuickSnooze(7)">+1 week</button>
-            <button type="button" class="qd-btn" onclick="setQuickSnooze('clear')">Clear</button>
+            <button type="button" class="qd-btn" data-action="setQuickSnooze" data-args='[1]'>+1 day</button>
+            <button type="button" class="qd-btn" data-action="setQuickSnooze" data-args='[3]'>+3 days</button>
+            <button type="button" class="qd-btn" data-action="setQuickSnooze" data-args='[7]'>+1 week</button>
+            <button type="button" class="qd-btn" data-action="setQuickSnooze" data-arg="clear">Clear</button>
           </div>
         </div>
         <div class="mfield">
@@ -923,7 +933,7 @@
             <div id="mdBlockedBy" role="group" aria-labelledby="mdBlockedByLbl"></div>
           </div>
           <div class="mfield md-similar-wrap" id="mdBreakdownWrap" style="display:none">
-            <button type="button" class="similar-acc-trigger" id="mdBreakdownTrigger" onclick="toggleBreakdownAccordion()">
+            <button type="button" class="similar-acc-trigger" id="mdBreakdownTrigger" data-action="toggleBreakdownAccordion">
               <span>Break down with AI</span><span class="similar-acc-chevron">▼</span>
             </button>
             <div class="similar-acc-panel" id="mdBreakdownAccordion">
@@ -931,7 +941,7 @@
             </div>
           </div>
           <div class="mfield md-similar-wrap">
-            <button type="button" class="similar-acc-trigger" id="mdSimilarTrigger" onclick="toggleSimilarAccordion()">
+            <button type="button" class="similar-acc-trigger" id="mdSimilarTrigger" data-action="toggleSimilarAccordion">
               <span>Similar tasks</span><span class="similar-acc-chevron">▼</span>
             </button>
             <div class="similar-acc-panel" id="mdSimilarAccordion">
@@ -951,9 +961,9 @@
 
     </div>
     <div class="modal-foot">
-      <button class="mfoot-btn mfoot-del" onclick="deleteTaskFromModal()">Delete</button>
-      <button class="mfoot-btn mfoot-cancel" onclick="closeTaskDetail()">Cancel</button>
-      <button class="mfoot-btn mfoot-save" onclick="saveTaskDetail()">Save</button>
+      <button class="mfoot-btn mfoot-del" data-action="deleteTaskFromModal">Delete</button>
+      <button class="mfoot-btn mfoot-cancel" data-action="closeTaskDetail">Cancel</button>
+      <button class="mfoot-btn mfoot-save" data-action="saveTaskDetail">Save</button>
     </div>
   </div>
 </div>

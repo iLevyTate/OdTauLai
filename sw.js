@@ -1,5 +1,5 @@
 // OdTauLai Service Worker — keep CACHE_NAME aligned with js/version.js swCache
-const CACHE_NAME = 'odtaulai-v43';
+const CACHE_NAME = 'odtaulai-v44';
 
 const ASSETS = [
   './',
@@ -8,6 +8,7 @@ const ASSETS = [
   './favicon.ico',
   './css/main.css',
   './js/version.js',
+  './js/event-delegation.js',
   './js/pwa.js',
   './js/config.js',
   './js/icons.js',

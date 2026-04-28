@@ -1609,7 +1609,7 @@ function updateHabitsHiddenNotice(){
   const n=countHabitsHiddenInView();
   if(n>0 && typeof cfg==='object' && cfg && cfg.hideHabitsInMainViews!==false){
     el.style.display='';
-    el.innerHTML=''+n+' recurring hidden — <button type="button" class="habits-hidden-link" onclick="setSmartView(&quot;habits&quot;)">View Habits</button>';
+    el.innerHTML=''+n+' recurring hidden — <button type="button" class="habits-hidden-link" data-action="setSmartView" data-arg="habits">View Habits</button>';
   }else{ el.style.display='none'; el.textContent=''; }
 }
 function onHideHabitsToggle(){
@@ -1985,13 +1985,13 @@ function renderChecklist(taskId){
     ${items.length?`<div class="cl-progress"><div class="cl-bar" style="width:${pct}%"></div><span class="cl-pct">${pct}%</span></div>`:''}
     <div class="cl-items" id="clItems"></div>
     <div class="cl-add">
-      <input class="cl-input" id="clInput" placeholder="Add item…" onkeydown="if(event.key==='Enter'){addChecklistItem(${taskId},this.value);this.value=''}">
-      <button class="btn-ghost btn-sm" onclick="addChecklistItem(${taskId},document.getElementById('clInput').value);document.getElementById('clInput').value=''">+</button>
+      <input class="cl-input" id="clInput" placeholder="Add item…" data-onkeydown="checklistAddOnEnter" data-task-id="${taskId}">
+      <button class="btn-ghost btn-sm" data-action="checklistAddFromButton" data-task-id="${taskId}">+</button>
     </div>`;
   const list=document.getElementById('clItems');
   items.forEach(item=>{
     const d=document.createElement('div');d.className='cl-item'+(item.done?' cl-done':'');
-    d.innerHTML=`<button class="cl-check${item.done?' on':''}" onclick="toggleChecklistItem(${taskId},${item.id})">${item.done?'✓':''}</button><span class="cl-text">${esc(item.text)}</span><button class="cl-rm" onclick="removeChecklistItem(${taskId},${item.id})">×</button>`;
+    d.innerHTML=`<button class="cl-check${item.done?' on':''}" data-action="toggleChecklistItem" data-args='[${taskId},${item.id}]'>${item.done?'✓':''}</button><span class="cl-text">${esc(item.text)}</span><button class="cl-rm" data-action="removeChecklistItem" data-args='[${taskId},${item.id}]'>×</button>`;
     list.appendChild(d);
   });
 }
@@ -2090,13 +2090,13 @@ function renderTaskNotes(taskId){
   el.innerHTML=`
     <div class="note-add">
       <textarea class="note-input" id="noteInput" rows="2" placeholder="Add a timestamped note…"></textarea>
-      <button class="btn-ghost btn-sm" onclick="addTaskNote(${taskId},document.getElementById('noteInput').value);document.getElementById('noteInput').value=''">Add</button>
+      <button class="btn-ghost btn-sm" data-action="taskNoteAddFromButton" data-task-id="${taskId}">Add</button>
     </div>
     <div id="noteList"></div>`;
   const list=document.getElementById('noteList');
   (t.notes||[]).forEach(n=>{
     const d=document.createElement('div');d.className='note-item';
-    d.innerHTML=`<span class="note-time">${esc(n.createdAt||'')}</span><span class="note-text">${esc(n.text)}</span><button class="note-rm" onclick="removeTaskNote(${taskId},${n.id})">×</button>`;
+    d.innerHTML=`<span class="note-time">${esc(n.createdAt||'')}</span><span class="note-text">${esc(n.text)}</span><button class="note-rm" data-action="removeTaskNote" data-args='[${taskId},${n.id}]'>×</button>`;
     list.appendChild(d);
   });
 }
@@ -2125,13 +2125,13 @@ function renderBlockedBy(taskId){
         <option value="">Select blocking task…</option>
         ${tasks.filter(x=>x.id!==taskId&&x.status!=='done').map(x=>`<option value="${x.id}">${esc(x.name.slice(0,40))}</option>`).join('')}
       </select>
-      <button class="btn-ghost btn-sm" onclick="addBlockedBy(${taskId},document.getElementById('blockerSel').value)">Link</button>
+      <button class="btn-ghost btn-sm" data-action="taskBlockerAddFromSelect" data-task-id="${taskId}">Link</button>
     </div>`;
   const chips=document.getElementById('blockerChips');
   blockers.forEach(bid=>{
     const bt=findTask(bid);if(!bt)return;
     const c=document.createElement('span');c.className='blocker-chip'+(bt.status==='done'?' resolved':'');
-    c.innerHTML=`${bt.status==='done'?'✓ ':''}<span>${esc(bt.name.slice(0,30))}</span><button onclick="removeBlockedBy(${taskId},${bid})">×</button>`;
+    c.innerHTML=`${bt.status==='done'?'✓ ':''}<span>${esc(bt.name.slice(0,30))}</span><button data-action="removeBlockedBy" data-args='[${taskId},${bid}]'>×</button>`;
     chips.appendChild(c);
   });
 }
@@ -2165,7 +2165,7 @@ function setCardDensity(v){
   if(typeof updateFiltersActiveBadge === 'function') updateFiltersActiveBadge();
   renderTaskList();
 }
-// Legacy entry-point kept so any old onclick="onCardDensityToggle()" still works.
+// Legacy entry-point kept so any old data-action="onCardDensityToggle" still works.
 function onCardDensityToggle(){
   setCardDensity(getCardDensity()==='comfortable' ? 'cozy' : 'comfortable');
 }

@@ -657,8 +657,8 @@ function renderCalFeedsPanel(){
         <input type="color" id="cfColor" class="calfeed-color" value="#3d8bcc">
 
         <div class="calfeed-mode-tabs">
-          <button class="calfeed-mode active" data-mode="paste" onclick="calFeedMode(this,'paste')">Paste .ics</button>
-          <button class="calfeed-mode" data-mode="url" onclick="calFeedMode(this,'url')">URL + Proxy</button>
+          <button class="calfeed-mode active" data-mode="paste" data-action="calFeedModeFromButton">Paste .ics</button>
+          <button class="calfeed-mode" data-mode="url" data-action="calFeedModeFromButton">URL + Proxy</button>
         </div>
 
         <div id="cfPasteMode" class="calfeed-mode-panel">
@@ -675,23 +675,23 @@ function renderCalFeedsPanel(){
           <input type="url" id="cfProxy" class="calfeed-in" value="${esc(proxyDefault)}" placeholder="https://your-name.workers.dev/?url=">
           <p class="calfeed-hint">
             Browsers block direct fetches from Google. Options:<br>
-            • <strong>Most private:</strong> <a href="#" onclick="showWorkerInstructions();return false">Deploy a free Cloudflare Worker (15 min)</a><br>
+            • <strong>Most private:</strong> <a href="#" data-action="showWorkerInstructions" data-prevent-default="1">Deploy a free Cloudflare Worker (15 min)</a><br>
             • <strong>Convenient:</strong> Use a public proxy like <code>https://corsproxy.io/?url=</code> — the operator CAN see your URL<br>
             • <strong>Paste mode</strong> (left tab) has no proxy at all
           </p>
         </div>
 
-        <button class="btn-primary" style="margin-top:10px;width:100%" onclick="submitAddCalFeed()">Add Calendar</button>
+        <button class="btn-primary" style="margin-top:10px;width:100%" data-action="submitAddCalFeed">Add Calendar</button>
       </div>
     </details>
 
     <div class="calfeed-sync-row">
-      <button class="btn-ghost btn-sm" onclick="syncAllCalFeedsAndRerender()" ${_calFeeds.feeds.length?'':'disabled'}>↻ Refresh all</button>
+      <button class="btn-ghost btn-sm" data-action="syncAllCalFeedsAndRerender" ${_calFeeds.feeds.length?'':'disabled'}>↻ Refresh all</button>
       <span class="calfeed-hint" style="font-size:10px">Auto-refresh runs on app open. Events cache locally for offline use.</span>
     </div>
 
     <div id="workerInstructions" class="calfeed-worker-panel" style="display:none">
-      <button class="btn-ghost btn-sm" onclick="document.getElementById('workerInstructions').style.display='none'" style="float:right">×</button>
+      <button class="btn-ghost btn-sm" data-action="hideWorkerInstructions" style="float:right">×</button>
       <h4 style="margin-top:0">Deploy a personal CORS proxy (free, 15 min)</h4>
       <ol style="font-size:11px;line-height:1.6;padding-left:18px;color:var(--text-3)">
         <li>Sign up at <a href="https://dash.cloudflare.com" target="_blank" rel="noopener noreferrer">dash.cloudflare.com</a> (free)</li>

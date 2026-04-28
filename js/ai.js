@@ -897,14 +897,14 @@ function _renderPendingOps(){
   wrap.innerHTML = `
     <div class="pending-hdr">
       <span class="pending-title">Proposed changes (${_pendingOps.length})${sourceBadge}</span>
-      <button type="button" class="pending-toggle-all" onclick="intelToggleAllPending()">Toggle all</button>
+      <button type="button" class="pending-toggle-all" data-action="intelToggleAllPending">Toggle all</button>
     </div>
     ${massWarn}
     <div class="pending-list">${normalParts.join('')}</div>
     ${dangerHtml}
     <div class="pending-actions">
-      <button type="button" class="btn-ghost btn-sm" onclick="intelRejectPending()">Reject all</button>
-      <button type="button" class="btn-primary" onclick="intelApplyPending()">Apply selected</button>
+      <button type="button" class="btn-ghost btn-sm" data-action="intelRejectPending">Reject all</button>
+      <button type="button" class="btn-primary" data-action="intelApplyPending">Apply selected</button>
     </div>`;
   _setIntelStatus('idle', 'Review proposed changes below');
 }
@@ -1318,7 +1318,7 @@ function _renderValuesGrid(){
     const v = SCHWARTZ[key];
     const sel = _cfg.dominant.includes(key);
     const rank = sel ? _cfg.dominant.indexOf(key) + 1 : null;
-    return `<div class="schwartz-card ${sel ? 'selected' : ''}" onclick="aiToggleValue('${key}')">
+    return `<div class="schwartz-card ${sel ? 'selected' : ''}" data-action="aiToggleValue" data-arg="${key}">
       <div class="schwartz-card-top">
         <span class="schwartz-icon">${(window.icon && window.icon(v.icon, {size:16})) || ''}</span>
         <span class="schwartz-name">${key}</span>
@@ -1374,29 +1374,29 @@ function renderAIPanel(){
           <div class="intel-progress-info"><span id="intelProgressPct">0%</span> <span id="intelProgressTxt"></span></div>
         </div>
         <div class="intel-toolbar-row">
-          <button class="intel-tool-btn intel-tool-btn--primary" type="button" onclick="intelRetryLoad()" id="intelRetryBtn" style="display:none">${_IC.refresh}<span>Retry load</span></button>
-          <button class="intel-tool-btn" type="button" id="intelUndoBtn" onclick="aiUndo()" style="display:${_undoStack.length ? '' : 'none'}">${_IC.undo}<span>Undo</span></button>
+          <button class="intel-tool-btn intel-tool-btn--primary" type="button" data-action="intelRetryLoad" id="intelRetryBtn" style="display:none">${_IC.refresh}<span>Retry load</span></button>
+          <button class="intel-tool-btn" type="button" id="intelUndoBtn" data-action="aiUndo" style="display:${_undoStack.length ? '' : 'none'}">${_IC.undo}<span>Undo</span></button>
         </div>
         <div class="intel-action-grid">
-          <button type="button" class="intel-action-btn intel-action-btn--primary" id="alignValuesBtn" onclick="aiAlign()" ${!ready || _cfg.dominant.length < 2 ? 'disabled' : ''}>
+          <button type="button" class="intel-action-btn intel-action-btn--primary" id="alignValuesBtn" data-action="aiAlign" ${!ready || _cfg.dominant.length < 2 ? 'disabled' : ''}>
             ${_IC.bolt}
             <span class="intel-action-btn-text"><span class="intel-action-btn-lbl">Align values only</span><span class="intel-action-btn-sub">${!ready ? 'Embedding model loading\u2026' : _cfg.dominant.length < 2 ? 'Pick 2–3 dominant values below' : 'Align to ' + _cfg.dominant.join(', ')}</span></span>
           </button>
-          <button type="button" class="intel-action-btn intel-action-btn--primary" onclick="intelHarmonizeFields()" ${!ready ? 'disabled' : ''}
+          <button type="button" class="intel-action-btn intel-action-btn--primary" data-action="intelHarmonizeFields" ${!ready ? 'disabled' : ''}
             title="Propose updates using values, life area, priority, effort, energy, and tags from embeddings and similar tasks. Review before apply.">
             ${_IC.harmonize}
             <span class="intel-action-btn-text"><span class="intel-action-btn-lbl">Harmonize all fields</span><span class="intel-action-btn-sub">Preview field updates from the embedding model</span></span>
           </button>
-          <button type="button" class="intel-action-btn" onclick="intelAutoOrganize()" ${!ready || (typeof lists === 'undefined' || lists.length < 2) ? 'disabled' : ''}
+          <button type="button" class="intel-action-btn" data-action="intelAutoOrganize" ${!ready || (typeof lists === 'undefined' || lists.length < 2) ? 'disabled' : ''}
             title="Route tasks into the list whose name and description match best. Edit a list description to tune routing.">
             ${_IC.folder}
             <span class="intel-action-btn-text"><span class="intel-action-btn-lbl">Auto-organize into lists</span><span class="intel-action-btn-sub">${!ready ? 'Embedding model loading\u2026' : (typeof lists === 'undefined' || lists.length < 2) ? 'Needs at least two lists' : 'Route across ' + lists.length + ' lists'}</span></span>
           </button>
-          <button type="button" class="intel-action-btn" onclick="intelFindDuplicatesUI()">
+          <button type="button" class="intel-action-btn" data-action="intelFindDuplicatesUI">
             ${_IC.duplicate}
             <span class="intel-action-btn-text"><span class="intel-action-btn-lbl">Find duplicates</span><span class="intel-action-btn-sub">Near-duplicate pairs by embedding similarity</span></span>
           </button>
-          <button type="button" class="intel-action-btn" onclick="intelReembedAll()">
+          <button type="button" class="intel-action-btn" data-action="intelReembedAll">
             ${_IC.refresh}
             <span class="intel-action-btn-text"><span class="intel-action-btn-lbl">Re-embed all tasks</span><span class="intel-action-btn-sub">Refresh vectors after bulk edits</span></span>
           </button>
@@ -1543,7 +1543,7 @@ async function runMdBreakdown(){
     );
     if(!res || !Array.isArray(res.subtasks) || !res.subtasks.length){
       body.innerHTML = '<span class="intel-muted">LLM didn\u2019t return usable subtasks. Try adding a short description and retry.</span>'
-        + ' <button type="button" class="md-breakdown-btn" onclick="runMdBreakdown()" style="margin-top:8px">Retry</button>';
+        + ' <button type="button" class="md-breakdown-btn" data-action="runMdBreakdown" style="margin-top:8px">Retry</button>';
       return;
     }
     window._mdBreakdownSuggestion = { taskId: t.id, subtasks: res.subtasks };
@@ -1557,13 +1557,13 @@ async function runMdBreakdown(){
       <div class="md-breakdown-list">${rows}</div>
       ${res.rationale ? `<div class="pending-rationale" style="margin-top:8px">${esc(res.rationale)}</div>` : ''}
       <div class="md-breakdown-actions">
-        <button type="button" class="md-breakdown-btn" onclick="runMdBreakdown()">Re-run</button>
-        <button type="button" class="md-breakdown-btn md-breakdown-btn--primary" onclick="acceptMdBreakdown()">Add as subtasks</button>
+        <button type="button" class="md-breakdown-btn" data-action="runMdBreakdown">Re-run</button>
+        <button type="button" class="md-breakdown-btn md-breakdown-btn--primary" data-action="acceptMdBreakdown">Add as subtasks</button>
       </div>`;
   }catch(err){
     console.warn('[breakdown]', err);
     body.innerHTML = '<span class="intel-muted">Something went wrong. Try again.</span>'
-      + ' <button type="button" class="md-breakdown-btn" onclick="runMdBreakdown()" style="margin-top:8px">Retry</button>';
+      + ' <button type="button" class="md-breakdown-btn" data-action="runMdBreakdown" style="margin-top:8px">Retry</button>';
   }
 }
 
@@ -1650,7 +1650,7 @@ async function intelFindDuplicatesUI(){
         <span class="intel-dup-pair">${esc(p.taskA.name.slice(0, 32))} ↔ ${esc(p.taskB.name.slice(0, 32))}</span>
         <span class="intel-dup-sim">${p.sim.toFixed(2)}</span>
         ${verdict}
-        <button type="button" class="btn-ghost btn-sm" onclick="intelMergeDuplicatePair(${p.idA},${p.idB})">Archive 2nd</button>
+        <button type="button" class="btn-ghost btn-sm" data-action="intelMergeDuplicatePair" data-args='[${p.idA},${p.idB}]'>Archive 2nd</button>
         ${reason}
       </div>`;
     }).join('');
@@ -1990,17 +1990,17 @@ function _renderSmartAddChips(s){
   if(!prev) return;
   const effortTips = { xs:'Extra small — ~15 min', s:'Small — ~1 hr', m:'Medium — ~half day', l:'Large — ~full day', xl:'Extra large — multi-day' };
   const chips = [];
-  if(s.priority) chips.push(`<span class="sa-chip sa-priority sa-p-${esc(s.priority)}" data-tip="Priority — tap to remove" onclick="smartAddRemove('priority')">priority: ${esc(s.priority)} ×</span>`);
+  if(s.priority) chips.push(`<span class="sa-chip sa-priority sa-p-${esc(s.priority)}" data-tip="Priority — tap to remove" data-action="smartAddRemove" data-arg="priority">priority: ${esc(s.priority)} ×</span>`);
   const ic = (n, size) => (window.icon && window.icon(n, {size: size||13})) || '';
   if(s.category){
     const cdef = (typeof getCategoryDef === 'function') ? getCategoryDef(s.category) : null;
     const catLbl = cdef ? cdef.label : s.category;
     const catIc = (cdef && cdef.icon) || CAT_ICON[s.category] || 'pin';
-    chips.push(`<span class="sa-chip" data-tip="Category — tap to remove" onclick="smartAddRemove('category')"><span class="sa-chip-ic">${ic(catIc)}</span> ${esc(catLbl)} ×</span>`);
+    chips.push(`<span class="sa-chip" data-tip="Category — tap to remove" data-action="smartAddRemove" data-arg="category"><span class="sa-chip-ic">${ic(catIc)}</span> ${esc(catLbl)} ×</span>`);
   }
-  if(s.effort) chips.push(`<span class="sa-chip" data-tip="${escAttr(effortTips[s.effort] || 'Effort')} — tap to remove" onclick="smartAddRemove('effort')">effort: ${esc(String(s.effort).toUpperCase())} ×</span>`);
-  if(s.energyLevel) chips.push(`<span class="sa-chip" data-tip="Energy — tap to remove" onclick="smartAddRemove('energyLevel')"><span class="sa-chip-ic">${ic(s.energyLevel === 'high' ? 'flame' : 'leaf')}</span> ${esc(s.energyLevel)} ×</span>`);
-  if(s.dueDate) chips.push(`<span class="sa-chip" data-tip="Due date — tap to remove" onclick="smartAddRemove('dueDate')"><span class="sa-chip-ic">${ic('calendar')}</span> ${esc(s.dueDate)} ×</span>`);
+  if(s.effort) chips.push(`<span class="sa-chip" data-tip="${escAttr(effortTips[s.effort] || 'Effort')} — tap to remove" data-action="smartAddRemove" data-arg="effort">effort: ${esc(String(s.effort).toUpperCase())} ×</span>`);
+  if(s.energyLevel) chips.push(`<span class="sa-chip" data-tip="Energy — tap to remove" data-action="smartAddRemove" data-arg="energyLevel"><span class="sa-chip-ic">${ic(s.energyLevel === 'high' ? 'flame' : 'leaf')}</span> ${esc(s.energyLevel)} ×</span>`);
+  if(s.dueDate) chips.push(`<span class="sa-chip" data-tip="Due date — tap to remove" data-action="smartAddRemove" data-arg="dueDate"><span class="sa-chip-ic">${ic('calendar')}</span> ${esc(s.dueDate)} ×</span>`);
   if(s.tags && s.tags.length) s.tags.forEach(tag => chips.push(`<span class="sa-chip" data-tip="Tag — tap to remove" data-sa-tag="${encodeURIComponent(tag)}">#${esc(tag)} ×</span>`));
   prev.innerHTML = `
     <span class="smart-add-hint">Suggestions — tap to remove, Enter to add:</span>
@@ -2089,7 +2089,7 @@ function openWhatNext(){
   if(body){
     body.innerHTML = ranked.length
       ? ranked.map((x, i) => `
-        <button type="button" class="what-next-item" onclick="openTaskDetail(${x.t.id});closeWhatNext();">
+        <button type="button" class="what-next-item" data-action="openTaskDetailAndCloseWhatNext" data-arg="${x.t.id}">
           <span class="wn-name">${esc(x.t.name)}</span>
           <span class="wn-meta">${x.t.dueDate ? esc(x.t.dueDate) : 'no date'} · ${esc(x.t.priority || 'none')}</span>
           ${i === 0 && calHint ? `<span class="wn-cal-hint" role="note">${esc(calHint)}</span>` : ''}
@@ -2231,14 +2231,14 @@ function renderGenSettings(){
     <div class="gen-settings">
       <div class="srow" style="justify-content:space-between;gap:10px">
         <span class="sr-lbl" style="font-size:13px">Enable generative Ask (beta)</span>
-        <div class="toggle ${cfg.enabled ? 'on' : ''}" id="genEnableToggle" onclick="toggleGenEnabled()" role="switch" aria-checked="${cfg.enabled}"><div class="tknob"></div></div>
+        <div class="toggle ${cfg.enabled ? 'on' : ''}" id="genEnableToggle" data-action="toggleGenEnabled" role="switch" aria-checked="${cfg.enabled}"><div class="tknob"></div></div>
       </div>
       <p class="gen-settings-lead">
         Adds an <strong>Ask</strong> mode to the command palette (<kbd>Ctrl/⌘ + K</kbd>, then prefix <code>?</code>). A tiny instruct-tuned model runs <em>on this device</em>; nothing you type leaves the browser. Proposed changes always preview before anything is applied.
       </p>
       <div class="gen-settings-row">
         <label for="genModelSelect" class="gen-settings-lbl">Model</label>
-        <select id="genModelSelect" onchange="selectGenModel(this.value)" ${disableSelect ? 'disabled' : ''} title="${busy ? 'Disabled while busy' : ''}">
+        <select id="genModelSelect" data-onchange="selectGenModelFromSelect" ${disableSelect ? 'disabled' : ''} title="${busy ? 'Disabled while busy' : ''}">
           ${presets.map(p => {
             const pCached = typeof isGenDownloaded === 'function' && isGenDownloaded(p.id);
             const tag = pCached ? ' ✓ cached' : '';
@@ -2252,7 +2252,7 @@ function renderGenSettings(){
       ${ramHint === 'ios-unknown' && (preset && preset.sizeMb > 150) ? `<div class="gen-settings-warn">On iOS the WASM fallback uses extra RAM. If the tab reloads during generation, switch to the 135M preset.</div>` : ''}
       <div class="gen-settings-row">
         <label for="genTimeout" class="gen-settings-lbl">Timeout (sec)</label>
-        <input type="number" id="genTimeout" class="sinput" min="5" max="120" value="${cfg.timeoutSec}" onchange="setGenTimeout(this.value)" ${cfg.enabled ? '' : 'disabled'}>
+        <input type="number" id="genTimeout" class="sinput" min="5" max="120" value="${cfg.timeoutSec}" data-onchange="setGenTimeoutFromInput" ${cfg.enabled ? '' : 'disabled'}>
       </div>
       <div class="gen-settings-status" id="genSettingsStatus">${esc(statusText)}</div>
       <div id="genProgressWrap" class="intel-progress-wrap" style="display:${loading ? '' : 'none'}">
@@ -2262,15 +2262,15 @@ function renderGenSettings(){
       ${errForThisModel ? `<div class="gen-settings-warn" id="genSettingsError" role="alert">${esc(errForThisModel)}</div>` : ''}
       <div class="gen-settings-actions">
         ${loading
-          ? '<button type="button" class="btn-ghost btn-sm" onclick="genAbortLoad()">Cancel download</button>'
-          : `<button type="button" class="btn-primary btn-sm" id="genDownloadBtn" onclick="genDownloadClick()" ${actionDisabled ? 'disabled' : ''}>
+          ? '<button type="button" class="btn-ghost btn-sm" data-action="genAbortLoad">Cancel download</button>'
+          : `<button type="button" class="btn-primary btn-sm" id="genDownloadBtn" data-action="genDownloadClick" ${actionDisabled ? 'disabled' : ''}>
               ${esc(actionLabel)}
             </button>`}
-        ${readyThisModel && !loading ? '<button type="button" class="btn-ghost btn-sm" onclick="genAbort()">Abort generation</button>' : ''}
+        ${readyThisModel && !loading ? '<button type="button" class="btn-ghost btn-sm" data-action="genAbort">Abort generation</button>' : ''}
       </div>
       <div class="gen-settings-actions gen-settings-actions--secondary">
-        <button type="button" class="btn-ghost btn-sm" onclick="genClearAskHistory()" ${historySize ? '' : 'disabled'}>Clear Ask history (${historySize})</button>
-        <button type="button" class="btn-ghost btn-sm" onclick="genClearCache()">Clear LLM cache</button>
+        <button type="button" class="btn-ghost btn-sm" data-action="genClearAskHistory" ${historySize ? '' : 'disabled'}>Clear Ask history (${historySize})</button>
+        <button type="button" class="btn-ghost btn-sm" data-action="genClearCache">Clear LLM cache</button>
       </div>
       <p class="gen-settings-hint">
         Progress also appears in the <strong>footer bar</strong> and the header chip (percentage) while files download. After load, status shows <strong>WebGPU</strong> (GPU) or <strong>WASM (CPU)</strong> — whichever actually bound.

@@ -473,12 +473,12 @@ function renderClassificationSettings(){
     h += '<div class="class-mgr-cat' + (obj.hidden ? ' class-mgr-cat--hidden' : '') + '">'
       + '<div class="class-mgr-row">'
       + '<input type="text" class="class-mgr-in" value="' + esc(obj.label) + '" '
-      + 'onchange="classificationSetLabel(' + idx + ',this.value)" aria-label="Label"/>'
-      + '<select class="class-mgr-sel" onchange="classificationSetIcon(' + idx + ',this.value)" aria-label="Icon">' + opt + '</select>'
-      + '<select class="class-mgr-sel class-mgr-sel-color" onchange="classificationSetColor(' + idx + ',this.value)" aria-label="Color">' + colOpts + '</select>'
-      + '<button type="button" class="class-mgr-btn" onclick="classificationToggleHidden(' + idx + ')">' + (obj.hidden ? 'Show' : 'Hide') + '</button>'
-      + '<button type="button" class="class-mgr-btn" onclick="classificationMove(' + idx + ',-1)">↑</button>'
-      + '<button type="button" class="class-mgr-btn" onclick="classificationMove(' + idx + ',1)">↓</button>'
+      + 'data-onchange="classificationSetLabelFromInput" data-idx="' + idx + '" aria-label="Label"/>'
+      + '<select class="class-mgr-sel" data-onchange="classificationSetIconFromSelect" data-idx="' + idx + '" aria-label="Icon">' + opt + '</select>'
+      + '<select class="class-mgr-sel class-mgr-sel-color" data-onchange="classificationSetColorFromSelect" data-idx="' + idx + '" aria-label="Color">' + colOpts + '</select>'
+      + '<button type="button" class="class-mgr-btn" data-action="classificationToggleHidden" data-arg="' + idx + '">' + (obj.hidden ? 'Show' : 'Hide') + '</button>'
+      + '<button type="button" class="class-mgr-btn" data-action="classificationMove" data-args="[' + idx + ',-1]">↑</button>'
+      + '<button type="button" class="class-mgr-btn" data-action="classificationMove" data-args="[' + idx + ',1]">↓</button>'
       + '<code class="class-mgr-id" title="Stable id stored on tasks">' + esc(obj.id) + '</code>'
       + '</div>'
       + '<details class="class-mgr-details"' + (isEmpty ? ' data-empty="1"' : '') + '><summary>' + esc(summaryLabel) + '</summary>'
@@ -486,9 +486,9 @@ function renderClassificationSettings(){
       + '</details></div>';
   });
   h += '<div class="class-mgr-reclass">'
-    + '<button type="button" class="btn-ghost btn-sm" onclick="intelReclassifyUncategorized()">Re-classify uncategorized tasks</button>'
+    + '<button type="button" class="btn-ghost btn-sm" data-action="intelReclassifyUncategorized">Re-classify uncategorized tasks</button>'
     + '<span class="class-mgr-hint">Uses embeddings to suggest a life area — review in the preview below.</span></div>'
-    + '<button type="button" class="btn-ghost btn-sm class-mgr-add" onclick="classificationAdd()">+ Add life area</button></div>';
+    + '<button type="button" class="btn-ghost btn-sm class-mgr-add" data-action="classificationAdd">+ Add life area</button></div>';
 
   root.innerHTML = h;
 }
