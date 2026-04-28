@@ -56,7 +56,10 @@ function todayKey(){const d=new Date();return d.getFullYear()+'-'+String(d.getMo
 function dateStr(d){return (d||new Date()).toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}
 function prettyDate(iso){const d=new Date(iso+'T12:00:00');return d.toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric',year:'numeric'})}
 
-gid('headerDate').textContent=dateStr();
+/** Render today's date into the header. Called from app.js init so this
+ *  module no longer mutates the DOM at script-evaluation time. */
+function setHeaderDate(){const el=gid('headerDate');if(el) el.textContent=dateStr();}
+window.setHeaderDate=setHeaderDate;
 
 function timeNowFull(){const d=new Date();return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')}
 

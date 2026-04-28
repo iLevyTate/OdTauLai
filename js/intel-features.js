@@ -153,7 +153,12 @@ function ensureClassificationConfig(c){
     });
   } else {
     c.categories = c.categories.map(row => {
-      const id = String(row.id || '').trim().slice(0, 64) || null;
+      // Strip everything except [A-Za-z0-9_-] so an imported config cannot
+      // smuggle quotes or HTML into ids that get interpolated into UI strings.
+      // The default category ids (bodyMindSpirit, jobLearningFinances, …) are
+      // camelCase, so we cannot lowercase or run them through `slugClassId`
+      // without breaking existing data — the character allow-list is enough.
+      const id = String(row.id || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64) || null;
       const base = id ? DEFAULT_CATEGORY_DEFS.find(d => d.id === id) : null;
       const coreValues = _normalizeRowCoreValues(row.coreValues, base);
       const examples = _normalizeRowExamples(row.examples, base);
@@ -505,9 +510,24 @@ function refreshClassificationUi(){
   }
   if(tb){
     const cur = sel ? sel.value : 'all';
-    tb.innerHTML = `<button class="sv-chip ${cur === 'all' ? 'active' : ''}" onclick="setFilterCategory('all')">All Tags</button>`;
+    // Build chips with DOM APIs so untrusted category ids/labels can never
+    // reach the HTML parser. addEventListener also lets CSP eventually drop
+    // 'unsafe-inline' for this row.
+    tb.replaceChildren();
+    const allBtn = document.createElement('button');
+    allBtn.type = 'button';
+    allBtn.className = 'sv-chip' + (cur === 'all' ? ' active' : '');
+    allBtn.textContent = 'All Tags';
+    allBtn.addEventListener('click', () => setFilterCategory('all'));
+    tb.appendChild(allBtn);
     getActiveCategories().forEach(c => {
-      tb.innerHTML += `<button class="sv-chip ${cur === c.id ? 'active' : ''}" onclick="setFilterCategory('${c.id}')">${c.label}</button>`;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'sv-chip' + (cur === c.id ? ' active' : '');
+      btn.textContent = String(c.label || '');
+      const id = String(c.id);
+      btn.addEventListener('click', () => setFilterCategory(id));
+      tb.appendChild(btn);
     });
   }
   if(document.getElementById('classificationManager')){

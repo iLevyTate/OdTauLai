@@ -13,6 +13,7 @@ const root = resolve(__dirname, '..');
 
 const versionSrc = readFileSync(resolve(root, 'js/version.js'), 'utf-8');
 const swSrc      = readFileSync(resolve(root, 'sw.js'), 'utf-8');
+const pwaSrc     = readFileSync(resolve(root, 'js/pwa.js'), 'utf-8');
 
 // Extract swCache from version.js
 const versionMatch = versionSrc.match(/swCache\s*:\s*['"]([^'"]+)['"]/);
@@ -30,11 +31,25 @@ if (!swMatch) {
 }
 const swCache = swMatch[1];
 
-if (versionCache !== swCache) {
-  console.error(`❌ Version drift detected!`);
-  console.error(`   js/version.js  swCache:   '${versionCache}'`);
-  console.error(`   sw.js          CACHE_NAME: '${swCache}'`);
-  console.error(`\n   Run: node scripts/bump-version.mjs <new-version>`);
+// Extract the inline-SW fallback string from js/pwa.js. The fallback is the
+// hardcoded literal used when window.ODTAULAI_RELEASE.swCache is unavailable
+// (e.g. version.js failed to load). Pattern matches: ` : 'odtaulai-vNN'`.
+const pwaMatch = pwaSrc.match(/:\s*['"](odtaulai-v[^'"]+)['"]/);
+if (!pwaMatch) {
+  console.error('❌ Could not find inline-SW cache fallback in js/pwa.js');
+  process.exit(1);
+}
+const pwaCache = pwaMatch[1];
+
+const drifts = [];
+if (versionCache !== swCache)  drifts.push(['sw.js CACHE_NAME', swCache]);
+if (versionCache !== pwaCache) drifts.push(['js/pwa.js inline fallback', pwaCache]);
+
+if (drifts.length) {
+  console.error('❌ Version drift detected!');
+  console.error(`   js/version.js  swCache: '${versionCache}'`);
+  drifts.forEach(([where, val]) => console.error(`   ${where.padEnd(30)} '${val}'`));
+  console.error('\n   Run: node scripts/bump-version.mjs <new-version>');
   process.exit(1);
 }
 

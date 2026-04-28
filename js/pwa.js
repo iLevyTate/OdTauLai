@@ -171,6 +171,8 @@
   } else {
     _syncInstallButtonForPlatform();
   }
-  setTimeout(_syncInstallButtonForPlatform, 800);
-  setTimeout(_syncInstallButtonForPlatform, 2500);
+  // beforeinstallprompt fires asynchronously after engagement criteria are
+  // met; one delayed re-sync covers the common case without the previous
+  // double-timeout. The event listeners above also call refresh on demand.
+  setTimeout(_syncInstallButtonForPlatform, 1500);
 })();

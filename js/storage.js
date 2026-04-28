@@ -1449,6 +1449,30 @@ function setToggle(id,val){ const el=gid(id); if(!el)return; if(val)el.classList
 const _ARCHIVE_MAX_TIME_LOG = 500;
 const _ARCHIVE_MAX_SESSION_HISTORY = 400;
 
+/**
+ * Build a yesterday-stamped state snapshot suitable for `archiveDay`.
+ * Pure: does not touch globals or the DOM. Extracted so the rollover path
+ * is testable without spinning up a full app context.
+ *
+ *   buildYesterdaySnapshot('2026-04-27', { totalPomos, ..., tasks, ... })
+ *     → { date: '2026-04-27', totalPomos, totalBreaks, totalFocusSec, goals,
+ *         tasks, timeLog, sessionHistory }
+ */
+function buildYesterdaySnapshot(date, state){
+  const s = state || {};
+  return {
+    date:           date || null,
+    totalPomos:     _int(s.totalPomos, 0),
+    totalBreaks:    _int(s.totalBreaks, 0),
+    totalFocusSec:  _int(s.totalFocusSec, 0),
+    goals:          _arr(s.goals),
+    tasks:          _arr(s.tasks),
+    timeLog:        _arr(s.timeLog),
+    sessionHistory: _arr(s.sessionHistory),
+  };
+}
+if(typeof window !== 'undefined') window.buildYesterdaySnapshot = buildYesterdaySnapshot;
+
 function archiveDay(state){
   try{
     const day = state && state.date;
