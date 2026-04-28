@@ -99,31 +99,18 @@ test('parseQuickAdd: "next week" → ISO-shaped date, name stripped', () => {
   assert.equal(r.name, 'plan trip');
 });
 
-test('parseQuickAdd: weekday short forms (sun/mon/tue/wed/thu/fri/sat) map to a date', () => {
+test('parseQuickAdd: weekday names — all short and long forms map to a date', () => {
   const parse = loadParser('2026-04-27');
-  for (const day of ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']) {
+  const days = [
+    'sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat',           // 3-letter abbreviations
+    'tues', 'thurs',                                            // common 4-letter abbreviations
+    'sunday', 'monday', 'tuesday', 'wednesday',                 // full forms
+    'thursday', 'friday', 'saturday',
+  ];
+  for (const day of days) {
     const r = parse(`haircut ${day}`);
     assert.match(r.props.dueDate, /^\d{4}-\d{2}-\d{2}$/, `dueDate for ${day}`);
     assert.equal(r.name, 'haircut', `name stripped for ${day}`);
-  }
-});
-
-test('parseQuickAdd: weekday long forms — only sun/mon/fri+day match (parser gap)', () => {
-  // Regex is /\b(sun|mon|tue|wed|thu|fri|sat)(?:day)?\b/i — the optional "day"
-  // suffix only forms a real word for sun+day/mon+day/fri+day. The full forms
-  // tuesday/wednesday/thursday/saturday have extra letters between the 3-char
-  // prefix and "day" and so DON'T match. This is a parser limitation worth
-  // fixing; for now we lock in current behavior so a fix will surface as a
-  // visible test update rather than silent behavior change.
-  const parse = loadParser('2026-04-27');
-  for (const day of ['sunday', 'monday', 'friday']) {
-    const r = parse(`haircut ${day}`);
-    assert.match(r.props.dueDate, /^\d{4}-\d{2}-\d{2}$/, `${day} parses today`);
-  }
-  for (const day of ['tuesday', 'wednesday', 'thursday', 'saturday']) {
-    const r = parse(`haircut ${day}`);
-    assert.equal(r.props.dueDate, undefined, `${day} NOT parsed (known gap)`);
-    assert.equal(r.name, `haircut ${day}`, `${day} stays in name (known gap)`);
   }
 });
 

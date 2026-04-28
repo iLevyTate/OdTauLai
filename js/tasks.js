@@ -186,7 +186,7 @@ function parseQuickAdd(raw){
     props.dueDate=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
     text=text.replace(/\bnext week\b/i,'');
   }else{
-    const dayMatch=text.match(/\b(sun|mon|tue|wed|thu|fri|sat)(?:day)?\b/i);
+    const dayMatch=text.match(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday|tues|thurs|sun|mon|tue|wed|thu|fri|sat)\b/i);
     if(dayMatch){
       const target=days[dayMatch[1].toLowerCase().slice(0,3)];
       const d=new Date();const today=d.getDay();
