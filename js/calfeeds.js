@@ -637,9 +637,9 @@ function renderCalFeedsPanel(){
               <div class="calfeed-label">${esc(f.label)}</div>
               ${status}
             </div>
-            <button class="calfeed-btn" onclick="toggleCalFeedVisibility('${escAttr(f.id)}');renderCalFeedsPanel();if(typeof renderTaskList==='function')renderTaskList()" title="${f.visible?'Hide':'Show'}">${f.visible?'👁':'◎'}</button>
-            <button class="calfeed-btn" onclick="refreshCalFeed('${escAttr(f.id)}')" title="Refresh now">↻</button>
-            <button class="calfeed-btn calfeed-rm" onclick="confirmRemoveCalFeed('${escAttr(f.id)}')" title="Remove">×</button>
+            <button type="button" class="calfeed-btn calfeed-toggle" aria-label="${f.visible?'Hide calendar':'Show calendar'}" title="${f.visible?'Hide':'Show'}">${f.visible?'👁':'◎'}</button>
+            <button type="button" class="calfeed-btn calfeed-refresh" aria-label="Refresh calendar now" title="Refresh now">↻</button>
+            <button type="button" class="calfeed-btn calfeed-rm" aria-label="Remove calendar" title="Remove">×</button>
           </div>`;
       }).join('')
     : '<div class="calfeed-empty">No calendars added yet</div>';
@@ -725,6 +725,24 @@ function renderCalFeedsPanel(){
       <p style="font-size:11px;color:var(--text-3)"><strong>Privacy note:</strong> This Worker only forwards requests to <code>calendar.google.com</code>. You're the only one using it. Cloudflare's free tier gives 100k requests/day, more than enough for personal use.</p>
     </div>
   `;
+  // Wire per-row buttons via delegated listeners. The row's data-id carries
+  // the trusted feed id without needing to embed it in an inline JS handler
+  // (which would pull untrusted strings into a JS-string parser context).
+  panel.querySelectorAll('.calfeed-row').forEach(row => {
+    const id = row.dataset.id;
+    if(!id) return;
+    const tog = row.querySelector('.calfeed-toggle');
+    if(tog) tog.addEventListener('click', () => {
+      toggleCalFeedVisibility(id);
+      renderCalFeedsPanel();
+      if(typeof renderTaskList === 'function') renderTaskList();
+    });
+    const ref = row.querySelector('.calfeed-refresh');
+    if(ref) ref.addEventListener('click', () => refreshCalFeed(id));
+    const rm = row.querySelector('.calfeed-rm');
+    if(rm) rm.addEventListener('click', () => confirmRemoveCalFeed(id));
+  });
+
   // G-19: hide-past toggle, prepended via DOM (not template literal) so it
   // isn't part of any innerHTML interpolation.
   const hidePast = !!(typeof cfg === 'object' && cfg && cfg.calHidePast);

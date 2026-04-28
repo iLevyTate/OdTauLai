@@ -232,6 +232,7 @@ function exportClipboard(){const content=buildReport('txt');navigator.clipboard.
 
 // ========== INIT ==========
 loadState();
+if(typeof setHeaderDate==='function') setHeaderDate();
 if(typeof ensureClassificationConfig==='function') ensureClassificationConfig(cfg);
 ensureDefaultList();
 setTimeout(() => {
@@ -393,6 +394,18 @@ updateMiniTimer();
 // Apply saved active tab without scroll
 document.querySelectorAll('[data-tab]').forEach(el=>{el.style.display=el.dataset.tab===activeTab?'':'none'});
 document.querySelectorAll('.nav-tab').forEach(el=>{const on=el.dataset.navtab===activeTab;el.classList.toggle('active',on);el.setAttribute('aria-selected',on?'true':'false')});
+// Delegated nav-tab click handler — replaces the per-button inline onclick
+// shipped in earlier versions. Uses data-navtab to dispatch.
+(function bindNavTabs(){
+  const root = document.getElementById('navTabs');
+  if(!root) return;
+  root.addEventListener('click', e => {
+    const btn = e.target.closest('.nav-tab[data-navtab]');
+    if(!btn || !root.contains(btn)) return;
+    const t = btn.dataset.navtab;
+    if(t && typeof showTab === 'function') showTab(t);
+  });
+})();
 if(activeTab==='focus'&&typeof setTimerSub==='function') setTimerSub(cfg.timerSub||'pomo');
 if(typeof syncQaHintVisibility==='function') syncQaHintVisibility();
 if(activeTab==='settings'){
@@ -427,16 +440,9 @@ function _handleDayRollover(){
     // Build a yesterday-stamped snapshot from the live in-memory state and
     // archive it. storage.js also sets stupind_archived_<date> so other tabs
     // skip duplicate archive entries for the same calendar day.
-    const yesterday = {
-      date:           _lastKnownDate,
-      totalPomos:     totalPomos,
-      totalBreaks:    totalBreaks,
-      totalFocusSec:  totalFocusSec,
-      goals:          goals,
-      tasks:          tasks,
-      timeLog:        timeLog,
-      sessionHistory: sessionHistory,
-    };
+    const yesterday = (typeof buildYesterdaySnapshot === 'function')
+      ? buildYesterdaySnapshot(_lastKnownDate, { totalPomos, totalBreaks, totalFocusSec, goals, tasks, timeLog, sessionHistory })
+      : { date: _lastKnownDate, totalPomos, totalBreaks, totalFocusSec, goals, tasks, timeLog, sessionHistory };
     try{
       const k = ((window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.ARCHIVED_PREFIX) || 'stupind_archived_') + _lastKnownDate;
       if(typeof localStorage === 'undefined' || localStorage.getItem(k) !== '1'){

@@ -30,6 +30,7 @@ const ASSETS = [
   './js/calfeeds.js',
   './js/app.js',
   './js/vendor/peerjs.min.js',
+  './js/vendor/Sortable.min.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/icon-maskable-512.png',
