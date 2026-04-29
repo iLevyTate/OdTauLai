@@ -628,7 +628,7 @@ function renderSyncPanel() {
     panel.innerHTML = `
       <div class="sync-off-state">
         <p class="sync-desc">Sync tasks between your devices directly — no server stores your data.</p>
-        <p class="sync-desc" style="font-size:10px;color:var(--text-4);margin-top:-4px">
+        <p class="sync-desc">
           ℹ Best effort: works reliably on same WiFi; may fail on some cellular networks due to NAT restrictions.
         </p>
         <button class="btn-primary" data-action="syncEnable">Enable Sync</button>

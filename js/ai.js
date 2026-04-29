@@ -845,7 +845,7 @@ const _IC = {
 function _renderUndoBtn(){
   const btn = document.getElementById('intelUndoBtn');
   if(!btn) return;
-  btn.style.display = _undoStack.length ? '' : 'none';
+  btn.hidden = !(_undoStack.length);
   btn.innerHTML = _IC.undo + '<span>Undo (' + _undoStack.length + ')</span>';
   if(_undoStack.length){
     const top = _undoStack[0];
@@ -858,8 +858,8 @@ function _renderUndoBtn(){
 function _renderPendingOps(){
   const wrap = document.getElementById('intelPendingOps');
   if(!wrap) return;
-  if(!_pendingOps.length){ wrap.innerHTML = ''; wrap.style.display = 'none'; return; }
-  wrap.style.display = '';
+  if(!_pendingOps.length){ wrap.innerHTML = ''; wrap.hidden = true; return; }
+  wrap.hidden = false;
 
   const normalParts = [];
   const dangerIdx = [];
@@ -904,7 +904,7 @@ function _renderPendingOps(){
     ${dangerHtml}
     <div class="pending-actions">
       <button type="button" class="btn-ghost btn-sm" data-action="intelRejectPending">Reject all</button>
-      <button type="button" class="btn-primary" data-action="intelApplyPending">Apply selected</button>
+      <button type="button" class="btn-primary btn-sm" data-action="intelApplyPending">Apply selected</button>
     </div>`;
   _setIntelStatus('idle', 'Review proposed changes below');
 }
@@ -1307,7 +1307,7 @@ function _renderBreakdown(){
       ${s.high ? `<span class="breakdown-badge high">${s.high}↑</span>` : ''}
     </div>`;
   }).join('');
-  el.innerHTML = rows || '<span style="color:var(--text-3);font-size:12px">Run alignment to see</span>';
+  el.innerHTML = rows || '<span class="text-12-muted">Run alignment to see</span>';
 }
 
 function _renderValuesGrid(){
@@ -1369,13 +1369,13 @@ function renderAIPanel(){
             <p class="intel-details-body">An on-device embedding model (<strong>${embedModel}</strong>) encodes each task’s meaning as a vector — WebGPU uses bge-base (~110 MB), WASM uses bge-small (~33 MB). Cosine similarity drives semantic search, duplicate detection, smart-add hints, list routing, similar tasks, and harmonize proposals. Your task text stays local.</p>
           </details>
         </div>
-        <div id="intelProgressWrap" class="intel-progress-wrap" style="display:none">
-          <div class="intel-progress-track"><div class="intel-progress-bar" id="intelProgressBar" style="width:0%"></div></div>
+        <div id="intelProgressWrap" class="intel-progress-wrap" hidden>
+          <div class="intel-progress-track"><div class="intel-progress-bar progress-bar" id="intelProgressBar"></div></div>
           <div class="intel-progress-info"><span id="intelProgressPct">0%</span> <span id="intelProgressTxt"></span></div>
         </div>
         <div class="intel-toolbar-row">
-          <button class="intel-tool-btn intel-tool-btn--primary" type="button" data-action="intelRetryLoad" id="intelRetryBtn" style="display:none">${_IC.refresh}<span>Retry load</span></button>
-          <button class="intel-tool-btn" type="button" id="intelUndoBtn" data-action="aiUndo" style="display:${_undoStack.length ? '' : 'none'}">${_IC.undo}<span>Undo</span></button>
+          <button class="intel-tool-btn intel-tool-btn--primary" type="button" data-action="intelRetryLoad" id="intelRetryBtn" hidden>${_IC.refresh}<span>Retry load</span></button>
+          <button class="intel-tool-btn" type="button" id="intelUndoBtn" data-action="aiUndo" ${_undoStack.length ? '' : 'hidden'}>${_IC.undo}<span>Undo</span></button>
         </div>
         <div class="intel-action-grid">
           <button type="button" class="intel-action-btn intel-action-btn--primary" id="alignValuesBtn" data-action="aiAlign" ${!ready || _cfg.dominant.length < 2 ? 'disabled' : ''}>
@@ -1401,8 +1401,8 @@ function renderAIPanel(){
             <span class="intel-action-btn-text"><span class="intel-action-btn-lbl">Re-embed all tasks</span><span class="intel-action-btn-sub">Refresh vectors after bulk edits</span></span>
           </button>
         </div>
-        <div id="intelDupSection" class="intel-dup-section" style="display:none"></div>
-        <div id="intelPendingOps" class="pending-ops-wrap" style="display:none"></div>
+        <div id="intelDupSection" class="intel-dup-section" hidden></div>
+        <div id="intelPendingOps" class="pending-ops-wrap" hidden></div>
         <div class="intel-section-hdr">
           <span class="intel-section-title">Dominant values</span>
           <span class="intel-section-hint">Pick 2–3 to steer alignment</span>
@@ -1486,8 +1486,8 @@ function intelRetryLoad(){
   const pct = document.getElementById('intelProgressPct');
   const txt = document.getElementById('intelProgressTxt');
   const btn = document.getElementById('intelRetryBtn');
-  if(btn) btn.style.display = 'none';
-  if(w) w.style.display = '';
+  if(btn) btn.hidden = true;
+  if(w) w.hidden = false;
   const onProgress = _makeProgressAggregator((v, ev) => {
     if(bar) bar.style.width = v + '%';
     if(pct) pct.textContent = v + '%';
@@ -1497,15 +1497,15 @@ function intelRetryLoad(){
     syncHeaderAIChip('loading', v + '%');
   });
   intelLoad(onProgress).then(() => {
-    if(w) w.style.display = 'none';
+    if(w) w.hidden = true;
     if(typeof ensureSchwartzEmbeddings === 'function'){
       ensureSchwartzEmbeddings().catch(() => {});
     }
     renderAIPanel();
     if(typeof maybeShowEnhanceBtn === 'function') maybeShowEnhanceBtn();
   }).catch(() => {
-    if(w) w.style.display = 'none';
-    if(btn) btn.style.display = '';
+    if(w) w.hidden = true;
+    if(btn) btn.hidden = false;
     _setIntelStatus('error', 'Could not load model');
     syncSemanticSearchUi();
   });
@@ -1543,7 +1543,7 @@ async function runMdBreakdown(){
     );
     if(!res || !Array.isArray(res.subtasks) || !res.subtasks.length){
       body.innerHTML = '<span class="intel-muted">LLM didn\u2019t return usable subtasks. Try adding a short description and retry.</span>'
-        + ' <button type="button" class="md-breakdown-btn" data-action="runMdBreakdown" style="margin-top:8px">Retry</button>';
+        + ' <button type="button" class="md-breakdown-btn" data-action="runMdBreakdown">Retry</button>';
       return;
     }
     window._mdBreakdownSuggestion = { taskId: t.id, subtasks: res.subtasks };
@@ -1555,7 +1555,7 @@ async function runMdBreakdown(){
       </label>`).join('');
     body.innerHTML = `
       <div class="md-breakdown-list">${rows}</div>
-      ${res.rationale ? `<div class="pending-rationale" style="margin-top:8px">${esc(res.rationale)}</div>` : ''}
+      ${res.rationale ? `<div class="pending-rationale">${esc(res.rationale)}</div>` : ''}
       <div class="md-breakdown-actions">
         <button type="button" class="md-breakdown-btn" data-action="runMdBreakdown">Re-run</button>
         <button type="button" class="md-breakdown-btn md-breakdown-btn--primary" data-action="acceptMdBreakdown">Add as subtasks</button>
@@ -1563,7 +1563,7 @@ async function runMdBreakdown(){
   }catch(err){
     console.warn('[breakdown]', err);
     body.innerHTML = '<span class="intel-muted">Something went wrong. Try again.</span>'
-      + ' <button type="button" class="md-breakdown-btn" data-action="runMdBreakdown" style="margin-top:8px">Retry</button>';
+      + ' <button type="button" class="md-breakdown-btn" data-action="runMdBreakdown">Retry</button>';
   }
 }
 
@@ -1607,12 +1607,12 @@ async function intelFindDuplicatesUI(){
   if(!isIntelReady()){ _setIntelStatus('error', 'Model not ready'); return; }
   const sec = document.getElementById('intelDupSection');
   if(!sec) return;
-  sec.style.display = '';
-  sec.innerHTML = '<span style="font-size:12px;color:var(--text-3)">Scanning…</span>';
+  sec.hidden = false;
+  sec.innerHTML = '<span class="text-12-muted">Scanning…</span>';
   try{
     const pairs = await findDuplicates(0.9);
     if(!pairs.length){
-      sec.innerHTML = '<span style="font-size:12px;color:var(--text-3)">No near-duplicate pairs (≥0.9) found.</span>';
+      sec.innerHTML = '<span class="text-12-muted">No near-duplicate pairs (≥0.9) found.</span>';
       window._dupSimMap = null;
       return;
     }
@@ -1628,7 +1628,7 @@ async function intelFindDuplicatesUI(){
     // different" with a short reason. Bounded to keep this interactive.
     const verdicts = new Map();
     if(typeof isGenReady === 'function' && isGenReady() && typeof genDedupeJudge === 'function'){
-      sec.innerHTML = '<span style="font-size:12px;color:var(--text-3)">Asking LLM to adjudicate top pairs…</span>';
+      sec.innerHTML = '<span class="text-12-muted">Asking LLM to adjudicate top pairs…</span>';
       const JUDGE = Math.min(6, shown.length);
       for(let i = 0; i < JUDGE; i++){
         const p = shown[i];
@@ -1655,7 +1655,7 @@ async function intelFindDuplicatesUI(){
       </div>`;
     }).join('');
   }catch(e){
-    sec.innerHTML = '<span style="color:var(--danger)">Failed to scan</span>';
+    sec.innerHTML = '<span class="text-danger">Failed to scan</span>';
   }
 }
 
@@ -1815,19 +1815,19 @@ function maybeShowEnhanceBtn(){
   if(!btn || !inp) return;
   const len = inp.value.trim().length;
   const showable = (typeof isIntelReady === 'function' && isIntelReady()) && len >= 3;
-  btn.style.display = showable ? '' : 'none';
+  btn.hidden = !(showable);
   // LLM freeform parse button: only offered when a generative model is loaded.
   // Shown for longer inputs (≥8 chars) where nlparse + embeddings struggle.
   const parseBtn = document.getElementById('taskParseBtn');
   if(parseBtn){
     const llmOn = typeof isGenReady === 'function' && isGenReady();
     const canParse = llmOn && len >= 8;
-    parseBtn.style.display = canParse ? '' : 'none';
+    parseBtn.hidden = !(canParse);
   }
   if((len < 3 || window._smartAddPreview) && !btn.disabled){
     window._smartAddPreview = null;
     const prev = document.getElementById('smartAddPreview');
-    if(prev){ prev.innerHTML = ''; prev.style.display = 'none'; }
+    if(prev){ prev.innerHTML = ''; prev.hidden = true; }
   }
 }
 
@@ -1835,7 +1835,7 @@ document.addEventListener('visibilitychange', () => {
   if(document.hidden && window._smartAddPreview){
     window._smartAddPreview = null;
     const prev = document.getElementById('smartAddPreview');
-    if(prev){ prev.innerHTML = ''; prev.style.display = 'none'; }
+    if(prev){ prev.innerHTML = ''; prev.hidden = true; }
   }
 });
 
@@ -1876,7 +1876,7 @@ async function smartAddEnhance(){
     if(Object.keys(cleaned).length === 0){
       if(prev){
         prev.innerHTML = '<span class="smart-add-empty">No confident suggestions — add manually or keep typing</span>';
-        prev.style.display = '';
+        prev.hidden = false;
       }
     } else {
       window._smartAddPreview = cleaned;
@@ -1930,7 +1930,7 @@ async function smartAddParseWithLLM(){
     if(!parsed || !parsed.name){
       if(prev){
         prev.innerHTML = '<span class="smart-add-empty">LLM couldn\u2019t parse that — try adding more context.</span>';
-        prev.style.display = '';
+        prev.hidden = false;
       }
       return;
     }
@@ -1956,7 +1956,7 @@ async function smartAddParseWithLLM(){
         prev.innerHTML = parsed.rationale
           ? `<span class="smart-add-empty">${esc(parsed.rationale)}</span>`
           : '<span class="smart-add-empty">Parsed — press Enter to add.</span>';
-        prev.style.display = '';
+        prev.hidden = false;
       }
     } else {
       window._smartAddPreview = cleaned;
@@ -1964,7 +1964,7 @@ async function smartAddParseWithLLM(){
       if(parsed.rationale && prev){
         prev.insertAdjacentHTML(
           'beforeend',
-          `<div class="pending-rationale" style="margin-top:6px">${esc(parsed.rationale)}</div>`,
+          `<div class="pending-rationale">${esc(parsed.rationale)}</div>`,
         );
       }
     }
@@ -2005,7 +2005,7 @@ function _renderSmartAddChips(s){
   prev.innerHTML = `
     <span class="smart-add-hint">Suggestions — tap to remove, Enter to add:</span>
     <div class="sa-chips">${chips.join('')}</div>`;
-  prev.style.display = '';
+  prev.hidden = false;
 }
 
 function smartAddRemove(field){
@@ -2015,7 +2015,7 @@ function smartAddRemove(field){
      (Object.keys(window._smartAddPreview).length === 1 && window._smartAddPreview.tags && !window._smartAddPreview.tags.length)){
     window._smartAddPreview = null;
     const prev = document.getElementById('smartAddPreview');
-    if(prev){ prev.innerHTML = ''; prev.style.display = 'none'; }
+    if(prev){ prev.innerHTML = ''; prev.hidden = true; }
   } else {
     _renderSmartAddChips(window._smartAddPreview);
   }
@@ -2028,7 +2028,7 @@ function smartAddRemoveTag(tag){
   if(Object.keys(window._smartAddPreview).length === 0){
     window._smartAddPreview = null;
     const prev = document.getElementById('smartAddPreview');
-    if(prev){ prev.innerHTML = ''; prev.style.display = 'none'; }
+    if(prev){ prev.innerHTML = ''; prev.hidden = true; }
   } else {
     _renderSmartAddChips(window._smartAddPreview);
   }
@@ -2062,9 +2062,9 @@ async function applySmartAddAndSubmit(){
   inp.value = '';
   window._smartAddPreview = null;
   const prev = document.getElementById('smartAddPreview');
-  if(prev){ prev.innerHTML = ''; prev.style.display = 'none'; }
+  if(prev){ prev.innerHTML = ''; prev.hidden = true; }
   const btn = document.getElementById('taskEnhanceBtn');
-  if(btn) btn.style.display = 'none';
+  if(btn) btn.hidden = true;
 
   renderTaskList();
   if(typeof renderBanner === 'function') renderBanner();
@@ -2093,11 +2093,11 @@ function openWhatNext(){
           <span class="wn-name">${esc(x.t.name)}</span>
           <span class="wn-meta">${x.t.dueDate ? esc(x.t.dueDate) : 'no date'} · ${esc(x.t.priority || 'none')}</span>
           ${i === 0 && calHint ? `<span class="wn-cal-hint" role="note">${esc(calHint)}</span>` : ''}
-          ${i === 0 ? '<span class="wn-why" id="wnWhy" style="display:none"></span>' : ''}
+          ${i === 0 ? '<span class="wn-why" id="wnWhy" hidden></span>' : ''}
         </button>`).join('')
-      : '<span style="color:var(--text-3);font-size:12px">Nothing queued — add tasks or clear filters.</span>';
+      : '<span class="text-12-muted">Nothing queued — add tasks or clear filters.</span>';
   }
-  o.style.display = '';
+  o.hidden = false;
   if(typeof openFocusTrap === 'function') openFocusTrap(o);
 
   // Opt-in LLM rationale for the top pick. Runs after the modal is visible
@@ -2110,7 +2110,7 @@ function openWhatNext(){
       const el = document.getElementById('wnWhy');
       if(el){
         el.textContent = note;
-        el.style.display = '';
+        el.hidden = false;
       }
     }).catch(() => {});
   }
@@ -2118,7 +2118,7 @@ function openWhatNext(){
 
 function closeWhatNext(){
   const o = document.getElementById('whatNextOverlay');
-  if(o) o.style.display = 'none';
+  if(o) o.hidden = true;
   if(typeof closeFocusTrap === 'function') closeFocusTrap();
 }
 
@@ -2212,7 +2212,7 @@ function renderGenSettings(){
   if(!cfg.enabled) actionLabel = 'Enable above first';
   else if(loading) actionLabel = 'Loading…';
   else if(readyThisModel) actionLabel = 'Reload model';
-  else if(cached) actionLabel = 'Load model';
+  else if(cached) actionLabel = 'Pre-load model';
   else actionLabel = `Download model (~${sizeMb} MB)`;
   const actionDisabled = !cfg.enabled || loading;
 
@@ -2229,8 +2229,8 @@ function renderGenSettings(){
 
   host.innerHTML = `
     <div class="gen-settings">
-      <div class="srow" style="justify-content:space-between;gap:10px">
-        <span class="sr-lbl" style="font-size:13px">Enable generative Ask (beta)</span>
+      <div class="srow srow--spread">
+        <span class="sr-lbl sr-lbl--lg">Enable generative Ask (beta)</span>
         <div class="toggle ${cfg.enabled ? 'on' : ''}" id="genEnableToggle" data-action="toggleGenEnabled" role="switch" aria-checked="${cfg.enabled}"><div class="tknob"></div></div>
       </div>
       <p class="gen-settings-lead">
@@ -2251,12 +2251,12 @@ function renderGenSettings(){
       ${ramHint === 'low' ? `<div class="gen-settings-warn">Your device reports low RAM. The 135M preset is recommended.</div>` : ''}
       ${ramHint === 'ios-unknown' && (preset && preset.sizeMb > 150) ? `<div class="gen-settings-warn">On iOS the WASM fallback uses extra RAM. If the tab reloads during generation, switch to the 135M preset.</div>` : ''}
       <div class="gen-settings-row">
-        <label for="genTimeout" class="gen-settings-lbl">Timeout (sec)</label>
+        <label for="genTimeout" class="gen-settings-lbl" title="Max time allowed for generating a response">Max generation time (sec)</label>
         <input type="number" id="genTimeout" class="sinput" min="5" max="120" value="${cfg.timeoutSec}" data-onchange="setGenTimeoutFromInput" ${cfg.enabled ? '' : 'disabled'}>
       </div>
       <div class="gen-settings-status" id="genSettingsStatus">${esc(statusText)}</div>
-      <div id="genProgressWrap" class="intel-progress-wrap" style="display:${loading ? '' : 'none'}">
-        <div class="intel-progress-track"><div class="intel-progress-bar" id="genProgressBar" style="width:0%"></div></div>
+      <div id="genProgressWrap" class="intel-progress-wrap" ${loading ? '' : 'hidden'}>
+        <div class="intel-progress-track"><div class="intel-progress-bar progress-bar" id="genProgressBar"></div></div>
         <div class="intel-progress-info"><span id="genProgressPct">0%</span> <span id="genProgressTxt"></span></div>
       </div>
       ${errForThisModel ? `<div class="gen-settings-warn" id="genSettingsError" role="alert">${esc(errForThisModel)}</div>` : ''}

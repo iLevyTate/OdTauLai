@@ -28,16 +28,21 @@
 <meta name="apple-mobile-web-app-title" content="OdTauLai">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="application-name" content="OdTauLai">
-<!-- CSP: script-src / object-src / base-uri are the hard security boundaries.
-     'unsafe-inline' was dropped from script-src after the H-2 migration —
-     all inline event handlers go through the document-level dispatcher in
-     js/event-delegation.js (data-action / data-on<event> attributes).
-     style-src keeps 'unsafe-inline' because many components style via
-     inline `style="..."` attributes; that's a separate cleanup.
+<!-- CSP: script-src / style-src / object-src / base-uri are the hard
+     security boundaries. 'unsafe-inline' is gone from BOTH script-src
+     and style-src:
+       - script-src: every inline on<event>="..." replaced with data-action
+         / data-on<event> attributes routed through the document-level
+         dispatcher in js/event-delegation.js.
+       - style-src: every inline style="..." extracted to CSS utility
+         classes; dynamic colors / widths set via the JS DOM API
+         (el.style.X = ...) AFTER innerHTML, which is allowed by CSP;
+         visibility uses the HTML5 `hidden` attribute and el.hidden =
+         bool toggles instead of style.display.
      connect-src uses http:/https: broadly because calfeeds.js allows
      user-configured CORS proxy URLs.
      wss: entries are required for PeerJS WebRTC signalling. -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' http: https: wss://*.peerjs.com wss://0.peerjs.com wss://1.peerjs.com wss://peerjs.com;">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com; worker-src 'self' blob:; style-src 'self'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' http: https: wss://*.peerjs.com wss://0.peerjs.com wss://1.peerjs.com wss://peerjs.com;">
 
 <!-- Icons -->
 <link rel="manifest" href="manifest.json" id="pwa-manifest">
@@ -69,9 +74,9 @@
 <!-- Polite live region: announces task add/remove/done events to screen readers
      without interrupting whatever the user is doing. -->
 <div id="srAnnouncer" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
-<div id="embedReindexBanner" class="track-banner" style="display:none" role="status" aria-live="polite"></div>
+<div id="embedReindexBanner" class="track-banner" hidden role="status" aria-live="polite"></div>
 <!-- Offline status indicator — only visible when navigator.onLine is false -->
-<div id="onlineStatus" class="offline-indicator" style="display:none" role="status" aria-live="polite"></div>
+<div id="onlineStatus" class="offline-indicator" hidden role="status" aria-live="polite"></div>
 <main class="container" id="mainTabpanels" aria-label="App content">
   <header class="header">
     <h1>
@@ -107,7 +112,7 @@
     </div>
   </header>
 
-  <div id="banner" class="track-banner" style="display:none">
+  <div id="banner" class="track-banner" hidden>
     <div class="track-banner-inner">
       <div class="track-banner-pulse" aria-hidden="true"></div>
       <span class="track-banner-label">Tracking</span>
@@ -156,9 +161,9 @@
   </nav>
 
   <!-- Tasks (primary ClickUp-style task manager) -->
-  <div class="panel" data-tab="tasks" style="padding:14px">
+  <div class="panel panel--tasks" data-tab="tasks">
     <div class="shdr">
-      <div class="sdot" style="background:#e056a0"></div>
+      <div class="sdot sdot--tasks"></div>
       <h2 class="slbl">Task Manager</h2>
       <span class="scnt" id="taskCountBadge">0 active</span>
     </div>
@@ -172,13 +177,13 @@
           enterkeyhint="send"
           data-oninput="taskInputLiveUpdate"
           data-onkeydown="onTaskInputKey">
-        <button class="task-enhance-btn" id="taskEnhanceBtn" data-action="smartAddEnhance" style="display:none" title="Suggest metadata from your task history (embeddings)" data-icon="sparkles" aria-label="Smart-add suggestions"></button>
-        <button class="task-enhance-btn task-enhance-btn--llm" id="taskParseBtn" data-action="smartAddParseWithLLM" style="display:none" title="Parse this freeform sentence with the on-device LLM" data-icon="wand" aria-label="Parse with LLM"></button>
-        <button class="task-enhance-btn task-voice-btn" id="taskVoiceBtn" data-action="toggleVoiceInput" style="display:none" title="Voice input (on-device speech recognition)" data-icon="mic" aria-label="Voice input"></button>
+        <button class="task-enhance-btn" id="taskEnhanceBtn" data-action="smartAddEnhance" hidden title="Suggest metadata from your task history (embeddings)" data-icon="sparkles" aria-label="Smart-add suggestions"></button>
+        <button class="task-enhance-btn task-enhance-btn--llm" id="taskParseBtn" data-action="smartAddParseWithLLM" hidden title="Parse this freeform sentence with the on-device LLM" data-icon="wand" aria-label="Parse with LLM"></button>
+        <button class="task-enhance-btn task-voice-btn" id="taskVoiceBtn" data-action="toggleVoiceInput" hidden title="Voice input (on-device speech recognition)" data-icon="mic" aria-label="Voice input"></button>
       </div>
       <button class="task-add" data-action="addTaskOrApplyPreview">+ Add</button>
     </div>
-    <div id="smartAddPreview" class="smart-add-preview" style="display:none"></div>
+    <div id="smartAddPreview" class="smart-add-preview" hidden></div>
     <!-- Live parse preview: chips reflect quick-add tokens parsed from current
          input text so users can SEE what will commit before pressing Enter.
          Hidden when nothing is parseable. -->
@@ -186,7 +191,7 @@
     <!-- qa-hint defaults to hidden so the form starts uncluttered; users opt
          in via the inline disclosure below. syncQaHintVisibility() flips both
          based on cfg.qaHintHidden at runtime. -->
-    <div class="qa-hint" id="qa-hint" aria-label="Quick-add syntax examples" style="display:none">
+    <div class="qa-hint" id="qa-hint" aria-label="Quick-add syntax examples" hidden>
       <span class="qa-hint-lbl">Try:</span>
       <span class="qa-hint-tokens">
         <span class="qpc qpc--due"   title="Due dates">today</span>
@@ -202,18 +207,20 @@
     <!-- Configurable inline quick-add panel. Hidden by default; user toggles via
          'More options' chevron. Field set is user-configurable in Settings.
          Default: list + due. -->
-    <button type="button" class="qa-more-toggle" id="qaMoreToggle"
-      aria-expanded="false" aria-controls="qaMorePanel"
-      data-action="toggleQuickAddPanel">
-      <span class="qa-more-chevron" aria-hidden="true">▾</span>
-      <span class="qa-more-label">More options</span>
-    </button>
+    <div class="qa-actions-row">
+      <button type="button" class="qa-more-toggle" id="qaMoreToggle"
+        aria-expanded="false" aria-controls="qaMorePanel"
+        data-action="toggleQuickAddPanel">
+        <span class="qa-more-chevron" aria-hidden="true">▾</span>
+        <span class="qa-more-label">More options</span>
+      </button>
+      <button type="button" id="askPromoChip" class="ask-promo-chip" hidden data-action="openAskMode" aria-label="Ask the on-device AI about your tasks" title="Ask the on-device AI">
+        <span class="ask-promo-ic" data-icon="spark" data-icon-size="14" aria-hidden="true"></span>
+        <span class="ask-promo-label ask-promo-label--kbd">Ask · <kbd>Ctrl/⌘+K</kbd> then <kbd>?</kbd></span>
+        <span class="ask-promo-label ask-promo-label--touch">Ask the on-device AI</span>
+      </button>
+    </div>
     <div class="qa-more-panel" id="qaMorePanel" hidden></div>
-    <button type="button" id="askPromoChip" class="ask-promo-chip" style="display:none" data-action="openAskMode" aria-label="Ask the on-device AI about your tasks" title="Ask the on-device AI">
-      <span class="ask-promo-ic" data-icon="spark" data-icon-size="14" aria-hidden="true"></span>
-      <span class="ask-promo-label ask-promo-label--kbd">Ask · <kbd>Ctrl/⌘+K</kbd> then <kbd>?</kbd></span>
-      <span class="ask-promo-label ask-promo-label--touch">Ask the on-device AI</span>
-    </button>
 
     <!-- Views, Lists & Tags Collapsible -->
     <details class="views-accordion" open>
@@ -224,9 +231,9 @@
         <div class="lists-bar" id="listsBar"></div>
 
         <!-- Tags / Categories (prominent placement) -->
-        <div class="tags-bar-wrap" id="tagsBarWrap" style="margin-bottom:8px;">
+        <div class="tags-bar-wrap" id="tagsBarWrap">
           <label class="sr-only" for="filterCategory">Filter by category</label>
-          <select class="task-tb-sel" id="filterCategory" data-onchange="updateTaskFilters" style="display:none;margin:0;">
+          <select class="task-tb-sel" id="filterCategory" data-onchange="updateTaskFilters" hidden>
             <option value="all">Any category</option>
           </select>
           <div class="smart-views" id="tagsBar">
@@ -256,8 +263,8 @@
           <div class="task-search-row">
             <label class="sr-only" for="taskSearch">Search tasks</label>
             <input type="text" class="task-search" id="taskSearch" placeholder="Search tasks…" aria-label="Search tasks" data-oninput="updateTaskFilters" autocomplete="off">
-            <button type="button" class="task-search-clear" id="taskSearchClear" data-action="clearTaskSearch" style="display:none" aria-label="Clear search">×</button>
-            <span class="task-search-mode-pill" id="taskSearchSemanticPill" style="display:none">Semantic</span>
+            <button type="button" class="task-search-clear" id="taskSearchClear" data-action="clearTaskSearch" hidden aria-label="Clear search">×</button>
+            <span class="task-search-mode-pill" id="taskSearchSemanticPill" hidden>Semantic</span>
             <label class="task-search-semantic" title="Rank by meaning (requires model loaded)">
               <input type="checkbox" id="taskSearchSemantic" data-onchange="toggleTaskSearchSemantic"> Semantic
             </label>
@@ -275,19 +282,19 @@
           <button type="button" class="filters-toggle" id="filtersToggle" data-action="toggleFiltersPanel" title="Filters & sort" aria-expanded="false" aria-controls="filtersPanel">
             <span class="ft-icon">⚙</span>
             <span class="ft-label">Filters</span>
-            <span class="ft-count" id="filtersActiveCount" style="display:none">0</span>
+            <span class="ft-count" id="filtersActiveCount" hidden>0</span>
           </button>
         </div>
 
         <!-- Collapsible filter panel (hidden by default on mobile) -->
-        <div class="task-toolbar" id="filtersPanel" style="display:none">
+        <div class="task-toolbar" id="filtersPanel" hidden>
           <!-- View selector (mobile-only, when controlbar view-toggle is hidden) -->
-          <div class="view-toggle mobile-view-toggle" style="width:100%">
-            <button id="viewListMobile" class="active" data-action="setTaskViewMobile" data-arg="list" style="flex:1"><span class="mv-ic" data-icon="list"></span> List</button>
-            <button id="viewBoardMobile" data-action="setTaskViewMobile" data-arg="board" style="flex:1"><span class="mv-ic" data-icon="grid"></span> Board</button>
-            <button id="viewCalMobile" data-action="setTaskViewMobile" data-arg="calendar" style="flex:1"><span class="mv-ic" data-icon="calendar"></span> Cal</button>
+          <div class="view-toggle mobile-view-toggle">
+            <button id="viewListMobile" class="active" data-action="setTaskViewMobile" data-arg="list"><span class="mv-ic" data-icon="list"></span> List</button>
+            <button id="viewBoardMobile" data-action="setTaskViewMobile" data-arg="board"><span class="mv-ic" data-icon="grid"></span> Board</button>
+            <button id="viewCalMobile" data-action="setTaskViewMobile" data-arg="calendar"><span class="mv-ic" data-icon="calendar"></span> Cal</button>
           </div>
-          <fieldset class="task-toolbar-row" style="border:0;padding:0;margin:0;display:flex;gap:8px;flex-wrap:wrap">
+          <fieldset class="task-toolbar-row">
             <legend class="sr-only">Filter tasks</legend>
             <label class="sr-only" for="filterStatus">Filter by status</label>
             <select class="task-tb-sel" id="filterStatus" data-onchange="updateTaskFilters">
@@ -308,7 +315,7 @@
               <option value="low">Low</option>
             </select>
           </fieldset>
-          <fieldset class="task-toolbar-row" style="border:0;padding:0;margin:0;display:flex;gap:8px;flex-wrap:wrap">
+          <fieldset class="task-toolbar-row">
             <legend class="sr-only">Sort and group tasks</legend>
             <label class="sr-only" for="taskSortSel">Sort tasks by</label>
             <select class="task-tb-sel" id="taskSortSel" data-onchange="updateTaskFilters">
@@ -350,10 +357,10 @@
     </details>
 
     <!-- G-18: Calendar events for Today view (rendered conditionally) -->
-    <div class="today-cal-events" id="todayCalEvents" style="display:none"></div>
+    <div class="today-cal-events" id="todayCalEvents" hidden></div>
 
     <!-- Today banner: hidden when empty, compact when shown -->
-    <div class="today-banner today-banner-compact" id="todayBanner" style="display:none">
+    <div class="today-banner today-banner-compact" id="todayBanner" hidden>
       <div class="tb-item"><div class="tb-num overdue" id="tbOverdue">0</div><div class="tb-lbl">Overdue</div></div>
       <div class="tb-divider"></div>
       <div class="tb-item"><div class="tb-num today" id="tbToday">0</div><div class="tb-lbl">Today</div></div>
@@ -364,28 +371,28 @@
       <button type="button" class="tb-snooze" data-action="snoozeTodayBanner" title="Hide this banner until tomorrow">Snooze</button>
     </div>
 
-    <div id="swipeTipBanner" class="swipe-tip-banner" style="display:none" role="status">
+    <div id="swipeTipBanner" class="swipe-tip-banner" hidden role="status">
       <span class="swipe-tip-msg">Tip: swipe right on a task to mark done · swipe left to archive</span>
       <button type="button" class="swipe-tip-dismiss" data-action="dismissSwipeTip">Got it</button>
     </div>
 
     <!-- Archived notice (only shown in archive view) -->
-    <div class="archived-notice" id="archivedNotice" style="display:none">
+    <div class="archived-notice" id="archivedNotice" hidden>
       <span class="archived-notice-inner"><span class="archived-notice-ic" data-icon="archive"></span>Viewing archived tasks — click the restore button (<span class="archived-notice-restore" data-icon="rotateCcw"></span>) to bring them back</span>
       <button type="button" data-action="emptyArchiveWithConfirm">Empty Archive</button>
     </div>
 
     <!-- List view (default) -->
-    <div id="habitsHiddenNotice" class="habits-hidden-notice" style="display:none" role="status" aria-live="polite"></div>
+    <div id="habitsHiddenNotice" class="habits-hidden-notice" hidden role="status" aria-live="polite"></div>
     <!-- Scroll progress shown only when tasks.length > 50; updated by ui.js. -->
     <div class="task-list-progress" id="taskListProgress" role="progressbar" aria-label="Task list scroll position" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" hidden><div class="task-list-progress-bar" id="taskListProgressBar"></div></div>
     <div class="task-list" id="taskList"><div class="task-empty" id="taskEmpty"></div></div>
 
     <!-- Board view (kanban) -->
-    <div class="board-view" id="boardView" style="display:none"></div>
+    <div class="board-view" id="boardView" hidden></div>
 
     <!-- Calendar view -->
-    <div id="calendarView" style="display:none"></div>
+    <div id="calendarView" hidden></div>
   </div>
 
   <div class="timer-subnav" data-tab="focus">
@@ -395,9 +402,9 @@
     <button type="button" class="timer-sub-btn" data-sub="chimes" data-action="setTimerSub" data-arg="chimes">Chimes</button>
   </div>
   <!-- Pomodoro Focus Timer -->
-  <div class="panel timer-sub-panel" data-tab="focus" data-timer-sub="pomo" style="padding:20px">
+  <div class="panel timer-sub-panel panel--timer-sub" data-tab="focus" data-timer-sub="pomo">
     <div class="shdr">
-      <div class="sdot" style="background:var(--accent)"></div>
+      <div class="sdot sdot--accent"></div>
       <h2 class="slbl">Focus Timer</h2>
       <span class="scnt" id="pomoCycleLabel">Pomodoro</span>
     </div>
@@ -406,12 +413,12 @@
       <button class="tab" data-action="switchPhase" data-arg="short">Short Break</button>
       <button class="tab" data-action="switchPhase" data-arg="long">Long Break</button>
     </div>
-    <div class="card" id="mainCard" style="background:var(--work-bg);border:1px solid var(--work-border);margin-top:12px">
+    <div class="card card--work-phase" id="mainCard">
       <div class="ring-wrap">
         <svg class="ring-svg" viewBox="0 0 200 200"><circle class="ring-bg" cx="100" cy="100" r="88"/><circle class="ring-fg" id="ringFg" cx="100" cy="100" r="88" stroke="var(--work)" stroke-dasharray="553" stroke-dashoffset="0"/></svg>
         <div class="ring-center">
-          <div class="ring-time" id="display" style="color:var(--work)">25:00</div>
-          <div class="ring-label" id="phaseLabel" style="color:var(--work)">Focus</div>
+          <div class="ring-time text-work" id="display">25:00</div>
+          <div class="ring-label text-work" id="phaseLabel">Focus</div>
         </div>
       </div>
       <div class="pips" id="pips"></div>
@@ -421,15 +428,15 @@
   </div>
 
   <!-- Quick Timers -->
-  <div class="panel timer-sub-panel" data-tab="focus" data-timer-sub="quick" style="display:none">
+  <div class="panel timer-sub-panel panel--timer-sub" data-tab="focus" data-timer-sub="quick" hidden>
     <div class="shdr">
-      <div class="sdot" style="background:#48b5e0"></div>
+      <div class="sdot sdot--quick"></div>
       <h2 class="slbl">Quick Timers</h2>
       <span class="scnt" id="qtCount">0 timers</span>
     </div>
     <div class="qt-form">
-      <div style="flex:1 1 120px"><label class="fl">Label</label><input class="fi fi-w" id="qtLabel" placeholder="e.g. Tea steep" data-onkeydown="qtLabelEnterKey"></div>
-      <div style="display:flex;gap:6px"><div><label class="fl">Min</label><input type="number" class="fi fi-n" id="qtMin" value="5" min="0" max="999"></div><div><label class="fl">Sec</label><input type="number" class="fi fi-n" id="qtSec" value="0" min="0" max="59"></div></div>
+      <div class="grow-120"><label class="fl">Label</label><input class="fi fi-w" id="qtLabel" placeholder="e.g. Tea steep" data-onkeydown="qtLabelEnterKey"></div>
+      <div class="row-flex"><div><label class="fl">Min</label><input type="number" class="fi fi-n" id="qtMin" value="5" min="0" max="999"></div><div><label class="fl">Sec</label><input type="number" class="fi fi-n" id="qtSec" value="0" min="0" max="59"></div></div>
       <div><label class="fl">Sound</label><select class="fi fi-s" id="qtSound"><option value="bell">Bell</option><option value="ping">Ping</option><option value="buzz">Buzz</option><option value="chord">Chord</option><option value="alarm">Alarm</option></select></div>
       <button class="iadd" data-action="addQuickTimer">+ ADD</button>
     </div>
@@ -448,28 +455,28 @@
   </div>
 
   <!-- Stopwatch -->
-  <div class="panel timer-sub-panel" data-tab="focus" data-timer-sub="sw" style="display:none">
-    <div class="shdr"><div class="sdot" style="background:#9b59b6"></div><h2 class="slbl">Stopwatch</h2></div>
-    <div style="text-align:center">
-      <div id="swDisplay" style="font-size:42px;font-weight:800;color:var(--text-1);letter-spacing:3px;font-variant-numeric:tabular-nums;margin-bottom:12px">00:00:00</div>
-      <div style="display:flex;gap:10px;justify-content:center">
-        <button class="btn btn-primary" id="swStartBtn" data-action="swToggle" style="padding:8px 20px;font-size:10px">Start</button>
-        <button class="btn btn-ghost" data-action="swLap" style="padding:8px 20px;font-size:10px">Lap</button>
-        <button class="btn-danger" data-action="swReset" style="padding:8px 16px">Reset</button>
+  <div class="panel timer-sub-panel panel--timer-sub" data-tab="focus" data-timer-sub="sw" hidden>
+    <div class="shdr"><div class="sdot sdot--sw"></div><h2 class="slbl">Stopwatch</h2></div>
+    <div class="sw-body">
+      <div id="swDisplay" class="sw-display">00:00:00</div>
+      <div class="sw-buttons">
+        <button class="btn btn-primary btn-sm" id="swStartBtn" data-action="swToggle">Start</button>
+        <button class="btn btn-ghost btn-sm" data-action="swLap">Lap</button>
+        <button class="btn-danger btn-sm" data-action="swReset">Reset</button>
       </div>
-      <div id="swLaps" style="margin-top:10px;display:flex;flex-direction:column;gap:3px;max-height:120px;overflow-y:auto"></div>
+      <div id="swLaps" class="sw-laps"></div>
     </div>
   </div>
 
   <!-- Intervals / repeating chimes -->
-  <div class="panel timer-sub-panel" data-tab="focus" data-timer-sub="chimes" style="display:none">
-    <div class="shdr"><div class="sdot" style="background:#3d8bcc"></div><h2 class="slbl">Repeating Chimes</h2><span class="scnt" id="intCount">0 set</span></div>
+  <div class="panel timer-sub-panel panel--timer-sub" data-tab="focus" data-timer-sub="chimes" hidden>
+    <div class="shdr"><div class="sdot sdot--chimes"></div><h2 class="slbl">Repeating Chimes</h2><span class="scnt" id="intCount">0 set</span></div>
     <div class="iform">
-      <div style="flex:1 1 100px"><label class="fl">Label</label><input class="fi fi-w" id="intLabel" placeholder="e.g. Posture check"></div>
-      <div style="display:flex;gap:6px;align-items:flex-end"><div><label class="fl">Min</label><input type="number" class="fi fi-n" id="intMin" value="5" min="0" max="999"></div><div><label class="fl">Sec</label><input type="number" class="fi fi-n" id="intSec" value="0" min="0" max="59"></div></div>
+      <div class="grow-100"><label class="fl">Label</label><input class="fi fi-w" id="intLabel" placeholder="e.g. Posture check"></div>
+      <div class="row-flex--end"><div><label class="fl">Min</label><input type="number" class="fi fi-n" id="intMin" value="5" min="0" max="999"></div><div><label class="fl">Sec</label><input type="number" class="fi fi-n" id="intSec" value="0" min="0" max="59"></div></div>
       <div><label class="fl">Sound</label><select class="fi fi-s" id="intChime"><option value="bell">Bell</option><option value="ping">Ping</option><option value="buzz">Buzz</option><option value="chord">Chord</option><option value="alarm">Alarm</option></select></div>
       <div><label class="fl">During</label><select class="fi fi-s" id="intTarget"><option value="pomo">Pomodoro</option><option value="quick">Quick Timers</option><option value="sw">Stopwatch</option></select></div>
-      <div style="display:flex;gap:5px"><button type="button" class="iprev" data-action="intervalChimePreview" title="Preview" data-icon="play"></button><button class="iadd" data-action="addInterval">+ ADD</button></div>
+      <div class="row-flex--gap-5"><button type="button" class="iprev" data-action="intervalChimePreview" title="Preview" data-icon="play"></button><button class="iadd" data-action="addInterval">+ ADD</button></div>
     </div>
     <div class="ilist" id="intList"><div class="iempty" id="intEmpty">No chimes set</div></div>
   </div>
@@ -481,7 +488,7 @@
 
   <!-- Settings -->
   <div class="panel panel-settings" data-tab="settings">
-    <div class="stitle stitle-static"><div class="sdot" style="background:#3d8bcc"></div><h2 class="slbl">Settings</h2></div>
+    <div class="stitle stitle-static"><div class="sdot sdot--accent"></div><h2 class="slbl">Settings</h2></div>
     <div class="sbody sbody-static" id="settingsBody">
       <details class="set-section" open>
         <summary class="set-section-sum">General</summary>
@@ -507,17 +514,17 @@
           <div class="srow"><span class="sr-lbl" id="lbl-togLink">Link Task to Session</span><button type="button" class="toggle on" id="togLink" role="switch" aria-checked="true" aria-labelledby="lbl-togLink" data-action="toggleOpt" data-arg="togLink"><span class="tknob" aria-hidden="true"></span></button></div>
           <!-- Quick-add fields picker — controls which fields appear in the
                inline "More options" panel under the task input. -->
-          <div class="srow" style="flex-direction:column;align-items:flex-start;gap:6px;padding:12px 0 14px;border-top:1px solid var(--border);margin-top:6px">
+          <div class="srow col-stretch col-stretch--top">
             <span class="sr-lbl" id="lbl-qaFields">Quick-add fields</span>
-            <span style="font-size:11px;color:var(--text-3);line-height:1.5;max-width:100%">Pick which fields appear in the "More options" panel under the task input. Unchecked fields stay accessible via the full task editor.</span>
-            <div id="qaFieldsCfg" role="group" aria-labelledby="lbl-qaFields" style="display:flex;flex-wrap:wrap;gap:8px;width:100%;margin-top:4px"></div>
+            <span class="text-hint">Pick which fields appear in the "More options" panel under the task input. Unchecked fields stay accessible via the full task editor.</span>
+            <div id="qaFieldsCfg" role="group" aria-labelledby="lbl-qaFields" class="qa-fields-grid"></div>
           </div>
-          <div class="srow" style="flex-direction:column;align-items:flex-start;gap:6px;padding:12px 0 14px;border-bottom:1px solid var(--border)">
-            <div style="display:flex;align-items:center;gap:8px;width:100%;justify-content:space-between">
+          <div class="srow col-stretch col-stretch--bot">
+            <div class="row-flex--gap-8">
               <span class="sr-lbl">Background Audio</span>
-              <span id="bgAudioStatus" style="font-size:11px;font-weight:600;color:var(--text-3)">○ Idle</span>
+              <span id="bgAudioStatus" class="text-status">○ Idle</span>
             </div>
-            <span style="font-size:11px;color:var(--text-3);line-height:1.5;max-width:100%">
+            <span class="text-hint">
               Chimes play while this tab is in the background via Web Audio scheduling + Media Session API. Sounds <strong>stop if the browser is fully closed</strong> — install as a PWA for reliable background operation.
             </span>
           </div>
@@ -527,7 +534,7 @@
       <details class="set-section">
         <summary class="set-section-sum">Classifications</summary>
         <div class="set-section-body">
-          <p style="font-size:11px;color:var(--text-3);line-height:1.5;margin:0 0 10px">Customize life areas (7 default groups). Task data stores stable ids; rename labels and accent colors anytime.</p>
+          <p class="text-hint--block">Customize life areas (7 default groups). Task data stores stable ids; rename labels and accent colors anytime.</p>
           <div id="classificationManager"></div>
         </div>
       </details>
@@ -535,7 +542,7 @@
       <details class="set-section">
         <summary class="set-section-sum">Lists</summary>
         <div class="set-section-body">
-          <p style="font-size:11px;color:var(--text-3);line-height:1.5;margin:0 0 10px">
+          <p class="text-hint--block">
             Flexible groupings &mdash; e.g. <em>Research</em>, <em>School</em>, <em>Side Project</em>. Lists are <strong>more flexible than life areas</strong> (which are themed buckets) and <strong>less ad-hoc than tags</strong>; they may overlap with life areas freely. Each list takes an optional description that feeds Auto-organize so new tasks route here automatically.
           </p>
           <div id="listsManager"></div>
@@ -546,21 +553,21 @@
       <details class="set-section">
         <summary class="set-section-sum">Integrations</summary>
         <div class="set-section-body">
-          <div class="srow" style="justify-content:space-between;gap:10px">
-            <span class="sr-lbl" style="font-size:13px">Task understanding</span>
-            <button type="button" class="btn-ghost btn-sm" data-action="showTab" data-arg="tools" style="flex-shrink:0">Open in Tools</button>
+          <div class="srow srow--spread">
+            <span class="sr-lbl sr-lbl--lg">Task understanding</span>
+            <button type="button" class="btn-ghost btn-sm" data-action="showTab" data-arg="tools">Open in Tools</button>
           </div>
-          <div class="srow" style="flex-direction:column;align-items:flex-start;gap:10px;padding:14px 0 0;border-top:1px solid var(--border);margin-top:10px">
-            <span class="sr-lbl" style="font-size:12px;letter-spacing:.06em">Generative AI (Beta)</span>
-            <div id="genAISettings" style="width:100%"></div>
+          <div class="srow srow--col">
+            <span class="sr-lbl sr-lbl--section">Generative AI (Beta)</span>
+            <div id="genAISettings" class="srow-full"></div>
           </div>
-          <div class="srow" style="flex-direction:column;align-items:flex-start;gap:10px;padding:14px 0 0;border-top:1px solid var(--border);margin-top:10px">
-            <span class="sr-lbl" style="font-size:12px;letter-spacing:.06em">Device Sync (Beta)</span>
-            <div id="syncPanel" style="width:100%"></div>
+          <div class="srow srow--col">
+            <span class="sr-lbl sr-lbl--section">Device Sync (Beta)</span>
+            <div id="syncPanel" class="srow-full"></div>
           </div>
-          <div class="srow" style="flex-direction:column;align-items:flex-start;gap:10px;padding:14px 0 0;border-top:1px solid var(--border);margin-top:10px">
-            <span class="sr-lbl" style="font-size:12px;letter-spacing:.06em">Calendar Feeds</span>
-            <div id="calFeedsPanel" style="width:100%"></div>
+          <div class="srow srow--col">
+            <span class="sr-lbl sr-lbl--section">Calendar Feeds</span>
+            <div id="calFeedsPanel" class="srow-full"></div>
           </div>
         </div>
       </details>
@@ -568,15 +575,15 @@
       <details class="set-section">
         <summary class="set-section-sum">About</summary>
         <div class="set-section-body">
-          <div class="srow" style="margin-top:0;padding-top:0;border-top:none">
+          <div class="srow srow--no-top">
             <span class="sr-lbl">Install as App</span>
-            <button id="installBtn" data-action="installPWA" style="display:none;padding:8px 14px;background:var(--accent);color:#0a1320;border:none;border-radius:var(--r-sm);font-size:12px;font-weight:600;font-family:inherit;cursor:pointer">＋ Install</button>
-            <span id="pwaStatus" style="font-size:11px;color:var(--text-3);letter-spacing:0;text-align:right;max-width:200px"></span>
+            <button id="installBtn" class="btn-primary btn-sm" data-action="installPWA" hidden>＋ Install</button>
+            <span id="pwaStatus" class="pwa-status"></span>
           </div>
-          <div class="srow" style="flex-direction:column;align-items:stretch;gap:8px;padding:14px 0 10px;border-top:1px solid var(--border);margin-top:10px">
-            <span class="sr-lbl" style="font-size:12px;letter-spacing:.06em">System</span>
-            <div id="systemInfo" style="font-size:11px;color:var(--text-3);line-height:1.6;font-variant-numeric:tabular-nums">Loading…</div>
-            <button data-action="refreshSystemInfoQuota" style="align-self:flex-start;background:none;border:1px solid var(--border);color:var(--text-3);padding:4px 10px;border-radius:4px;font-size:10px;font-family:inherit;cursor:pointer">Refresh</button>
+          <div class="srow srow--col-stretch">
+            <span class="sr-lbl sr-lbl--section">System</span>
+            <div id="systemInfo" class="system-info">Loading…</div>
+            <button class="btn-ghost btn-sm" data-action="refreshSystemInfoQuota">Refresh</button>
           </div>
         </div>
       </details>
@@ -585,26 +592,26 @@
 
   <!-- Today's Stats (Data tab) -->
   <div class="panel panel-data" data-tab="data" data-data-section="stats">
-    <div class="shdr"><div class="sdot" style="background:var(--long)"></div><h2 class="slbl">Today's Stats</h2><button class="small-btn" data-action="resetStats">Reset Day</button></div>
+    <div class="shdr"><div class="sdot sdot--long"></div><h2 class="slbl">Today's Stats</h2><button class="small-btn" data-action="resetStats">Reset Day</button></div>
     <dl class="stat-grid">
       <div class="stat-box"><dd class="stat-val wc" id="statPomos">0</dd><dt class="stat-lbl">Sessions</dt></div>
       <div class="stat-box"><dd class="stat-val tc" id="statFocus">0m</dd><dt class="stat-lbl">Focus Time</dt></div>
       <div class="stat-box"><dd class="stat-val bc" id="statBreaks">0</dd><dt class="stat-lbl">Breaks</dt></div>
     </dl>
     <div class="history" id="historyBlocks"></div>
-    <div class="stats-by-area" id="statsByArea" style="display:none"></div>
-    <div class="focus-streak" id="focusStreak" style="display:none"></div>
+    <div class="stats-by-area" id="statsByArea" hidden></div>
+    <div class="focus-streak" id="focusStreak" hidden></div>
   </div>
 
   <!-- Time Log (Data tab) — sessions in chronological order. -->
   <div class="panel panel-data" data-tab="data" data-data-section="log">
-    <div class="shdr"><div class="sdot" style="background:var(--long)"></div><h2 class="slbl">Time Log</h2><button class="small-btn" data-action="clearLog">Clear</button></div>
+    <div class="shdr"><div class="sdot sdot--long"></div><h2 class="slbl">Time Log</h2><button class="small-btn" data-action="clearLog">Clear</button></div>
     <div class="log-list" id="logList"><div class="log-empty" id="logEmpty">Completed sessions appear here</div></div>
   </div>
 
   <!-- Past Days Archive (Data tab) -->
   <div class="panel panel-data" data-tab="data" data-data-section="archive">
-    <div class="shdr"><div class="sdot" style="background:#8e44ad"></div><h2 class="slbl">Past Days</h2><span class="scnt" id="archiveCount">0 days</span></div>
+    <div class="shdr"><div class="sdot sdot--history"></div><h2 class="slbl">Past Days</h2><span class="scnt" id="archiveCount">0 days</span></div>
     <div id="archiveList" class="archive-list"><div class="iempty" id="archiveEmpty">History will appear here after each day</div></div>
     <div class="archive-actions">
       <button class="export-btn export-csv" data-action="exportAllCSV">Export All History (.csv)</button>
@@ -614,7 +621,7 @@
 
   <!-- Export & Backup (Data tab) — own panel so the Stats panel stays scannable. -->
   <div class="panel panel-data" data-tab="data" data-data-section="export">
-    <div class="shdr"><div class="sdot" style="background:#3d8bcc"></div><h2 class="slbl">Export &amp; Backup</h2></div>
+    <div class="shdr"><div class="sdot sdot--accent"></div><h2 class="slbl">Export &amp; Backup</h2></div>
 
     <!-- Daily report — human-readable summary -->
     <div class="export-section">
@@ -676,11 +683,11 @@
     <div class="mt-time" id="mtTime">25:00</div>
   </div>
   <button class="mt-btn mt-play" id="mtToggle" aria-label="Play or pause focus timer" data-action="miniTimerToggle">▶</button>
-  <div class="mt-open" id="mtTaskHint" style="display:none">⇢ open</div>
+  <div class="mt-open" id="mtTaskHint" hidden>⇢ open</div>
 </div>
 
 <!-- What next? overlay -->
-<div id="whatNextOverlay" class="what-next-overlay" style="display:none" data-action="closeWhatNextOnBackdrop">
+<div id="whatNextOverlay" class="what-next-overlay" hidden data-action="closeWhatNextOnBackdrop">
   <div class="what-next-panel">
     <div class="what-next-hdr">
       <span>What next?</span>
@@ -735,7 +742,7 @@
       <!-- Auto-organize: route each pasted line to the right list + fill in
            category/priority via on-device embeddings (or fall back to LLM).
            Hidden when neither model is ready so the toggle never lies. -->
-      <label class="bulk-import-auto" id="bulkImportAutoWrap" style="display:none">
+      <label class="bulk-import-auto" id="bulkImportAutoWrap" hidden>
         <input type="checkbox" id="bulkImportAuto">
         <span class="bulk-import-auto-text">
           <strong>Auto-organize</strong>
@@ -755,7 +762,7 @@
 <div class="modal-overlay app-dlg-overlay" id="appConfirmModal" role="alertdialog" aria-modal="true" aria-labelledby="appConfirmMessage" data-action="closeAppConfirmOnBackdrop">
   <div class="modal app-dlg">
     <div class="modal-body">
-      <p id="appConfirmMessage" class="app-dlg-msg" style="margin:0;font-size:14px;line-height:1.5"></p>
+      <p id="appConfirmMessage" class="app-dlg-msg app-dlg-msg--p"></p>
     </div>
     <div class="modal-foot">
       <button type="button" class="mfoot-btn mfoot-cancel" data-action="closeAppConfirm" data-args='[false]'>Cancel</button>
@@ -768,9 +775,9 @@
 <div class="modal-overlay app-dlg-overlay" id="appPromptModal" role="dialog" aria-modal="true" aria-labelledby="appPromptLabel" data-action="closeAppPromptOnBackdrop">
   <div class="modal app-dlg">
     <div class="modal-body">
-      <label id="appPromptLabel" for="appPromptInput" class="app-dlg-msg" style="display:block;margin:0 0 10px;font-size:13px;white-space:pre-wrap;line-height:1.45"></label>
-      <input type="text" class="mfield-in" id="appPromptInput" style="width:100%" autocomplete="off" data-onkeydown="appPromptInputKey">
-      <textarea class="mfield-textarea" id="appPromptTextarea" aria-labelledby="appPromptLabel" style="width:100%;min-height:88px;display:none" rows="4" spellcheck="true"></textarea>
+      <label id="appPromptLabel" for="appPromptInput" class="app-dlg-msg app-dlg-msg--label"></label>
+      <input type="text" class="mfield-in full-w" id="appPromptInput" autocomplete="off" data-onkeydown="appPromptInputKey">
+      <textarea class="mfield-textarea app-prompt-textarea" id="appPromptTextarea" aria-labelledby="appPromptLabel" rows="4" spellcheck="true" hidden></textarea>
     </div>
     <div class="modal-foot">
       <button type="button" class="mfoot-btn mfoot-cancel" data-action="closeAppPrompt" data-args='[null]'>Cancel</button>
@@ -785,7 +792,7 @@
     <h2 class="sr-only" id="taskModalTitle">Task details</h2>
     <div class="modal-head">
       <button type="button" class="task-checkbox" id="mdCheckbox" data-action="toggleTaskDone"></button>
-      <input class="mfield-in" id="mdName" style="flex:1;font-size:14px;font-weight:700" placeholder="Task name" aria-label="Task name">
+      <input class="mfield-in mdName-input" id="mdName" placeholder="Task name" aria-label="Task name">
       <button type="button" class="modal-close" data-action="closeTaskDetail" aria-label="Close task">✕</button>
     </div>
     <div class="modal-body">
@@ -906,7 +913,7 @@
           <div class="mfield">
             <div class="mfield-lbl" id="mdCategoryLbl">Life area</div>
             <div class="mfield-chips" id="mdCategoryChips" role="group" aria-labelledby="mdCategoryLbl"></div>
-            <div id="mdValuesNote" style="font-size:11px;color:var(--text-3);margin-top:4px;font-style:italic"></div>
+            <div id="mdValuesNote" class="text-italic-hint"></div>
           </div>
           <div class="mfield-row">
             <div class="mfield">
@@ -932,7 +939,7 @@
             <div class="mfield-lbl" id="mdBlockedByLbl">Waiting on (blocked by)</div>
             <div id="mdBlockedBy" role="group" aria-labelledby="mdBlockedByLbl"></div>
           </div>
-          <div class="mfield md-similar-wrap" id="mdBreakdownWrap" style="display:none">
+          <div class="mfield md-similar-wrap" id="mdBreakdownWrap" hidden>
             <button type="button" class="similar-acc-trigger" id="mdBreakdownTrigger" data-action="toggleBreakdownAccordion">
               <span>Break down with AI</span><span class="similar-acc-chevron">▼</span>
             </button>

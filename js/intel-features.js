@@ -449,23 +449,23 @@ function renderClassificationSettings(){
       +   '<span class="class-mgr-field-lbl">Focus</span>'
       +   '<textarea class="class-mgr-in class-mgr-ta" rows="2" '
       +     'placeholder="What this life area is about (one or two sentences)" '
-      +     'onchange="classificationSetFocus(' + idx + ',this.value)">' + esc(focusVal) + '</textarea>'
+      +     'data-onchange="classificationSetFocusFromTextarea" data-idx="' + idx + '">' + esc(focusVal) + '</textarea>'
       + '</label>'
       + '<label class="class-mgr-field">'
       +   '<span class="class-mgr-field-lbl">Core values <em class="class-mgr-hint">one per line — <code>key: definition</code></em></span>'
       +   '<textarea class="class-mgr-in class-mgr-ta" rows="3" '
       +     'placeholder="Health: take care of body and mind&#10;Growth: keep learning" '
-      +     'onchange="classificationSetCoreValues(' + idx + ',this.value)">' + esc(cvText) + '</textarea>'
+      +     'data-onchange="classificationSetCoreValuesFromTextarea" data-idx="' + idx + '">' + esc(cvText) + '</textarea>'
       + '</label>'
       + '<label class="class-mgr-field">'
       +   '<span class="class-mgr-field-lbl">Example tasks <em class="class-mgr-hint">one per line or comma-separated</em></span>'
       +   '<textarea class="class-mgr-in class-mgr-ta" rows="3" '
       +     'placeholder="Walk for 30 min&#10;Meditate 10 min" '
-      +     'onchange="classificationSetExamples(' + idx + ',this.value)">' + esc(exText) + '</textarea>'
+      +     'data-onchange="classificationSetExamplesFromTextarea" data-idx="' + idx + '">' + esc(exText) + '</textarea>'
       + '</label>'
       + (hasBaseDefault
         ? '<div class="class-mgr-details-actions"><button type="button" class="btn-ghost btn-sm" '
-          + 'onclick="classificationResetDetails(' + idx + ')">Reset to defaults</button></div>'
+          + 'data-action="classificationResetDetails" data-arg="' + idx + '">Reset to defaults</button></div>'
         : '');
 
     const summaryLabel = isEmpty ? 'Life area details — set up' : 'Life area details';
