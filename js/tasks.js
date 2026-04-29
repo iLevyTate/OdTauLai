@@ -12,8 +12,8 @@ function renderGoalList(){
   const cnt=gid('goalCount');if(cnt)cnt.textContent=goals.filter(g=>g.done).length+' / '+goals.length;
   list.querySelectorAll('.goal-item').forEach(e=>e.remove());
   const empty=gid('goalEmpty'),prog=gid('goalProgress');
-  if(!goals.length){if(empty)empty.style.display='';if(prog)prog.style.display='none';return}
-  if(empty)empty.style.display='none';if(prog)prog.style.display='flex';
+  if(!goals.length){if(empty)empty.hidden = false;if(prog)prog.hidden = true;return}
+  if(empty)empty.hidden = true;if(prog)prog.hidden = false;
   const pct=goals.length?Math.round((goals.filter(g=>g.done).length/goals.length)*100):0;
   const bar=gid('goalBar'),pctEl=gid('goalPct');
   if(bar)bar.style.width=pct+'%';if(pctEl)pctEl.textContent=pct+'%';
@@ -278,19 +278,19 @@ async function addTask(){
 
 function showQaHint(){
   const h=gid('qa-hint'),r=gid('qa-hint-reveal');
-  if(h) h.style.display='';
-  if(r) r.style.display='none';
+  if(h) h.hidden = false;
+  if(r) r.hidden = true;
   if(typeof cfg==='object'&&cfg){cfg.qaHintHidden=false;saveState('user')}
 }
 function syncQaHintVisibility(){
   const h=gid('qa-hint'),r=gid('qa-hint-reveal');
   if(!h) return;
   if(typeof cfg==='object'&&cfg&&cfg.qaHintHidden){
-    h.style.display='none';
-    if(r) r.style.display='inline';
+    h.hidden = true;
+    if(r) r.hidden = false;
   }else{
-    h.style.display='';
-    if(r) r.style.display='none';
+    h.hidden = false;
+    if(r) r.hidden = true;
   }
 }
 window.showQaHint=showQaHint;
@@ -392,13 +392,13 @@ function maybeShowSwipeTip(){
   try{
     if(localStorage.getItem(SWIPE_TIP_KEY)==='1') return;
     const tip=document.getElementById('swipeTipBanner');
-    if(tip) tip.style.display='';
+    if(tip) tip.hidden = false;
   }catch(e){}
 }
 function dismissSwipeTip(){
   try{ localStorage.setItem(SWIPE_TIP_KEY,'1'); }catch(e){}
   const tip=document.getElementById('swipeTipBanner');
-  if(tip) tip.style.display='none';
+  if(tip) tip.hidden = true;
 }
 
 const BULK_LINE_MAX = 200;
@@ -490,11 +490,11 @@ function _syncBulkImportAutoToggle(){
   const intelOk = (typeof isIntelReady === 'function') && isIntelReady();
   const genOk = (typeof isGenReady === 'function') && isGenReady();
   if(!intelOk && !genOk){
-    wrap.style.display = 'none';
+    wrap.hidden = true;
     cb.checked = false;
     return;
   }
-  wrap.style.display = '';
+  wrap.hidden = false;
   if(hint){
     if(intelOk) hint.textContent = 'Route each task to the right list and fill in life area / priority via on-device embeddings (instant).';
     else hint.textContent = 'Embeddings not ready — falling back to the on-device LLM (slower, may take a few seconds per task).';
@@ -957,7 +957,7 @@ window.setFilterCategory = setFilterCategory;
 function setSmartView(v){
   smartView=v;
   document.querySelectorAll('.sv-chip').forEach(el=>{el.classList.toggle('active',el.dataset.view===v)});
-  const notice=gid('archivedNotice');if(notice)notice.style.display=v==='archived'?'flex':'none';
+  const notice=gid('archivedNotice');if(notice)notice.hidden = v !== 'archived';
   // Sync collapsed/expanded class to the user preference. By default the bar
   // is collapsed-to-active so the task header stays compact; users can opt
   // into the always-expanded layout with the `All views ▾` toggle.
@@ -1323,7 +1323,7 @@ function renderLists(){
   const bar=gid('listsBar');if(!bar)return;
   ensureDefaultList();
   bar.textContent='';
-  bar.style.display='';
+  bar.hidden = false;
   // Render a chip per list. Even with one list we render its chip so the user
   // can always see what list their tasks belong to and where the +List button
   // is. The ✕ delete control is suppressed when only one list exists so the
@@ -1461,9 +1461,9 @@ function updateTaskFilters(){
   updateFiltersActiveBadge();
   updateFiltersSummary();
   const clr=gid('taskSearchClear');
-  if(clr) clr.style.display=gid('taskSearch').value.trim()?'':'none';
+  if(clr) clr.hidden = !(gid('taskSearch').value.trim());
   const semPill=gid('taskSearchSemanticPill');
-  if(semPill) semPill.style.display=(gid('taskSearchSemantic')&&gid('taskSearchSemantic').checked)?'':'none';
+  if(semPill) semPill.hidden = !((gid('taskSearchSemantic')&&gid('taskSearchSemantic').checked));
   if(window._taskSearchSemantic && taskFilters.search && typeof semanticSearch === 'function' && typeof isIntelReady === 'function' && isIntelReady()){
     const rawQ = gid('taskSearch').value.trim();
     const myReq=++_semanticSearchReqId;
@@ -1498,9 +1498,9 @@ function setTaskView(v){
   if(gid('viewListMobile'))gid('viewListMobile').classList.toggle('active',v==='list');
   if(gid('viewBoardMobile'))gid('viewBoardMobile').classList.toggle('active',v==='board');
   if(gid('viewCalMobile'))gid('viewCalMobile').classList.toggle('active',v==='calendar');
-  gid('taskList').style.display=v==='list'?'':'none';
-  gid('boardView').style.display=v==='board'?'flex':'none';
-  if(gid('calendarView'))gid('calendarView').style.display=v==='calendar'?'':'none';
+  gid('taskList').hidden = !(v==='list');
+  gid('boardView').hidden = v !== 'board';
+  if(gid('calendarView'))gid('calendarView').hidden = !(v==='calendar');
   document.body.classList.toggle('cal-active-mobile',v==='calendar');
   renderTaskList();
   saveState('user')
@@ -1608,9 +1608,9 @@ function updateHabitsHiddenNotice(){
   if(!el) return;
   const n=countHabitsHiddenInView();
   if(n>0 && typeof cfg==='object' && cfg && cfg.hideHabitsInMainViews!==false){
-    el.style.display='';
+    el.hidden = false;
     el.innerHTML=''+n+' recurring hidden — <button type="button" class="habits-hidden-link" data-action="setSmartView" data-arg="habits">View Habits</button>';
-  }else{ el.style.display='none'; el.textContent=''; }
+  }else{ el.hidden = true; el.textContent=''; }
 }
 function onHideHabitsToggle(){
   const h=gid('hideHabitsInMain');
@@ -1689,20 +1689,20 @@ function renderTodayBanner(){
     try{ snooze=localStorage.getItem((window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.TB_SNOOZE) || 'odtaulai_tb_snooze'); }catch(e){}
     const hasUrgent=overdue>0||dueToday>0;
     const hiddenBySnooze=snooze===today;
-    banner.style.display=hasUrgent&&!hiddenBySnooze?'':'none';
+    banner.hidden = !(hasUrgent&&!hiddenBySnooze);
   }
 }
 function snoozeTodayBanner(){
   try{ localStorage.setItem((window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.STORAGE_KEYS && window.ODTAULAI_CONFIG.STORAGE_KEYS.TB_SNOOZE) || 'odtaulai_tb_snooze', todayISO()); }catch(e){}
   const banner=gid('todayBanner');
-  if(banner) banner.style.display='none';
+  if(banner) banner.hidden = true;
 }
 
 function toggleFiltersPanel(){
   const panel=gid('filtersPanel');if(!panel)return;
   const btn=gid('filtersToggle');
-  const isOpen=panel.style.display!=='none';
-  panel.style.display=isOpen?'none':'';
+  const isOpen = !panel.hidden;
+  panel.hidden = !!(isOpen);
   if(btn){
     btn.classList.toggle('active',!isOpen);
     btn.setAttribute('aria-expanded', isOpen ? 'false' : 'true');
@@ -1724,8 +1724,8 @@ function updateFiltersActiveBadge(){
   const sc=gid('showCompletedAll');if(sc&&sc.checked)count++;
   const cd=gid('cardDensityDetailed');if(cd&&cd.checked)count++;
   const hh=gid('hideHabitsInMain');if(hh&&!hh.checked)count++;
-  if(count>0){badge.textContent=count;badge.style.display='';}
-  else{badge.style.display='none';}
+  if(count>0){badge.textContent=count;badge.hidden = false;}
+  else{badge.hidden = true;}
 }
 
 function renderSmartViewCounts(){
@@ -1785,7 +1785,7 @@ function renderTaskList(){
   list.querySelectorAll('.task-item, .task-subtask-form, .task-section').forEach(e=>e.remove());
   if(!visibleTasks.length){
     const empty=gid('taskEmpty');
-    empty.style.display='';
+    empty.hidden = false;
     // Rebuild via createElement so styling is class-driven (theme-aware) and
     // there's no inline-style spaghetti to update when tokens change.
     empty.replaceChildren();
@@ -1853,7 +1853,7 @@ function renderTaskList(){
     if(typeof refreshTaskListProgress==='function') requestAnimationFrame(refreshTaskListProgress);
     return;
   }
-  gid('taskEmpty').style.display='none';
+  gid('taskEmpty').hidden = true;
   const visibleIds=new Set(visibleTasks.map(t=>t.id));
   // If grouping, bypass tree-render and group flat (only roots)
   if(taskGroupBy!=='none'){
@@ -1932,9 +1932,12 @@ function renderGroupedTasks(visibleTasks){
     const hdr=document.createElement('div');hdr.className='task-section';
     const isCol=collapsedSections[taskGroupBy+':'+k];
     hdr.innerHTML='<span class="ts-chevron'+(isCol?' collapsed':'')+'">▼</span>'
-      +'<span class="ts-color" style="background:'+getGroupColor(k)+'"></span>'
+      +'<span class="ts-color"></span>'
       +'<span class="ts-label">'+esc(getGroupLabel(k))+'</span>'
       +'<span class="ts-count">'+items.length+'</span>';
+    // Dynamic group color via DOM API — inline style is blocked by CSP.
+    const tsColor = hdr.querySelector('.ts-color');
+    if(tsColor) tsColor.style.background = getGroupColor(k);
     hdr.onclick=function(){collapsedSections[taskGroupBy+':'+k]=!isCol;renderTaskList();saveState('user')};
     list.appendChild(hdr);
     if(!isCol){
@@ -1982,12 +1985,15 @@ function renderChecklist(taskId){
   const done=items.filter(c=>c.done).length;
   const pct=items.length?Math.round((done/items.length)*100):0;
   el.innerHTML=`
-    ${items.length?`<div class="cl-progress"><div class="cl-bar" style="width:${pct}%"></div><span class="cl-pct">${pct}%</span></div>`:''}
+    ${items.length?`<div class="cl-progress"><div class="cl-bar"></div><span class="cl-pct">${pct}%</span></div>`:''}
     <div class="cl-items" id="clItems"></div>
     <div class="cl-add">
       <input class="cl-input" id="clInput" placeholder="Add item…" data-onkeydown="checklistAddOnEnter" data-task-id="${taskId}">
       <button class="btn-ghost btn-sm" data-action="checklistAddFromButton" data-task-id="${taskId}">+</button>
     </div>`;
+  // Dynamic progress width via DOM API.
+  const clBar = el.querySelector('.cl-bar');
+  if(clBar) clBar.style.width = pct + '%';
   const list=document.getElementById('clItems');
   items.forEach(item=>{
     const d=document.createElement('div');d.className='cl-item'+(item.done?' cl-done':'');

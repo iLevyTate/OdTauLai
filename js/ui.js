@@ -50,6 +50,11 @@ function renderCalendar(visibleTasks){
   }
   html+='</div></div>';
   container.innerHTML=html;
+  // Apply per-event border-left-color via DOM API — inline style is blocked
+  // by CSP, but el.style.X writes are allowed.
+  container.querySelectorAll('.cal-feed-event[data-feed-color]').forEach(el=>{
+    el.style.borderLeftColor = el.dataset.feedColor;
+  });
   // Click handlers - click day background opens new task with that date, click task opens detail
   container.querySelectorAll('.cal-task').forEach(el=>{
     el.onclick=function(e){e.stopPropagation();const tid=parseInt(el.dataset.taskId);if(tid)openTaskDetail(tid)};
@@ -92,7 +97,7 @@ function renderCalTasks(arr, isoDate){
       const mk = uid && typeof createTaskFromCalEvent === 'function'
         ? `<button type="button" class="cal-ev-mk-task" title="Create task from this event" aria-label="Create task from event" data-action="createTaskFromCalEvent" data-args='${JSON.stringify([String(ev.feedId), uid])}'>+Task</button>`
         : '';
-      return `<div class="cal-task cal-feed-event" style="border-left-color:${sanitizeListColor(ev.feedColor)}" title="${esc(ev.feedLabel)}: ${esc(ev.title)}${ev.time?' at '+esc(String(ev.time)):''}${ev.location?' — '+esc(ev.location):''}">`
+      return `<div class="cal-task cal-feed-event" data-feed-color="${escAttr(sanitizeListColor(ev.feedColor))}" title="${esc(ev.feedLabel)}: ${esc(ev.title)}${ev.time?' at '+esc(String(ev.time)):''}${ev.location?' — '+esc(ev.location):''}">`
         + mk
         + (ev.time ? `<span class="cal-feed-time">${esc(ev.time)}</span> ` : '')
         + esc(ev.title)
@@ -190,7 +195,7 @@ function _applyCmdkMode(){
     if(cmdkMode==='ask'){reply.hidden=false;if(!reply.childNodes.length){const h=document.createElement('div');h.className='cmdk-ask-hint';h.textContent='Press Enter to run on-device. No auto-apply — you’ll preview every proposed change.';reply.appendChild(h)}}
     else{reply.hidden=true;reply.textContent=''}
   }
-  if(results)results.style.display=cmdkMode==='ask'?'none':'';
+  if(results)results.hidden = !!(cmdkMode==='ask');
   _syncCmdkFindHint();
 }
 function _cmdkFootFindText(){
@@ -332,7 +337,7 @@ function syncAskPromoChip(){
   if(!chip)return;
   const ready=typeof isGenReady==='function'&&isGenReady();
   const allowed=!(typeof cfg==='object'&&cfg&&cfg.askPromoHidden);
-  chip.style.display=(ready&&allowed)?'':'none';
+  chip.hidden = !((ready&&allowed));
 }
 /** User-toggle to surface the inline Ask promo. Persists to cfg. */
 function showAskPromo(){
@@ -362,7 +367,7 @@ function renderCmdK(){
   }
   if(cmdkMode==='ask'){
     const results=gid('cmdkResults');
-    if(results)results.style.display='none';
+    if(results)results.hidden = true;
     _cmdkFootAskText();
     return;
   }
@@ -489,7 +494,7 @@ function cmdkKeydown(e){
 }
 function _blockingOverlaysForCmdK(){
   const wno = document.getElementById('whatNextOverlay');
-  if(wno && wno.style.display !== 'none' && wno.style.display !== '') return true;
+  if(wno && !wno.hidden) return true;
   const tm = document.getElementById('taskModal');
   if(tm && tm.classList.contains('open')) return true;
   if(document.getElementById('bulkImportModal')?.classList.contains('open')) return true;
@@ -943,7 +948,7 @@ function openTaskDetail(id){
   const bdWrap = gid('mdBreakdownWrap');
   if(bdWrap){
     const llmOn = typeof isGenReady === 'function' && isGenReady();
-    bdWrap.style.display = llmOn ? '' : 'none';
+    bdWrap.hidden = !(llmOn);
     const bdAcc = gid('mdBreakdownAccordion');
     if(bdAcc) bdAcc.classList.remove('open');
     const bdBody = gid('mdBreakdownBody');
@@ -970,10 +975,10 @@ function renderMdSessions(t){
   const entries = (t && Array.isArray(t.sessionEntries)) ? t.sessionEntries : [];
   if(!entries.length){
     el.replaceChildren();
-    if(wrap) wrap.style.display = 'none';
+    if(wrap) wrap.hidden = true;
     return;
   }
-  if(wrap) wrap.style.display = '';
+  if(wrap) wrap.hidden = false;
   el.replaceChildren();
   // Show newest first, cap at 30 visible to keep the modal scrollable.
   const recent = entries.slice(-30).reverse();
@@ -1235,9 +1240,9 @@ function toggleTaskDone(){
 
 function renderBanner(){
   const b=gid('banner');
-  if(!activeTaskId){b.style.display='none';return}
-  const t=findTask(activeTaskId);if(!t){b.style.display='none';return}
-  b.style.display='block';
+  if(!activeTaskId){b.hidden = true;return}
+  const t=findTask(activeTaskId);if(!t){b.hidden = true;return}
+  b.hidden = false;
   const path=getTaskPath(activeTaskId);
   const bel=gid('bannerTask');
   if(path.length>1){
@@ -1342,10 +1347,10 @@ function showAppPrompt(label, defaultValue, opts){
     _appPromptMultiline=useMulti;
     lb.textContent=label;
     if(lb.setAttribute) lb.setAttribute('for', useMulti ? 'appPromptTextarea' : 'appPromptInput');
-    if(single){ single.style.display=useMulti?'none':''; single.value=defaultValue||'' }
+    if(single){ single.hidden = !!(useMulti); single.value=defaultValue||'' }
     if(multi){
       if(multi._appPromptKd){ multi.removeEventListener('keydown', multi._appPromptKd); multi._appPromptKd=null }
-      multi.style.display=useMulti?'':'none';
+      multi.hidden = !(useMulti);
       multi.value=defaultValue||'';
       if(useMulti){
         multi._appPromptKd=_appPromptTextareaKeydown;
@@ -1372,7 +1377,7 @@ document.addEventListener('keydown',e=>{
   const cmdk=gid('cmdkOverlay');
   if(cmdk&&cmdk.classList.contains('open')){ e.preventDefault(); if(typeof closeCmdK==='function') closeCmdK(); return }
   const wno=gid('whatNextOverlay');
-  if(wno&&wno.style.display!=='none'){ e.preventDefault(); if(typeof closeWhatNext==='function') closeWhatNext(); return }
+  if(wno && !wno.hidden){ e.preventDefault(); if(typeof closeWhatNext==='function') closeWhatNext(); return }
   const bulk=gid('bulkImportModal');
   if(bulk&&bulk.classList.contains('open')){ e.preventDefault(); if(typeof closeBulkImportModal==='function') closeBulkImportModal(); return }
   const tm=gid('taskModal');
@@ -1382,14 +1387,14 @@ document.addEventListener('keydown',e=>{
 // ========== LOG ==========
 function addLog(name,durSec,type){timeLog.unshift({id:++logIdCtr,name,durSec,type,time:timeNow()});renderLog();saveState('user')}
 function removeLog(id){timeLog=timeLog.filter(l=>l.id!==id);renderLog();saveState('user')}
-function renderLog(){const list=gid('logList');list.querySelectorAll('.log-item').forEach(e=>e.remove());if(!timeLog.length){gid('logEmpty').style.display='';return}gid('logEmpty').style.display='none';timeLog.slice(0,40).forEach(l=>{const d=document.createElement('div');d.className='log-item';const col=l.type==='work'?'var(--work)':l.type==='short'?'var(--short)':l.type==='quick'?'#48b5e0':'var(--long)';const lid=l.id||0;const dot=document.createElement('div');dot.className='log-dot';dot.style.background=col;d.appendChild(dot);const nm=document.createElement('span');nm.className='log-name';nm.textContent=l.name;d.appendChild(nm);const dur=document.createElement('span');dur.className='log-dur';dur.textContent=fmtShort(l.durSec);d.appendChild(dur);const tm=document.createElement('span');tm.className='log-time';tm.textContent=l.time;d.appendChild(tm);if(lid){const del=document.createElement('button');del.className='log-del';del.title='Remove';del.textContent='�';del.onclick=function(){removeLog(lid)};d.appendChild(del)}list.appendChild(d)})}
+function renderLog(){const list=gid('logList');list.querySelectorAll('.log-item').forEach(e=>e.remove());if(!timeLog.length){gid('logEmpty').hidden = false;return}gid('logEmpty').hidden = true;timeLog.slice(0,40).forEach(l=>{const d=document.createElement('div');d.className='log-item';const col=l.type==='work'?'var(--work)':l.type==='short'?'var(--short)':l.type==='quick'?'#48b5e0':'var(--long)';const lid=l.id||0;const dot=document.createElement('div');dot.className='log-dot';dot.style.background=col;d.appendChild(dot);const nm=document.createElement('span');nm.className='log-name';nm.textContent=l.name;d.appendChild(nm);const dur=document.createElement('span');dur.className='log-dur';dur.textContent=fmtShort(l.durSec);d.appendChild(dur);const tm=document.createElement('span');tm.className='log-time';tm.textContent=l.time;d.appendChild(tm);if(lid){const del=document.createElement('button');del.className='log-del';del.title='Remove';del.textContent='�';del.onclick=function(){removeLog(lid)};d.appendChild(del)}list.appendChild(d)})}
 function clearLog(){timeLog=[];renderLog();saveState('user')}
 
 // ========== TAB NAVIGATION ==========
 function showTab(tab){
   if(typeof closeCmdK==='function')closeCmdK();
   activeTab=tab;
-  document.querySelectorAll('[data-tab]').forEach(el=>{el.style.display=el.dataset.tab===tab?'':'none'});
+  document.querySelectorAll('[data-tab]').forEach(el=>{el.hidden = !(el.dataset.tab===tab)});
   document.querySelectorAll('.nav-tab').forEach(el=>{
     const on=el.dataset.navtab===tab;
     el.classList.toggle('active',on);
@@ -1475,7 +1480,7 @@ function renderStatsByArea(){
   if(!host) return;
   const todays = timeLog.filter(l => l && l.type === 'work' && l.durSec > 0);
   host.replaceChildren();
-  if(!todays.length){ host.style.display='none'; return; }
+  if(!todays.length){ host.hidden = true; return; }
   const byCat = new Map();
   for(const l of todays){
     const t = tasks.find(x => x.name === l.name);
@@ -1483,8 +1488,8 @@ function renderStatsByArea(){
     byCat.set(cat, (byCat.get(cat) || 0) + l.durSec);
   }
   const total = Array.from(byCat.values()).reduce((a,b)=>a+b,0);
-  if(!total){ host.style.display='none'; return; }
-  host.style.display='';
+  if(!total){ host.hidden = true; return; }
+  host.hidden = false;
   const cats = (typeof getCategoryDefs === 'function') ? getCategoryDefs() : [];
   const labelFor = id => { const c = cats.find(c => c.id === id); return c ? c.label : id; };
   const colorFor = id => { const c = cats.find(c => c.id === id); return (c && c.accent) || 'var(--accent)'; };
@@ -1566,7 +1571,7 @@ function renderFocusStreak(){
     grid.appendChild(cell);
   }
   host.appendChild(grid);
-  host.style.display = '';
+  host.hidden = false;
 }
 window.renderFocusStreak = renderFocusStreak;
 
@@ -1582,7 +1587,7 @@ function showSessionNotePrompt(taskId){
     card.parentNode.insertBefore(host, card.nextSibling);
   }
   const t = (typeof findTask === 'function') ? findTask(taskId) : null;
-  if(!t){ host.style.display = 'none'; return; }
+  if(!t){ host.hidden = true; return; }
   host.replaceChildren();
   const lbl = document.createElement('label'); lbl.className = 'snp-lbl';
   lbl.appendChild(document.createTextNode('Quick note about your session on '));
@@ -1603,9 +1608,9 @@ function showSessionNotePrompt(taskId){
   offLbl.append(offCb, document.createTextNode(' Stop asking'));
   actions.append(saveBtn, skipBtn, offLbl);
   host.appendChild(actions);
-  host.style.display = '';
+  host.hidden = false;
   try{ input.focus(); }catch(_){}
-  const close = () => { host.style.display = 'none'; };
+  const close = () => { host.hidden = true; };
   saveBtn.onclick = function(){
     const text = (input.value || '').trim();
     if(text){
@@ -1655,11 +1660,11 @@ function _briefCard(title){
     document.body.appendChild(host);
   }
   host.replaceChildren();
-  host.style.display = '';
+  host.hidden = false;
   const head = document.createElement('div'); head.className = 'aibc-head';
   const h = document.createElement('span'); h.className = 'aibc-title'; h.textContent = title;
   const close = document.createElement('button'); close.type = 'button'; close.className = 'aibc-close';
-  close.textContent = '✕'; close.onclick = function(){ host.style.display = 'none'; };
+  close.textContent = '✕'; close.onclick = function(){ host.hidden = true; };
   head.append(h, close);
   host.appendChild(head);
   const body = document.createElement('div'); body.className = 'aibc-body';
@@ -1799,12 +1804,12 @@ window.suggestDueDateForTask = suggestDueDateForTask;
 function renderTodayCalEvents(){
   const host = gid('todayCalEvents');
   if(!host) return;
-  if(typeof smartView !== 'string' || smartView !== 'today'){ host.style.display = 'none'; host.replaceChildren(); return; }
-  if(typeof getCalFeedEventsForDate !== 'function'){ host.style.display = 'none'; return; }
+  if(typeof smartView !== 'string' || smartView !== 'today'){ host.hidden = true; host.replaceChildren(); return; }
+  if(typeof getCalFeedEventsForDate !== 'function'){ host.hidden = true; return; }
   const todayK = (typeof todayKey === 'function') ? todayKey() : (new Date()).toISOString().slice(0,10);
   let evs = [];
   try{ evs = getCalFeedEventsForDate(todayK) || []; }catch(_){}
-  if(!evs.length){ host.style.display = 'none'; host.replaceChildren(); return; }
+  if(!evs.length){ host.hidden = true; host.replaceChildren(); return; }
   evs.sort((a,b)=>{
     if(a.allDay && !b.allDay) return -1;
     if(!a.allDay && b.allDay) return 1;
@@ -1837,7 +1842,7 @@ function renderTodayCalEvents(){
     wrap.appendChild(row);
   });
   host.appendChild(wrap);
-  host.style.display = '';
+  host.hidden = false;
 }
 window.renderTodayCalEvents = renderTodayCalEvents;
 
@@ -1930,7 +1935,7 @@ function renderBulkBar(){
     bar.className = 'bulk-bar';
     document.body.appendChild(bar);
   }
-  if(!isBulkMode() || _bulkSelectedIds.size === 0){ bar.style.display = 'none'; return; }
+  if(!isBulkMode() || _bulkSelectedIds.size === 0){ bar.hidden = true; return; }
   bar.replaceChildren();
   const count = document.createElement('span');
   count.className = 'bulk-count';
@@ -1968,7 +1973,7 @@ function renderBulkBar(){
   const close = mkBtn('✕', toggleBulkMode);
   close.className = 'bulk-btn bulk-close';
   bar.appendChild(close);
-  bar.style.display = '';
+  bar.hidden = false;
 }
 window.toggleBulkMode = toggleBulkMode;
 window.bulkToggleSelect = bulkToggleSelect;
@@ -2002,11 +2007,11 @@ function showManagePerspectivesCard(){
     document.body.appendChild(host);
   }
   host.replaceChildren();
-  host.style.display = '';
+  host.hidden = false;
   const head = document.createElement('div'); head.className = 'aibc-head';
   const h = document.createElement('span'); h.className = 'aibc-title'; h.textContent = 'Saved views';
   const close = document.createElement('button'); close.type = 'button'; close.className = 'aibc-close';
-  close.textContent = '✕'; close.onclick = function(){ host.style.display = 'none'; };
+  close.textContent = '✕'; close.onclick = function(){ host.hidden = true; };
   head.append(h, close);
   host.appendChild(head);
   const body = document.createElement('div'); body.className = 'aibc-body';
@@ -2022,7 +2027,7 @@ function showManagePerspectivesCard(){
       apply.className = 'bulk-btn';
       apply.style.flex = '1';
       apply.textContent = p.name;
-      apply.onclick = function(){ applyPerspective(p.name); host.style.display = 'none'; };
+      apply.onclick = function(){ applyPerspective(p.name); host.hidden = true; };
       const del = document.createElement('button');
       del.type = 'button';
       del.className = 'bulk-btn bulk-close';
@@ -2098,7 +2103,7 @@ function _voiceSupport(){
 function showVoiceButtonIfSupported(){
   const btn = gid('taskVoiceBtn');
   if(!btn) return;
-  btn.style.display = _voiceSupport() ? '' : 'none';
+  btn.hidden = !(_voiceSupport());
 }
 function toggleVoiceInput(){
   if(_voiceActive){ stopVoiceInput(); return; }
@@ -2174,8 +2179,8 @@ document.addEventListener('keydown', function(e){
   const open = candidates.find(el => {
     const cls = el.classList;
     if(cls.contains('open')) return true;
-    if(el.style && el.style.display && el.style.display !== 'none' && cls.contains('cmdk-overlay')) return true;
-    if(el.id === 'aiBriefCard' && el.style.display !== 'none') return true;
+    if(!el.hidden && cls.contains('cmdk-overlay')) return true;
+    if(el.id === 'aiBriefCard' && !el.hidden) return true;
     return false;
   });
   if(!open) return;
@@ -2278,10 +2283,10 @@ function renderTaskActivity(t){
   }
   host.replaceChildren();
   if(!Array.isArray(t.activity) || !t.activity.length){
-    host.style.display = 'none';
+    host.hidden = true;
     return;
   }
-  host.style.display = '';
+  host.hidden = false;
   const head = document.createElement('div');
   head.className = 'md-activity-head';
   head.textContent = 'Activity (last ' + Math.min(t.activity.length, 8) + ')';
@@ -2347,7 +2352,7 @@ function toggleDescriptionRender(){
   if(!ta) return;
   if(view){
     view.remove();
-    ta.style.display = '';
+    ta.hidden = false;
     const btn = document.getElementById('mdDescToggle');
     if(btn) btn.textContent = 'Render markdown';
     return;
@@ -2356,7 +2361,7 @@ function toggleDescriptionRender(){
   view.id = 'mdDescView';
   view.className = 'md-desc-view';
   _safeWriteMarkdown(view, ta.value || '');
-  ta.style.display = 'none';
+  ta.hidden = true;
   ta.parentNode.insertBefore(view, ta.nextSibling);
   const btn = document.getElementById('mdDescToggle');
   if(btn) btn.textContent = 'Edit';
@@ -2438,8 +2443,8 @@ function renderEstimateVariance(t){
   host.replaceChildren();
   const est = parseInt(t.estimateMin, 10) || 0;
   const act = Math.round((t.totalSec || 0) / 60);
-  if(est <= 0 || act <= 0){ host.style.display = 'none'; return; }
-  host.style.display = '';
+  if(est <= 0 || act <= 0){ host.hidden = true; return; }
+  host.hidden = false;
   const ratio = act / est;
   const pct = Math.round((ratio - 1) * 100);
   const label = document.createElement('span');

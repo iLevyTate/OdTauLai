@@ -95,7 +95,7 @@ function setTimerSub(sub){
   if(!allowed.includes(sub)) sub='pomo';
   cfg.timerSub=sub;
   document.querySelectorAll('.timer-sub-panel[data-timer-sub]').forEach(el=>{
-    el.style.display=el.getAttribute('data-timer-sub')===sub?'':'none';
+    el.hidden = !(el.getAttribute('data-timer-sub')===sub);
   });
   document.querySelectorAll('.timer-sub-btn').forEach(b=>{
     b.classList.toggle('active',b.getAttribute('data-sub')===sub);
@@ -405,8 +405,8 @@ function renderQuickTimers(){
   const list=gid('qtList');
   gid('qtCount').textContent=quickTimers.length+' timer'+(quickTimers.length!==1?'s':'');
   list.querySelectorAll('.qt-item').forEach(e=>e.remove());
-  if(!quickTimers.length){gid('qtEmpty').style.display='';return}
-  gid('qtEmpty').style.display='none';
+  if(!quickTimers.length){gid('qtEmpty').hidden = false;return}
+  gid('qtEmpty').hidden = true;
   quickTimers.forEach(qt=>{
     let rem=qt.remaining;
     if(qt.running){const el=Math.floor((Date.now()-qt.startedAt)/1000);rem=Math.max(0,qt.pausedRem-el)}
@@ -478,8 +478,8 @@ function renderIntList(){
   const list=gid('intList');
   gid('intCount').textContent=intervals.length+' set';
   list.querySelectorAll('.iitem').forEach(e=>e.remove());
-  if(!intervals.length){gid('intEmpty').style.display='';return}
-  gid('intEmpty').style.display='none';
+  if(!intervals.length){gid('intEmpty').hidden = false;return}
+  gid('intEmpty').hidden = true;
   intervals.forEach(iv=>{
     const tgt=iv.target||'pomo';
     const {fires,next,active}=_intFireState(iv);

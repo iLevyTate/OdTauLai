@@ -70,9 +70,9 @@ function updateOnlineStatus(){
   const el = document.getElementById('onlineStatus');
   if(!el) return;
   if(navigator.onLine){
-    el.style.display = 'none';
+    el.hidden = true;
   } else {
-    el.style.display = '';
+    el.hidden = false;
     el.textContent = '● Offline — tasks work, sync paused';
   }
 }
@@ -349,7 +349,7 @@ window.calFeedModeFromButton = function(){
 };
 window.hideWorkerInstructions = function(){
   const el = document.getElementById('workerInstructions');
-  if(el) el.style.display = 'none';
+  if(el) el.hidden = true;
 };
 
 // ========== INIT ==========
@@ -453,7 +453,7 @@ setTimeout(() => {
       dismiss.setAttribute('aria-label', 'Dismiss');
       dismiss.onclick = () => banner.remove();
       banner.append(lead, dismiss);
-      banner.style.display = '';
+      banner.hidden = false;
       setTimeout(() => { if(banner.parentNode) banner.remove(); }, 8000);
     };
     if(document.readyState === 'complete') setTimeout(after, 200);
@@ -514,7 +514,7 @@ setSmartView(smartView);
 if(typeof hydrateIcons==='function') hydrateIcons();
 updateMiniTimer();
 // Apply saved active tab without scroll
-document.querySelectorAll('[data-tab]').forEach(el=>{el.style.display=el.dataset.tab===activeTab?'':'none'});
+document.querySelectorAll('[data-tab]').forEach(el=>{el.hidden = !(el.dataset.tab===activeTab)});
 document.querySelectorAll('.nav-tab').forEach(el=>{const on=el.dataset.navtab===activeTab;el.classList.toggle('active',on);el.setAttribute('aria-selected',on?'true':'false')});
 // Nav-tab clicks are routed by the document-level dispatcher in
 // js/event-delegation.js via data-action="showTab" data-arg="<tab>".
@@ -640,7 +640,7 @@ setTimeout(() => {
   const pct = document.getElementById('intelProgressPct');
   const txt = document.getElementById('intelProgressTxt');
   const retry = document.getElementById('intelRetryBtn');
-  if(w) w.style.display = '';
+  if(w) w.hidden = false;
   const onProgress = (typeof _makeProgressAggregator === 'function')
     ? _makeProgressAggregator((v, ev) => {
         if(bar) bar.style.width = v + '%';
@@ -657,15 +657,15 @@ setTimeout(() => {
         if(typeof syncHeaderAIChip === 'function') syncHeaderAIChip('loading', v + '%');
       });
   intelLoad(onProgress).then(async () => {
-    if(w) w.style.display = 'none';
-    if(retry) retry.style.display = 'none';
+    if(w) w.hidden = true;
+    if(retry) retry.hidden = true;
     if(typeof embedStore !== 'undefined' && embedStore.migrateEmbedRuntimeIfNeeded){
       try{
         const mig = await embedStore.migrateEmbedRuntimeIfNeeded();
         if(mig && mig.didPurge){
           const ban = document.getElementById('embedReindexBanner');
           if(ban){
-            ban.style.display = '';
+            ban.hidden = false;
             ban.setAttribute('role', 'status');
             ban.setAttribute('aria-live', 'polite');
             ban.textContent = 'Re-indexing tasks…';
@@ -677,7 +677,7 @@ setTimeout(() => {
           const b2 = document.getElementById('embedReindexBanner');
           if(b2){
             b2.textContent = 'Re-indexing complete.';
-            setTimeout(() => { if(b2) b2.style.display = 'none'; }, 4000);
+            setTimeout(() => { if(b2) b2.hidden = true; }, 4000);
           }
         }
       }catch(e){ console.warn('[app] embed migration', e); }
@@ -692,8 +692,8 @@ setTimeout(() => {
     if(typeof maybeShowEnhanceBtn === 'function') maybeShowEnhanceBtn();
     if(typeof scheduleIntelDupRefresh === 'function') scheduleIntelDupRefresh();
   }).catch(() => {
-    if(w) w.style.display = 'none';
-    if(retry) retry.style.display = '';
+    if(w) w.hidden = true;
+    if(retry) retry.hidden = false;
     if(typeof syncHeaderAIChip === 'function') syncHeaderAIChip('error', 'Load failed');
     if(typeof showExportToast === 'function') showExportToast('Embedding model failed to load — semantic features unavailable');
     if(typeof renderAIPanel === 'function') renderAIPanel();

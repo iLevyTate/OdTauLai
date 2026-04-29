@@ -632,7 +632,7 @@ function renderCalFeedsPanel(){
           : `<span class="calfeed-status calfeed-status--ok">✓ ${evCount} events · ${lastSync}</span>`;
         return `
           <div class="calfeed-row" data-id="${escAttr(f.id)}">
-            <span class="calfeed-dot" style="background:${typeof sanitizeListColor==='function'?sanitizeListColor(f.color):'#888'}"></span>
+            <span class="calfeed-dot"></span>
             <div class="calfeed-info">
               <div class="calfeed-label">${esc(f.label)}</div>
               ${status}
@@ -667,7 +667,7 @@ function renderCalFeedsPanel(){
           <p class="calfeed-hint">Most private option. Download the .ics file from Google Calendar (Settings → your calendar → Export calendar), unzip, open in text editor, paste contents.</p>
         </div>
 
-        <div id="cfUrlMode" class="calfeed-mode-panel" style="display:none">
+        <div id="cfUrlMode" class="calfeed-mode-panel" hidden>
           <label class="calfeed-lbl">Secret iCal URL</label>
           <input type="url" id="cfUrl" class="calfeed-in" placeholder="https://calendar.google.com/calendar/ical/.../private-.../basic.ics">
 
@@ -690,7 +690,7 @@ function renderCalFeedsPanel(){
       <span class="calfeed-hint">Auto-refresh runs on app open. Events cache locally for offline use.</span>
     </div>
 
-    <div id="workerInstructions" class="calfeed-worker-panel" style="display:none">
+    <div id="workerInstructions" class="calfeed-worker-panel" hidden>
       <button class="btn-ghost btn-sm calfeed-worker-close" data-action="hideWorkerInstructions">×</button>
       <h4 class="mt-0">Deploy a personal CORS proxy (free, 15 min)</h4>
       <ol class="calfeed-worker-list">
@@ -741,6 +741,11 @@ function renderCalFeedsPanel(){
     if(ref) ref.addEventListener('click', () => refreshCalFeed(id));
     const rm = row.querySelector('.calfeed-rm');
     if(rm) rm.addEventListener('click', () => confirmRemoveCalFeed(id));
+    // Apply per-feed dot color via DOM API (allowed by CSP) since the
+    // value is dynamic and can't sit in an inline style attribute.
+    const dot = row.querySelector('.calfeed-dot');
+    const f = _calFeeds.feeds.find(x => x.id === id);
+    if(dot && f) dot.style.background = (typeof sanitizeListColor === 'function') ? sanitizeListColor(f.color) : '#888';
   });
 
   // G-19: hide-past toggle, prepended via DOM (not template literal) so it
@@ -771,13 +776,13 @@ window.toggleCalHidePast = toggleCalHidePast;
 function calFeedMode(btn, mode){
   document.querySelectorAll('.calfeed-mode').forEach(b=>b.classList.remove('active'));
   btn.classList.add('active');
-  document.getElementById('cfPasteMode').style.display = mode === 'paste' ? '' : 'none';
-  document.getElementById('cfUrlMode').style.display = mode === 'url' ? '' : 'none';
+  document.getElementById('cfPasteMode').hidden = !(mode === 'paste');
+  document.getElementById('cfUrlMode').hidden = !(mode === 'url');
 }
 
 function showWorkerInstructions(){
   const el = document.getElementById('workerInstructions');
-  if(el) el.style.display = '';
+  if(el) el.hidden = false;
 }
 
 // Form submission handler

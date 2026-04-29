@@ -3229,10 +3229,11 @@ body:has(.offline-indicator:not([style*="display:none"])){ padding-top:30px; }
   .header-icon-btn--cmdk .cmdk-btn-txt{display:inline}
   .header-icon-btn--cmdk .cmdk-btn-kbd{display:none}
 }
-/* Standardize the `hidden` attribute (HTML5). UA default already does this
-   but explicit makes intent clear. No !important — JS togglers that set
-   `el.style.display = 'block'` should still be able to override. */
-[hidden]{display:none}
+/* HTML5 `hidden` attribute. !important ensures this wins over class rules
+   that set display: flex / grid. JS toggles via el.hidden = false to show:
+   once the attribute is removed the rule no longer matches, and any
+   class-based display rule (or el.style.display assignment) takes effect. */
+[hidden]{display:none !important}
 .track-banner{
   width:100%;max-width:720px;margin:-4px 0 12px;padding:8px 12px;
   background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-md);
