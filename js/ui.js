@@ -130,6 +130,7 @@ let _cmdkLastReply=null;
 let _cmdkPrevFocus=null;
 function openCmdK(opts){
   const openAsk = opts && opts.ask === true;
+  const prefill = (opts && typeof opts.prefill === 'string') ? opts.prefill : '';
   const ov=gid('cmdkOverlay');if(!ov)return;
   _cmdkPrevFocus=document.activeElement;
   ov.classList.add('open');
@@ -137,10 +138,13 @@ function openCmdK(opts){
   _cmdkAskHistoryIdx=-1;_cmdkLastReply=null;_cmdkAskBusy=false;
   _applyCmdkMode();
   const inp=gid('cmdkInput');
-  if(inp)inp.value='';
+  if(inp)inp.value=prefill;
   cmdkActiveIdx=0;renderCmdK();
   if(inp){
     try{inp.focus({preventScroll:true})}catch(_){inp.focus()}
+    if(prefill){
+      try{inp.setSelectionRange(prefill.length, prefill.length)}catch(_){}
+    }
   }
   if(typeof installTabTrap==='function') installTabTrap(ov);
 }

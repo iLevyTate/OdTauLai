@@ -306,6 +306,22 @@ window.syncQaHintVisibility=syncQaHintVisibility;
  */
 function onTaskInputKey(event){
   if(event.key==='Enter' && !event.isComposing){
+    const inp=event.target;
+    const raw=(inp && typeof inp.value==='string') ? inp.value : '';
+    // README documents `?` prefix as one of three Ask entry points (alongside
+    // Cmd/Ctrl+K and the Ask toggle). Route directly into the palette in Ask
+    // mode with the rest of the line pre-filled — user still confirms with
+    // Enter inside the palette, so an accidental `?` typo is recoverable.
+    if(raw.trim().charAt(0)==='?' && typeof openCmdK==='function'){
+      event.preventDefault();
+      const rest=raw.trim().slice(1).trim();
+      if(inp) inp.value='';
+      window._smartAddPreview=null;
+      if(typeof clearLiveParsePreview==='function') clearLiveParsePreview();
+      if(typeof maybeShowEnhanceBtn==='function') maybeShowEnhanceBtn();
+      openCmdK({ask:true, prefill:rest});
+      return;
+    }
     if(window._smartAddPreview) applySmartAddAndSubmit();
     else addTask();
     return;
