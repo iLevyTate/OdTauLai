@@ -114,10 +114,18 @@ function renderCtrls(){
   else{c.appendChild(_mkBtn('btn btn-primary','Resume',resumeTimer));c.appendChild(_mkBtn('btn-skip','Skip ▸',skipPhase));c.appendChild(_mkBtn('btn-danger','Reset',resetAll))}
 }
 
+// Sync ring visual state with running status (for pulse animation)
+function _syncRingState(){
+  const wrap=document.querySelector('.ring-wrap');
+  if(!wrap)return;
+  wrap.classList.toggle('ring-running',running);
+  ['work','short','long'].forEach(p=>wrap.classList.toggle(p,phase===p));
+}
+
 // ========== TIMER ==========
-function startTimer(){if(totalDuration<=0)return;running=true;finished=false;startedAt=Date.now();pausedRemaining=remaining;fireCounts={};if(cfg.linkTask&&phase==='work'&&activeTaskId)taskStartedAt=Date.now();clearInterval(tickId);tickId=setInterval(tick,250);reqNotifPerm();schedulePhaseAudio();startKeepalive();renderCtrls();if(typeof _updateActiveTaskTickSchedule==='function')_updateActiveTaskTickSchedule();}
-function pauseTimer(){running=false;const el=Math.floor((Date.now()-startedAt)/1000);pausedRemaining=Math.max(0,pausedRemaining-el);remaining=pausedRemaining;if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000);taskStartedAt=null}}cancelScheduledAudio();maybeStopKeepalive();renderCtrls();renderTaskList();saveState('user');if(typeof _updateActiveTaskTickSchedule==='function')_updateActiveTaskTickSchedule();}
-function resumeTimer(){running=true;startedAt=Date.now();if(cfg.linkTask&&phase==='work'&&activeTaskId)taskStartedAt=Date.now();clearInterval(tickId);tickId=setInterval(tick,250);schedulePhaseAudio();startKeepalive();renderCtrls();if(typeof _updateActiveTaskTickSchedule==='function')_updateActiveTaskTickSchedule();}
+function startTimer(){if(totalDuration<=0)return;running=true;finished=false;startedAt=Date.now();pausedRemaining=remaining;fireCounts={};if(cfg.linkTask&&phase==='work'&&activeTaskId)taskStartedAt=Date.now();clearInterval(tickId);tickId=setInterval(tick,250);reqNotifPerm();schedulePhaseAudio();startKeepalive();renderCtrls();_syncRingState();if(typeof _updateActiveTaskTickSchedule==='function')_updateActiveTaskTickSchedule();}
+function pauseTimer(){running=false;const el=Math.floor((Date.now()-startedAt)/1000);pausedRemaining=Math.max(0,pausedRemaining-el);remaining=pausedRemaining;if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000);taskStartedAt=null}}cancelScheduledAudio();maybeStopKeepalive();renderCtrls();_syncRingState();renderTaskList();saveState('user');if(typeof _updateActiveTaskTickSchedule==='function')_updateActiveTaskTickSchedule();}
+function resumeTimer(){running=true;startedAt=Date.now();if(cfg.linkTask&&phase==='work'&&activeTaskId)taskStartedAt=Date.now();clearInterval(tickId);tickId=setInterval(tick,250);schedulePhaseAudio();startKeepalive();renderCtrls();_syncRingState();if(typeof _updateActiveTaskTickSchedule==='function')_updateActiveTaskTickSchedule();}
 function tick(){
   if(!running)return;
   const el=Math.floor((Date.now()-startedAt)/1000);remaining=Math.max(0,pausedRemaining-el);
@@ -158,7 +166,7 @@ function onPhaseComplete(){
   // System notification for backgrounded tabs
   notify(getPL(phase)+' Complete',phase==='work'?'Great work! Time for a break.':'Break over — back to focus.');
   gid('display').className='ring-time done';gid('display').textContent='00:00';gid('phaseLabel').textContent=getPL(phase)+' Complete';
-  renderStats();renderCtrls();renderTaskList();updateTitle();saveState('auto');
+  renderStats();renderCtrls();_syncRingState();renderTaskList();updateTitle();saveState('auto');
   if(phase==='work'&&cfg.autoBreak)setTimeout(()=>{if(finished)advancePhase()},1500);
   else if(phase!=='work'&&cfg.autoWork)setTimeout(()=>{if(finished)advancePhase()},1500)
 }

@@ -511,6 +511,23 @@ document.addEventListener('keydown',e=>{
   }
 });
 
+// Keyboard shortcut: Ctrl+Z / Cmd+Z — undo the last action via the action toast button
+document.addEventListener('keydown',(e)=>{
+  if((e.ctrlKey||e.metaKey)&&e.key==='z'&&!e.shiftKey){
+    const active=document.activeElement;
+    const tag=active?active.tagName.toLowerCase():'';
+    // Don't intercept undo in text inputs/textareas (they handle Ctrl+Z natively)
+    if(tag!=='input'&&tag!=='textarea'&&tag!=='select'){
+      const toast=document.getElementById('actionToast');
+      const btn=toast?.querySelector('.action-toast-btn');
+      if(btn&&toast?.classList?.contains('show')){
+        e.preventDefault();
+        btn.click();
+      }
+    }
+  }
+},true);
+
 // ========== THEME TOGGLE ==========
 // Manual toggle wins over OS preference: once the user picks a theme it sticks
 // across reloads (persisted in localStorage). The OS auto-apply only takes
@@ -1491,6 +1508,24 @@ function showTab(tab){
   updateMiniTimer();
   saveState('auto');
 }
+
+// Mark panels as "entered" after initial animation so repeat visits don't re-trigger
+(function(){
+  let _enteredTabs = {};
+  const _origShowTab = window.showTab;
+  window.showTab = function(tab) {
+    _origShowTab(tab);
+    if(!_enteredTabs[tab]) {
+      const panel = document.querySelector('[data-tab="' + tab + '"]:not([hidden])');
+      if(panel) {
+        setTimeout(() => {
+          panel.setAttribute('data-panel-entered', '1');
+          _enteredTabs[tab] = true;
+        }, 360);
+      }
+    }
+  };
+})();
 
 // ========== FLOATING MINI TIMER ==========
 // Show the mini-timer when not on the Timer (focus) tab. Click it to jump to Timer.

@@ -88,7 +88,7 @@ window.announceTaskAdd=announceTaskAdd;
  *   showActionToast('Task added', 'Undo', () => removeTask(id), 5000);
  */
 function showActionToast(label, actionLabel, actionFn, ms){
-  const ttl = (typeof ms === 'number' && ms > 0) ? ms : 5000;
+  const ttl = (typeof ms === 'number' && ms > 0) ? ms : 8000;
   let host = document.getElementById('actionToast');
   if(!host){
     host = document.createElement('div');
@@ -101,10 +101,17 @@ function showActionToast(label, actionLabel, actionFn, ms){
   // Reset any in-flight toast so the new one supersedes it cleanly.
   host.replaceChildren();
   clearTimeout(host._tm);
+  clearInterval(host._prog);
+
+  // Header row: label + button
+  const hdr = document.createElement('div');
+  hdr.className = 'action-toast-header';
+
   const lbl = document.createElement('span');
   lbl.className = 'action-toast-lbl';
   lbl.textContent = label;
-  host.appendChild(lbl);
+  hdr.appendChild(lbl);
+
   if(actionLabel && typeof actionFn === 'function'){
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -113,11 +120,43 @@ function showActionToast(label, actionLabel, actionFn, ms){
     btn.onclick = () => {
       try { actionFn(); } catch(_) {}
       host.classList.remove('show');
+      clearInterval(host._prog);
     };
-    host.appendChild(btn);
+    hdr.appendChild(btn);
   }
+  host.appendChild(hdr);
+
+  // Ctrl+Z hint (only if undo button exists)
+  if(actionLabel && typeof actionFn === 'function'){
+    const kbdHint = document.createElement('span');
+    kbdHint.className = 'action-toast-kbd-hint';
+    kbdHint.textContent = 'Also: Ctrl+Z';
+    host.appendChild(kbdHint);
+  }
+
+  // Progress bar
+  const prog = document.createElement('div');
+  prog.className = 'action-toast-progress';
+  const progBar = document.createElement('div');
+  progBar.className = 'action-toast-progress-bar';
+  progBar.style.width = '100%';
+  prog.appendChild(progBar);
+  host.appendChild(prog);
+
+  // Animate progress bar
+  const startTime = Date.now();
+  host._prog = setInterval(() => {
+    const elapsed = Date.now() - startTime;
+    const pct = Math.max(0, 100 - (elapsed / ttl) * 100);
+    progBar.style.width = pct + '%';
+    if(pct <= 0) clearInterval(host._prog);
+  }, 80);
+
   // Force a frame so the .show transition kicks in.
   requestAnimationFrame(() => host.classList.add('show'));
-  host._tm = setTimeout(() => host.classList.remove('show'), ttl);
+  host._tm = setTimeout(() => {
+    host.classList.remove('show');
+    clearInterval(host._prog);
+  }, ttl);
 }
 window.showActionToast = showActionToast;
