@@ -1,5 +1,11 @@
 # Changelog
 
+## v46 — 2026-04-30
+
+- **Ask (`?` prefix)**: completed the third Ask-LLM entry point promised in README — typing `? archive everything done last week` (or any line beginning with `?`) into the main task input now opens the command palette in Ask mode with the rest of the line pre-filled and the caret at end-of-text. Previously only Cmd/Ctrl+K and the Ask toggle chip routed to Ask; the `?` prefix in the main input fell through to `addTask()` and created a literal task. Smart-add preview is cleared during the routing so it can't intercept the next Enter (`js/tasks.js` `onTaskInputKey`, `js/ui.js` `openCmdK` gains `opts.prefill`).
+- **Regression test**: `tests/tasks-input-ask-prefix.test.mjs` (+7 tests) locks the routing contract — `?` precedence over smart-add preview, mid-string `?` stays literal, bare `?` opens Ask with empty prefill, and plain Enter still falls through to addTask. Suite is now 188 / 188.
+- Service worker cache rotated to `odtaulai-v46`.
+
 ## v32 — 2026-04-21
 
 - **Icons**: Vector-first brand assets — `icons/icon.svg` (master squircle), `icons/icon-maskable.svg` (full-bleed, ~80% safe zone for Android adaptive icons), and `icons/icon-small.svg` (thick strokes for 16–32 px). PNGs (`favicon-32`, `apple-touch-icon`, `icon-192`, `icon-512`, `icon-maskable-512`) are generated via `npm run build:icons` (`scripts/build-icons.mjs`, `@resvg/resvg-js`). Navy radial background matches theme `#0a1320`; removed stale unused `icons/logo-full-256.png`.
