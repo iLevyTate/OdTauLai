@@ -39,6 +39,44 @@
     } catch(e) {}
   }
 
+  // Listen for SW precache-incomplete reports. The previous behavior was
+  // silent: a missing asset meant offline mode broke later with no clue.
+  // Now we surface a small dismissable banner above the install affordance.
+  try{
+    const swStatusCh = new BroadcastChannel('odtaulai-sw-status');
+    swStatusCh.addEventListener('message', (ev) => {
+      if(!ev.data || ev.data.type !== 'precache-incomplete') return;
+      const failed = Array.isArray(ev.data.failed) ? ev.data.failed : [];
+      if(!failed.length) return;
+      // Best-effort UI surface — the system info section is the natural home.
+      const host = document.getElementById('systemInfo') || document.body;
+      let banner = document.getElementById('swPrecacheBanner');
+      if(!banner){
+        banner = document.createElement('div');
+        banner.id = 'swPrecacheBanner';
+        banner.className = 'sw-precache-banner';
+        banner.setAttribute('role', 'status');
+        host.parentNode ? host.parentNode.insertBefore(banner, host) : document.body.appendChild(banner);
+      }
+      banner.replaceChildren();
+      const msg = document.createElement('span');
+      msg.textContent = '⚠ Offline cache incomplete — ' + failed.length + ' of ' + (ev.data.total || '?') + ' assets failed to load. App will work online; offline mode may be partial.';
+      banner.appendChild(msg);
+      const refresh = document.createElement('button');
+      refresh.type = 'button';
+      refresh.className = 'sw-precache-banner-btn';
+      refresh.textContent = 'Reload';
+      refresh.onclick = () => location.reload();
+      banner.appendChild(refresh);
+      const close = document.createElement('button');
+      close.type = 'button';
+      close.className = 'sw-precache-banner-btn sw-precache-banner-btn--ghost';
+      close.textContent = 'Dismiss';
+      close.onclick = () => banner.remove();
+      banner.appendChild(close);
+    });
+  }catch(_){ /* BroadcastChannel unavailable — fail silent */ }
+
   // Register external service worker when served via http(s) — preferred path.
   // Falls back to inline blob SW only if sw.js isn't reachable.
   if ('serviceWorker' in navigator && !isFileProtocol) {
@@ -143,25 +181,91 @@
     }
   }
 
+  // Render an inline help panel (instead of alert) below the install button
+  // when no native prompt is available. Platform-detected steps; tappable
+  // close button. Reusable across iOS / Android / desktop fallback paths.
+  function _renderInstallHelpPanel(steps, title){
+    const btn = document.getElementById('installBtn');
+    if(!btn) return;
+    let panel = document.getElementById('installHelpPanel');
+    if(!panel){
+      panel = document.createElement('div');
+      panel.id = 'installHelpPanel';
+      panel.className = 'install-help-panel';
+      panel.setAttribute('role', 'region');
+      panel.setAttribute('aria-label', 'How to install');
+      btn.parentNode.insertBefore(panel, btn.nextSibling);
+    }
+    if(!panel.hidden && panel.dataset.title === title){
+      // Toggle off when re-clicked.
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+    panel.dataset.title = title;
+    panel.replaceChildren();
+    const h = document.createElement('div');
+    h.className = 'install-help-title';
+    h.textContent = title;
+    panel.appendChild(h);
+    const ol = document.createElement('ol');
+    ol.className = 'install-help-steps';
+    steps.forEach(s => { const li = document.createElement('li'); li.textContent = s; ol.appendChild(li); });
+    panel.appendChild(ol);
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'install-help-close';
+    close.textContent = 'Got it';
+    close.onclick = () => { panel.hidden = true; };
+    panel.appendChild(close);
+  }
+
   window.installPWA = function(){
     if (window._deferredInstallPrompt) {
       window._deferredInstallPrompt.prompt();
       window._deferredInstallPrompt.userChoice.then(() => {
+        // Whatever the user chose, the prompt is consumed and can't be
+        // re-triggered until the browser re-fires beforeinstallprompt.
+        // Hiding the button keeps the affordance honest.
         window._deferredInstallPrompt = null;
         const btn = document.getElementById('installBtn');
         if (btn) btn.hidden = true;
+        const help = document.getElementById('installHelpPanel');
+        if (help) help.hidden = true;
       });
       return;
     }
     if (_isIOS()) {
-      alert('Apple does not provide an “Install” API on iPhone/iPad (unlike Android).\n\nUse Safari:\n1. Tap Share (square with arrow).\n2. Tap “Add to Home Screen”.\n3. Tap Add — OdTauLai opens fullscreen like an app.\n\nChrome on iOS uses the same WebKit engine; if Add to Home Screen is missing, try Safari.');
+      _renderInstallHelpPanel(
+        [
+          'Tap the Share button (square with up-arrow) at the bottom of Safari.',
+          'Scroll and tap “Add to Home Screen”.',
+          'Tap Add — OdTauLai opens fullscreen like a native app.',
+          'Note: iOS doesn’t provide a one-tap install API. Chrome on iOS uses the same WebKit; if “Add to Home Screen” is missing, switch to Safari.',
+        ],
+        'Install on iPhone / iPad'
+      );
       return;
     }
     if (/Android/i.test(navigator.userAgent || '')) {
-      alert('On Android (Chrome):\n1. Open the menu (⋮).\n2. Tap “Install app” or “Add to Home screen”.\n\nIf you do not see it:\n• Use HTTPS or localhost (required).\n• Use the site for a moment first — Chrome shows install when engagement criteria are met.');
+      _renderInstallHelpPanel(
+        [
+          'Open Chrome’s menu (⋮ in the top-right).',
+          'Tap “Install app” or “Add to Home screen”.',
+          'If you don’t see it: the site must be on HTTPS or localhost, and Chrome shows install only after a bit of engagement.',
+        ],
+        'Install on Android'
+      );
       return;
     }
-    alert('To install this app:\n\n• Chrome / Edge: tap ⊕ Install in the address bar, or Menu → Save and share → Install page as app.\n• Site must be served over HTTPS or localhost (not file://).\n\niOS: Share → Add to Home Screen.');
+    _renderInstallHelpPanel(
+      [
+        'In Chrome / Edge, click the ⊕ Install icon in the address bar, or use the menu → Save and share → Install page as app.',
+        'The site must be served over HTTPS or localhost (file:// won’t work).',
+        'On iOS Safari: Share → Add to Home Screen.',
+      ],
+      'Install OdTauLai'
+    );
   };
 
   window.refreshPWAInstallUI = _syncInstallButtonForPlatform;

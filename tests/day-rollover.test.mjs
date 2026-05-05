@@ -85,3 +85,18 @@ test('buildYesterdaySnapshot tolerates an empty/missing state', () => {
   const b = f(null, {});
   assert.equal(b.date, null);
 });
+
+// Static contract guards on _handleDayRollover. A previous version reset
+// pomosInCycle on rollover and let tick() finish on today, splitting the
+// in-flight session and bumping users out of mid-cycle. The fix calls
+// pauseTimer before archiving and removes the pomosInCycle=0 reset.
+test('_handleDayRollover preserves pomosInCycle across midnight', () => {
+  const src = readFileSync(join(root, 'js', 'app.js'), 'utf8');
+  const start = src.indexOf('function _handleDayRollover');
+  assert.ok(start > 0, '_handleDayRollover not found');
+  const body = src.slice(start, start + 2200);
+  assert.ok(!/pomosInCycle\s*=\s*0/.test(body), 'rollover must not reset pomosInCycle');
+  assert.match(body, /pauseTimer\(\)/, 'rollover must call pauseTimer when running');
+  assert.match(body, /totalPomos\s*=\s*0/, 'rollover must reset totalPomos');
+  assert.match(body, /totalBreaks\s*=\s*0/, 'rollover must reset totalBreaks');
+});

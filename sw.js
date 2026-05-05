@@ -44,10 +44,32 @@ const ASSETS = [
 
 self.addEventListener('install', e => {
   e.waitUntil(
-    caches.open(CACHE_NAME)
-      .then(c => c.addAll(ASSETS).catch(err => {
-        console.warn('[sw] precache incomplete', err && err.message ? err.message : err);
-      }))
+    caches.open(CACHE_NAME).then(async c => {
+      // Add assets one-by-one so a single missing file (e.g. a renamed icon)
+      // doesn't fail the entire precache. Track which URLs failed so the
+      // page can report them — silent install was the previous behavior and
+      // it produced the "app suddenly broken offline" class of bug.
+      const failed = [];
+      await Promise.all(ASSETS.map(url =>
+        fetch(url, { cache: 'reload' })
+          .then(res => {
+            if(!res || !res.ok) throw new Error('HTTP ' + (res && res.status));
+            return c.put(url, res);
+          })
+          .catch(err => { failed.push({ url, err: String(err && err.message || err) }); })
+      ));
+      if(failed.length){
+        console.warn('[sw] precache incomplete:', failed);
+        // Notify the page via BroadcastChannel; pwa.js subscribes and shows
+        // a banner so the user knows offline mode may be partial. Wrapped
+        // because not every browser context has BroadcastChannel.
+        try{
+          const ch = new BroadcastChannel('odtaulai-sw-status');
+          ch.postMessage({ type: 'precache-incomplete', failed, total: ASSETS.length });
+          ch.close();
+        }catch(_){}
+      }
+    })
   );
 });
 
