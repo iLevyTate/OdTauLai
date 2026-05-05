@@ -561,9 +561,15 @@ function _handleDayRollover(){
   try{
     const today = (typeof todayKey === 'function') ? todayKey() : null;
     if(!today || !_lastKnownDate || today === _lastKnownDate) return;
-    // Build a yesterday-stamped snapshot from the live in-memory state and
-    // archive it. storage.js also sets stupind_archived_<date> so other tabs
-    // skip duplicate archive entries for the same calendar day.
+    // If a Pomodoro is mid-flight when the calendar flips over, the existing
+    // tick() will land its phase completion on today and split the session
+    // across two archive entries. Pause first so pauseTimer's accounting
+    // folds elapsed time into yesterday's totals and the linked task, then
+    // archive a coherent yesterday.
+    const wasRunning = (typeof running !== 'undefined') && running;
+    if(wasRunning && typeof pauseTimer === 'function'){
+      try{ pauseTimer(); }catch(e){ console.warn('[app] pauseTimer at rollover', e); }
+    }
     const yesterday = (typeof buildYesterdaySnapshot === 'function')
       ? buildYesterdaySnapshot(_lastKnownDate, { totalPomos, totalBreaks, totalFocusSec, goals, tasks, timeLog, sessionHistory })
       : { date: _lastKnownDate, totalPomos, totalBreaks, totalFocusSec, goals, tasks, timeLog, sessionHistory };
@@ -573,14 +579,20 @@ function _handleDayRollover(){
         archiveDay(yesterday);
       }
     }catch(e){ console.warn('[app] archiveDay at rollover', e); }
-    totalPomos=0; totalBreaks=0; totalFocusSec=0; pomosInCycle=0;
+    totalPomos=0; totalBreaks=0; totalFocusSec=0;
     sessionHistory=[]; timeLog=[];
+    // Note: pomosInCycle deliberately NOT reset — preserving the user's
+    // cycle position across midnight is the right call for someone who was
+    // mid-pomo-3-of-4 at 23:59. Day-bounded counters reset; cycle does not.
     _lastKnownDate = today;
     if(typeof saveState==='function') saveState('auto');
     if(typeof renderAll==='function') renderAll();
     if(typeof renderLog==='function') renderLog();
     if(typeof renderStats==='function') renderStats();
     if(typeof renderArchive==='function') renderArchive();
+    if(wasRunning && typeof showExportToast === 'function'){
+      showExportToast('Crossed midnight — yesterday archived. Cycle progress preserved; press Resume to continue.');
+    }
   }catch(e){ console.warn('[app] day rollover', e); }
 }
 // Check every minute while the tab is alive…

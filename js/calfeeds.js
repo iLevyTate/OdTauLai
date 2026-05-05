@@ -429,6 +429,29 @@ function _alldayRangeCovers(ev, isoDate){
   }catch(e){ return false; }
 }
 
+// Return all feeds whose last sync attempt errored. Used by the calendar
+// view to surface "events may be stale" inline instead of leaving the user
+// with cached data and a silent failure in the settings panel.
+function getFailedCalFeeds(){
+  _loadCalFeeds();
+  return (_calFeeds.feeds || []).filter(f => f && f.error);
+}
+// Retry every failed feed in parallel. Triggered from the calendar's inline
+// "Retry sync" button. Refreshes the calendar render via renderTaskList()
+// so the alert vanishes once a feed recovers.
+async function retryFailedCalFeeds(){
+  _loadCalFeeds();
+  const failed = (_calFeeds.feeds || []).filter(f => f && f.error);
+  if(!failed.length) return;
+  await Promise.all(failed.map(f => syncCalFeed(f.id).catch(()=>{})));
+  if(typeof renderTaskList === 'function') renderTaskList();
+  if(typeof renderCalFeedsPanel === 'function') renderCalFeedsPanel();
+}
+if(typeof window !== 'undefined'){
+  window.getFailedCalFeeds = getFailedCalFeeds;
+  window.retryFailedCalFeeds = retryFailedCalFeeds;
+}
+
 function getCalFeedEventsForDate(isoDate){
   _loadCalFeeds();
   const out = [];

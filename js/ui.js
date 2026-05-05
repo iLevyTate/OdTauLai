@@ -20,7 +20,22 @@ function renderCalendar(visibleTasks){
   // Group tasks by due date
   const byDate={};
   visibleTasks.forEach(t=>{if(t.dueDate){(byDate[t.dueDate]=byDate[t.dueDate]||[]).push(t)}});
-  let html='<div class="calendar"><div class="cal-head">'
+  // Surface feed sync failures inline at the top of the calendar so users
+  // realise their displayed events may be stale. Falls back silently when
+  // the calfeed module isn't loaded (e.g. in test sandbox).
+  let feedAlertHtml='';
+  if(typeof getFailedCalFeeds === 'function'){
+    const failed = getFailedCalFeeds();
+    if(failed && failed.length){
+      const names = failed.map(f => esc(f.label || 'Feed')).slice(0, 3).join(', ');
+      const more = failed.length > 3 ? ' +' + (failed.length - 3) : '';
+      feedAlertHtml = '<div class="cal-feed-alert" role="status">'
+        + '<span class="cal-feed-alert-msg">⚠ ' + names + more + ' — sync failed; events may be stale</span>'
+        + '<button type="button" class="cal-feed-alert-btn" data-action="retryFailedCalFeeds">Retry sync</button>'
+        + '</div>';
+    }
+  }
+  let html=feedAlertHtml+'<div class="calendar"><div class="cal-head">'
     +'<button class="cal-nav" data-action="calNav" data-args="[-1]" title="Previous month">‹</button>'
     +'<div class="cal-title">'+monthName+'</div>'
     +'<button class="cal-today-btn" data-action="calToday">Today</button>'
@@ -221,6 +236,37 @@ function _cmdkFootAskText(){
     foot.textContent=mod+'/Ctrl+K · Enter = ask · Esc · '+(genReady?'Model ready':'Model not loaded');
   }
 }
+// Append a collapsible "Rejected ops" panel to the existing Ask reply DOM.
+// validateOps returns each rejection with a reason; surfacing them lets the
+// user see exactly why a proposed change didn't apply (e.g. unknown id,
+// invalid status, mismatched arg shape) instead of just a "(N rejected)"
+// count. textContent only — the LLM op shape is not trusted as HTML.
+function _renderAskRejected(rejected){
+  const reply = gid('cmdkAskReply');
+  if(!reply) return;
+  const det = document.createElement('details');
+  det.className = 'cmdk-ask-rejected';
+  const summ = document.createElement('summary');
+  summ.textContent = rejected.length + ' rejected — show reasons';
+  det.appendChild(summ);
+  const list = document.createElement('ul');
+  list.className = 'cmdk-ask-rejected-list';
+  rejected.slice(0, 25).forEach(r => {
+    const li = document.createElement('li');
+    const op = (r && r.op) || (r && r.name) || 'op';
+    const why = (r && (r.reason || r.error || r.message)) || 'invalid';
+    li.textContent = String(op) + ' — ' + String(why);
+    list.appendChild(li);
+  });
+  if(rejected.length > 25){
+    const more = document.createElement('li');
+    more.className = 'cmdk-ask-rejected-more';
+    more.textContent = '+ ' + (rejected.length - 25) + ' more';
+    list.appendChild(more);
+  }
+  det.appendChild(list);
+  reply.appendChild(det);
+}
 // Render a free-form prose answer from the on-device model. Kept separate
 // from _renderAskStatus so it can host longer multi-line replies (chat-style)
 // without being mistaken for an error or "done" toast. textContent only —
@@ -360,7 +406,13 @@ async function cmdkAskSubmit(){
     const extra=res.rejected&&res.rejected.length?` (${res.rejected.length} rejected)`:'';
     const rrd=res.readRounds>0?` ${res.readRounds} read step${res.readRounds!==1?'s':''} ·`:'';
     _renderAskStatus('done',`Proposed ${n} change${n!==1?'s':''}${extra}.${rrd} Opened Tools — review before applying.`);
-    setTimeout(closeCmdK,650);
+    // Show why each rejected op was dropped so the user can adjust their
+    // request. validateOps already returns the reasons; previously they
+    // were summarized as a count and the detail vanished.
+    if(res.rejected && res.rejected.length){
+      _renderAskRejected(res.rejected);
+    }
+    setTimeout(closeCmdK,res.rejected && res.rejected.length ? 2400 : 650);
   }catch(e){
     _renderAskStatus('error',(e&&e.message)||'Error');
   }finally{
@@ -942,10 +994,30 @@ function renderBoard(visibleTasks){
   })
 }
 
-// Task Detail Modal — chips mutate the live task object while open. _taskModalSnapshot
-// is a deep clone taken on open; closeTaskDetail() restores it on Cancel/Escape/backdrop
-// unless skipRevert (Save, Delete).
+// Task Detail Modal — chips commit immediately to the live task and persist
+// via saveState. _taskModalSnapshot is a deep clone taken on open so close-
+// without-save can revert the *text fields* (name, description, dates, url,
+// notes) — but chip-driven fields (priority, effort, energy, category, type,
+// recur, tags, status) are explicitly re-snapshotted on each commit so they
+// are NOT reverted on cancel. This matches the user's mental model: clicking
+// a chip looks like an immediate action, so it should be one. Typing into a
+// textarea and bailing should still discard, hence the per-field handling.
 let _taskModalSnapshot=null;
+const TASK_MODAL_CHIP_FIELDS = ['priority','effort','energyLevel','category','type','recur','tags','status','completedAt','dueDate'];
+// Commit a chip-driven mutation: persist via saveState, refresh the chip
+// portion of the snapshot so closeTaskDetail's revert pass can't undo it,
+// re-render the task list (so chips on the row update live), and pulse the
+// existing save-indicator pill so the user gets visible "saved" feedback.
+function _commitChipChange(t){
+  if(!t || !_taskModalSnapshot) return;
+  TASK_MODAL_CHIP_FIELDS.forEach(f => {
+    const v = t[f];
+    _taskModalSnapshot[f] = (v && typeof v === 'object') ? JSON.parse(JSON.stringify(v)) : v;
+  });
+  if(typeof saveState === 'function') saveState('user');
+  if(typeof renderTaskList === 'function') renderTaskList();
+  if(typeof showSaveIndicator === 'function') showSaveIndicator();
+}
 function openTaskDetail(id){
   const t=findTask(id);if(!t)return;
   _taskModalSnapshot=JSON.parse(JSON.stringify(t));
@@ -968,6 +1040,7 @@ function openTaskDetail(id){
         t.type=key;
         Array.from(tChips.children).forEach(c=>c.classList.remove('active'));
         b.classList.add('active');
+        _commitChipChange(t);
       };
       tChips.appendChild(b);
     });
@@ -1000,9 +1073,12 @@ function openTaskDetail(id){
         gid('mdTracked').textContent=fmtHMS(getRolledUpTime(t.id))+' · '+getRolledUpSessions(t.id)+' sessions';
       }else{
         t.status=st;
+        if(st==='done' && !t.completedAt && typeof stampCompletion === 'function') t.completedAt = stampCompletion();
+        if(st!=='done') t.completedAt = null;
         gid('mdCheckbox').classList.toggle('checked',st==='done');gid('mdCheckbox').textContent=st==='done'?'✓':'';
         [...sChips.children].forEach(c=>c.classList.remove('active'));b.classList.add('active');
       }
+      _commitChipChange(t);
     };
     sChips.appendChild(b)
   });
@@ -1012,7 +1088,7 @@ function openTaskDetail(id){
     const b=document.createElement('button');b.className='mfield-chip-btn'+((t.priority||'none')===pr?' active':'');
     b.style.color=pr!=='none'?({urgent:'#c0392b',high:'#e67e22',normal:'#3d8bcc',low:'#7f8c8d'}[pr]):'';
     b.textContent=PRIORITIES[pr].label;
-    b.onclick=function(){t.priority=pr;[...pChips.children].forEach(c=>c.classList.remove('active'));b.classList.add('active')};
+    b.onclick=function(){t.priority=pr;[...pChips.children].forEach(c=>c.classList.remove('active'));b.classList.add('active');_commitChipChange(t)};
     pChips.appendChild(b)
   });
   // Effort chips
@@ -1020,7 +1096,7 @@ function openTaskDetail(id){
   [['xs','XS'],['s','S'],['m','M'],['l','L'],['xl','XL']].forEach(([key,lbl])=>{
     const b=document.createElement('button');b.className='mfield-chip-btn'+((t.effort||null)===key?' active':'');
     b.textContent=lbl;b.title={xs:'Extra small (~15min)',s:'Small (~1hr)',m:'Medium (~half day)',l:'Large (~full day)',xl:'Extra large (multi-day)'}[key];
-    b.onclick=function(){t.effort=t.effort===key?null:key;[...eChips.children].forEach(c=>c.classList.remove('active'));if(t.effort===key||!t.effort){}else b.classList.add('active');renderEffortChips(t,eChips)};
+    b.onclick=function(){t.effort=t.effort===key?null:key;[...eChips.children].forEach(c=>c.classList.remove('active'));if(t.effort===key||!t.effort){}else b.classList.add('active');renderEffortChips(t,eChips);_commitChipChange(t)};
     eChips.appendChild(b)
   });
   // Energy chips
@@ -1028,7 +1104,7 @@ function openTaskDetail(id){
   [['high','High energy'],['low','Low energy']].forEach(([key,lbl])=>{
     const b=document.createElement('button');b.className='mfield-chip-btn'+((t.energyLevel||null)===key?' active':'');
     b.textContent=lbl;
-    b.onclick=function(){t.energyLevel=t.energyLevel===key?null:key;[...enChips.children].forEach(c=>c.classList.remove('active'));if(t.energyLevel)b.classList.add('active')};
+    b.onclick=function(){t.energyLevel=t.energyLevel===key?null:key;[...enChips.children].forEach(c=>c.classList.remove('active'));if(t.energyLevel)b.classList.add('active');_commitChipChange(t)};
     enChips.appendChild(b)
   });
   // Recurrence — calendar-relative (daily/weekly/...) plus C-5 after-completion variants
@@ -1048,8 +1124,7 @@ function openTaskDetail(id){
         // First-time recurrence on a task with no due date defaults to today
         // so it actually shows up in Today / Habits views immediately.
         if(t.recur && !t.dueDate && typeof todayISO === 'function') t.dueDate = todayISO();
-        if(typeof saveState === 'function') saveState('user');
-        if(typeof renderTaskList === 'function') renderTaskList();
+        _commitChipChange(t);
       };
       rc.appendChild(b)
     })
@@ -1072,7 +1147,7 @@ function openTaskDetail(id){
       const tip=((cdef.label||key)+(cdef.focus?': '+(cdef.focus):'')+((cdef.examples&&cdef.examples.length)?' · e.g. '+cdef.examples.slice(0,3).join(', '):'')).slice(0,280);
       if(tip) b.setAttribute('title', tip);
     }
-    b.onclick=function(){t.category=t.category===key?null:key;[...catChips.children].forEach(c=>c.classList.remove('active'));if(t.category)b.classList.add('active')};
+    b.onclick=function(){t.category=t.category===key?null:key;[...catChips.children].forEach(c=>c.classList.remove('active'));if(t.category)b.classList.add('active');_commitChipChange(t)};
     catChips.appendChild(b)
   });
   const vn=gid('mdValuesNote');if(vn)vn.textContent=t.valuesNote||'';
@@ -1232,8 +1307,8 @@ function renderTagsEditor(id){
   inp.onkeydown=function(e){if(e.key==='Enter'&&inp.value.trim()){addTag(id,inp.value.trim());inp.value=''}};
   ed.appendChild(inp)
 }
-function addTag(id,tag){const t=findTask(id);if(!t)return;if(!t.tags)t.tags=[];if(!t.tags.includes(tag))t.tags.push(tag);renderTagsEditor(id)}
-function removeTag(id,idx){const t=findTask(id);if(!t||!t.tags)return;t.tags.splice(idx,1);renderTagsEditor(id)}
+function addTag(id,tag){const t=findTask(id);if(!t)return;if(!t.tags)t.tags=[];if(!t.tags.includes(tag))t.tags.push(tag);renderTagsEditor(id);_commitChipChange(t)}
+function removeTag(id,idx){const t=findTask(id);if(!t||!t.tags)return;t.tags.splice(idx,1);renderTagsEditor(id);_commitChipChange(t)}
 
 let _taskModalPrevFocus=null;
 function _taskModalTabTrap(e){
@@ -1247,8 +1322,40 @@ function _taskModalTabTrap(e){
   if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}
   else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}
 }
-function closeTaskDetail(opts){
+// Snapshot-vs-form-fields divergence check. Only the *text/number* form
+// fields gate the discard-confirm — chip edits already committed via
+// _commitChipChange aren't considered "unsaved". Returns true when the user
+// has typed or changed an input that would be lost on revert.
+function _taskModalHasUnsavedTextEdits(){
+  if(!_taskModalSnapshot) return false;
+  const pairs = [
+    ['mdName',         _taskModalSnapshot.name         || ''],
+    ['mdDesc',         _taskModalSnapshot.description  || ''],
+    ['mdUrl',          _taskModalSnapshot.url          || ''],
+    ['mdCompletionNote', _taskModalSnapshot.completionNote || ''],
+    ['mdDue',          _taskModalSnapshot.dueDate      || ''],
+    ['mdStartDate',    _taskModalSnapshot.startDate    || ''],
+    ['mdSnoozeUntil',  _taskModalSnapshot.hiddenUntil  || ''],
+    ['mdRemindAt',     _taskModalSnapshot.remindAt     || ''],
+    ['mdEstimate',     String(_taskModalSnapshot.estimateMin ?? 0)],
+  ];
+  for(const [id, baseline] of pairs){
+    const el = gid(id);
+    if(!el) continue;
+    const cur = (id === 'mdName' || id === 'mdUrl' || id === 'mdCompletionNote') ? (el.value||'').trim() : (el.value||'');
+    const base = (id === 'mdName' || id === 'mdUrl' || id === 'mdCompletionNote') ? String(baseline).trim() : String(baseline);
+    if(cur !== base) return true;
+  }
+  return false;
+}
+async function closeTaskDetail(opts){
   const skipRevert=opts&&opts.skipRevert;
+  // Confirm before discarding text/number edits the user typed but didn't
+  // save. Chip edits aren't gated by this — they were already committed.
+  if(!skipRevert && _taskModalSnapshot && _taskModalHasUnsavedTextEdits() && typeof showAppConfirm === 'function'){
+    const ok = await showAppConfirm('Discard unsaved text edits?');
+    if(!ok) return;
+  }
   if(!skipRevert&&_taskModalSnapshot&&editingTaskId!=null){
     const id=editingTaskId,si=tasks.findIndex(x=>x.id===id);
     if(si>=0){
@@ -1385,6 +1492,7 @@ function toggleTaskDone(){
   }else{t.status='done';t.completedAt=stampCompletion();gid('mdCheckbox').classList.add('checked');gid('mdCheckbox').textContent='✓'}
   // Update status chips
   const sChips=gid('mdStatusChips');if(sChips){[...sChips.children].forEach((c,i)=>c.classList.toggle('active',STATUS_ORDER[i]===t.status))}
+  _commitChipChange(t);
 }
 
 function renderBanner(){
