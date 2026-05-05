@@ -458,7 +458,16 @@ function _applyState(s){
     if(Array.isArray(s.tasks)){
       tasks     = s.tasks;
       taskIdCtr = _int(s.taskIdCtr, 0);
-      activeTaskId  = null;
+      // Restore the active-task linkage if the saved id still resolves to a
+      // real task. Without this, mobile tab-discard (common on iOS Safari /
+      // low-RAM Android after minimizing) silently drops the tracking
+      // indicator on reload — the user sees their "currently tracking" task
+      // disappear even though the elapsed time was already folded into the
+      // task's totalSec at save. taskStartedAt stays null because we don't
+      // auto-resume the timer; the user resumes via Start/Resume which will
+      // re-anchor it.
+      const savedActive = (typeof s.activeTaskId === 'number' || typeof s.activeTaskId === 'string') ? s.activeTaskId : null;
+      activeTaskId  = savedActive && tasks.some(t => t && t.id === savedActive) ? savedActive : null;
       taskStartedAt = null;
       // Seed the change-detection snapshot so the first post-load save
       // doesn't treat every existing task as "just modified" — which would

@@ -125,6 +125,25 @@ function refreshParetoTopSet(){
 function isParetoTop(id){return _paretoTopSet.has(id)}
 function getImpactScore(id){return _paretoScoreMap.get(id)||0}
 
+// Create a recurring task from a one-click empty-state template. Mirrors the
+// shape of addTask() (push + index + save + render) without going through the
+// quick-add parser, so the template's recur value is the canonical source.
+function addHabitFromTemplate(name, recur){
+  if(!name || !recur) return;
+  ensureDefaultList();
+  const t = Object.assign(
+    { id: ++taskIdCtr, name, totalSec:0, sessions:0, created: timeNowFull(), parentId:null, collapsed:false },
+    defaultTaskProps(),
+    { recur, dueDate: todayISO() }
+  );
+  tasks.push(t);
+  if(typeof _taskIndexRegister === 'function') _taskIndexRegister(t);
+  if(typeof saveState === 'function') saveState('user');
+  if(typeof renderTaskList === 'function') renderTaskList();
+  if(typeof openTaskDetail === 'function') openTaskDetail(t.id);
+}
+window.addHabitFromTemplate = addHabitFromTemplate;
+
 function defaultTaskProps(){return{
   status:'open',priority:'none',tags:[],dueDate:null,startDate:null,
   estimateMin:0,description:'',starred:false,completedAt:null,
@@ -1783,7 +1802,15 @@ function renderSmartViewCounts(){
   set('svcStuck',visibleNow.filter(t=>typeof t.lastModified==='number'&&t.lastModified>0&&t.lastModified<stuckCutoff).length);
   set('svcSnoozed',activeNotDone.filter(t=>t.hiddenUntil&&t.hiddenUntil>today).length);
   set('svcCompleted',active.filter(t=>t.status==='done').length);
-  set('svcArchived',tasks.filter(t=>t.archived&&inList(t)).length);
+  const archivedCount=tasks.filter(t=>t.archived&&inList(t)).length;
+  set('svcArchived',archivedCount);
+  // Pin the Archive chip in the collapsed smart-views bar whenever the
+  // archive is non-empty — otherwise the only entry point is the All-views
+  // expander, which a first-time user has no reason to discover.
+  const archChip=document.querySelector('.sv-chip[data-view="archived"]');
+  if(archChip) archChip.classList.toggle('sv-chip-pinned', archivedCount>0);
+  const doneChip=document.querySelector('.sv-chip[data-view="completed"]');
+  if(doneChip) doneChip.classList.toggle('sv-chip-pinned', (active.filter(t=>t.status==='done').length)>0);
 }
 
 // Main render (list view)
@@ -1847,6 +1874,27 @@ function renderTaskList(){
       empty.appendChild(buildIcon('archive'));
       addBlock('task-empty-title', 'Archive is empty');
       addBlock('task-empty-help',  'Archived tasks will appear here when you archive them from the menu.');
+    } else if(smartView==='habits'){
+      empty.appendChild(buildIcon('refresh'));
+      addBlock('task-empty-title', 'No recurring tasks yet');
+      addBlock('task-empty-help',  'Habits and daily check-ins repeat on a schedule and reappear after each completion.');
+      const row=document.createElement('div');
+      row.className='habit-template-row';
+      const tmpls=[
+        {label:'+ Daily check-in',name:'Daily check-in',recur:'daily'},
+        {label:'+ Weekly review',name:'Weekly review',recur:'weekly'},
+        {label:'+ Weekday habit',name:'New weekday habit',recur:'weekdays'},
+      ];
+      tmpls.forEach(tm=>{
+        const b=document.createElement('button');
+        b.type='button';
+        b.className='first-task-btn habit-template-btn';
+        b.textContent=tm.label;
+        b.onclick=()=>{ if(typeof addHabitFromTemplate==='function') addHabitFromTemplate(tm.name,tm.recur); };
+        row.appendChild(b);
+      });
+      empty.appendChild(row);
+      addBlock('task-empty-tip', 'Or type any task with "daily" / "every weekday" / "weekly" — the parser will set recurrence automatically.');
     } else {
       const mod = /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform||'') ? '⌘' : 'Ctrl';
       empty.appendChild(buildIcon('sparkles'));

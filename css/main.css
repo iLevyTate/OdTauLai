@@ -543,7 +543,7 @@
   .smart-views{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px;padding:4px;background:#0a1320;border-radius:10px;border:1px solid #152238;align-items:center}
   /* Collapsed: only the active chip + toggle remain visible. Hides the rest
      instead of unmounting them so counts (#svcXxx) stay live & queryable. */
-  .smart-views--collapsed .sv-chip:not(.active){display:none}
+  .smart-views--collapsed .sv-chip:not(.active):not(.sv-chip-pinned){display:none}
   .sv-toggle{
     display:inline-flex;align-items:center;gap:4px;
     padding:7px 10px;border-radius:7px;border:1px dashed var(--border,#2a3a52);
@@ -3496,6 +3496,8 @@ body:has(.offline-indicator:not([style*="display:none"])){ padding-top:30px; }
 }
 .first-task-btn:hover{filter:brightness(1.08);background:var(--accent);color:var(--bg-0);border-color:var(--accent)}
 .first-task-btn:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.habit-template-row{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;margin:var(--space-3) 0}
+.habit-template-row .habit-template-btn{margin:0;padding:8px 14px;font-size:var(--fs-12)}
 
 /* Empty-state internal layout — class-driven so it stays theme-aware and
    token-consistent across views (no-tasks-yet / no-filter-match / archive). */
