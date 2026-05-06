@@ -433,7 +433,20 @@ async function cognitaskRun(query, opts){
         readRounds++;
         if(typeof opts.onReadRound === 'function'){ try{ opts.onReadRound({ results, readRounds }); }catch(e){} }
         messages.push({ role: 'assistant', content: raw });
-        const payload = JSON.stringify(results).slice(0, 6000);
+        // Bumped from 6 KB to 24 KB now that small on-device models handle
+        // ≥8K context comfortably. When truncation actually happens, append
+        // a literal note so the LLM is *aware* its view is partial and can
+        // ask for a narrower query in its next turn instead of confidently
+        // operating on incomplete data.
+        const TOOL_RESULT_LIMIT = 24000;
+        const _full = JSON.stringify(results);
+        let payload = _full;
+        if(_full.length > TOOL_RESULT_LIMIT){
+          const dropped = _full.length - TOOL_RESULT_LIMIT;
+          payload = _full.slice(0, TOOL_RESULT_LIMIT) +
+            '\n\n[Note: tool results truncated — ' + dropped + ' bytes dropped. Refine your query for full coverage.]';
+          console.info('[ask] tool-result truncated', { originalBytes: _full.length, keptBytes: TOOL_RESULT_LIMIT });
+        }
         messages.push({ role: 'user', content: 'Tool result:\n' + payload + '\n\nNow return ONLY a JSON array of write operations (or [] if no changes), using task ids from context.' });
         continue;
       }

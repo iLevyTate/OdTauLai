@@ -452,14 +452,38 @@ if(typeof window !== 'undefined') window._maybeCheckStorageQuota = _maybeCheckSt
 
 let _embedEnsureIds=new Set();
 let _embedEnsureT=null;
+// Track consecutive flush failures so we don't spam toasts. One coalesced
+// notification per burst, then escalate to console.error if the IDB write
+// path keeps breaking — at which point user data isn't being indexed for
+// semantic search and they deserve to know.
+let _embedFailureCount=0;
+let _embedFailureToastBurstId=null;
 function _flushEmbedEnsure(){
   _embedEnsureT=null;
   if(typeof embedStore === 'undefined' || !embedStore || !embedStore.ensure) return;
   const ids=[..._embedEnsureIds];
   _embedEnsureIds.clear();
+  // Track per-burst failures so we surface a single toast even if many
+  // tasks fail in the same flush.
+  let burstFailed=false;
   ids.forEach(id=>{
     const t=typeof findTask==='function'?findTask(id):null;
-    if(t) embedStore.ensure(t).catch(()=>{});
+    if(!t) return;
+    embedStore.ensure(t).catch(err => {
+      if(!burstFailed){
+        burstFailed=true;
+        _embedFailureCount += 1;
+        console.warn('[embed] ensure failed (burst', _embedFailureCount, ')', err);
+        if(_embedFailureCount <= 3 && typeof showActionToast === 'function'){
+          showActionToast('Semantic search index update failed', 'Retry', () => {
+            _embedFailureCount = 0;
+            _queueEmbedEnsure(ids);
+          }, 8000);
+        } else if(_embedFailureCount === 4){
+          console.error('[embed] ensure has failed 4+ times — semantic search will be stale until reload');
+        }
+      }
+    });
   });
   if(typeof scheduleIntelDupRefresh==='function') scheduleIntelDupRefresh();
 }
@@ -1356,6 +1380,12 @@ function _parseCSV(text){
 // Convert a row (from CSV parse OR JSON object) → task shape.
 // Handles both: CSV rows come in with array fields as semicolon-joined strings,
 // JSON rows come in with array fields as actual arrays.
+// Track per-row issues found during CSV import so the surrounding flow
+// can surface them. The previous shape silently dropped invalid blockedBy
+// references and filtered malformed values without telling the user.
+// Callers reset this on each import via _resetCsvRowWarnings().
+let _csvRowWarnings = [];
+function _resetCsvRowWarnings(){ _csvRowWarnings = []; }
 function _csvRowToTask(obj, existingTask){
   // Start from existing if we're updating, otherwise blank slate with defaults
   const base = existingTask ? {...existingTask} : {
@@ -1392,7 +1422,24 @@ function _csvRowToTask(obj, existingTask){
   if('sessions' in obj)        T.sessions = num(obj.sessions);
   if('tags' in obj)            T.tags = asArr(obj.tags).map(String);
   if('valuesAlignment' in obj) T.valuesAlignment = asArr(obj.valuesAlignment).map(String);
-  if('blockedBy' in obj)       T.blockedBy = asArr(obj.blockedBy).map(x => parseInt(x,10)).filter(x => x > 0);
+  if('blockedBy' in obj){
+    const _rawBlockedBy = asArr(obj.blockedBy);
+    const _parsedBlockedBy = _rawBlockedBy.map(x => parseInt(x,10));
+    T.blockedBy = _parsedBlockedBy.filter(x => x > 0);
+    // Surface dropped values (NaN, 0, negatives) so they're not invisible —
+    // forward references to IDs not yet imported are validated separately
+    // in the post-pass after all rows are merged.
+    if(T.blockedBy.length < _rawBlockedBy.length){
+      const dropped = _rawBlockedBy.filter((v, i) => !(_parsedBlockedBy[i] > 0));
+      if(dropped.length){
+        _csvRowWarnings.push({
+          rowName: T.name || ('id ' + (T.id ?? '?')),
+          field: 'blockedBy',
+          issue: 'invalid IDs dropped: ' + dropped.slice(0, 5).join(', '),
+        });
+      }
+    }
+  }
   if('description' in obj)     T.description = obj.description || '';
   if('url' in obj)             T.url = str(obj.url);
   if('completionNote' in obj)  T.completionNote = str(obj.completionNote);
@@ -1445,9 +1492,28 @@ function importTasks(file){
     if(report.added)   parts.push(report.added + ' added');
     if(report.updated) parts.push(report.updated + ' updated');
     if(report.skipped) parts.push(report.skipped + ' skipped');
-    const msg = 'Import complete: ' + (parts.join(', ') || 'no changes') +
-                (report.errors.length ? '\n\nWarnings:\n• ' + report.errors.slice(0,5).join('\n• ') : '');
-    alert(msg);
+    const headline = 'Import complete: ' + (parts.join(', ') || 'no changes');
+    if(report.errors.length){
+      // Group all warnings into the dev console so a power user can
+      // investigate the full list. The toast surfaces just the count + an
+      // action that opens the console group inline.
+      try{
+        console.group('[import] ' + report.errors.length + ' warning(s)');
+        report.errors.forEach(e => console.warn(e));
+        console.groupEnd();
+      }catch(_){}
+      if(typeof showActionToast === 'function'){
+        showActionToast(headline + ' — ' + report.errors.length + ' warning(s)', 'View', () => {
+          alert('Import warnings (' + report.errors.length + '):\n\n• ' + report.errors.slice(0,12).join('\n• ') +
+            (report.errors.length > 12 ? '\n…\n(see browser console for the full list)' : ''));
+        }, 9000);
+      } else {
+        alert(headline + '\n\nWarnings:\n• ' + report.errors.slice(0,5).join('\n• '));
+      }
+    } else {
+      if(typeof showExportToast === 'function') showExportToast(headline);
+      else alert(headline);
+    }
   };
   reader.readAsText(file);
 }
@@ -1494,6 +1560,7 @@ function _importTasksFromJSON(text){
 }
 
 function _importTasksFromCSV(text){
+  _resetCsvRowWarnings();
   const rows = _parseCSV(text);
   if(rows.length < 2) throw new Error('CSV must have a header row and at least one data row');
   const headers = rows[0].map(h => h.trim());
@@ -1512,6 +1579,27 @@ function _importTasksFromCSV(text){
     }
     _applyIncomingTask(obj, report);
   }
+  // Pull per-row warnings (e.g. invalid blockedBy IDs) from the row helper
+  // into the user-visible report. The header gives the row name so the user
+  // knows where to look in the source CSV.
+  if(_csvRowWarnings.length){
+    _csvRowWarnings.forEach(w => {
+      report.errors.push('Row "' + w.rowName + '" — ' + w.field + ': ' + w.issue);
+    });
+    _resetCsvRowWarnings();
+  }
+  // Post-pass: validate blockedBy references resolve to imported tasks.
+  // Forward references (target imported later in the same CSV) are valid;
+  // unresolvable IDs after the merge are real broken dependencies.
+  const liveIds = new Set(tasks.map(t => t.id));
+  tasks.forEach(t => {
+    if(!Array.isArray(t.blockedBy) || !t.blockedBy.length) return;
+    const orphans = t.blockedBy.filter(id => !liveIds.has(id));
+    if(orphans.length){
+      report.errors.push('Task "' + (t.name||t.id) + '" — blockedBy references non-existent IDs: ' + orphans.slice(0,5).join(', '));
+      t.blockedBy = t.blockedBy.filter(id => liveIds.has(id));
+    }
+  });
   return report;
 }
 

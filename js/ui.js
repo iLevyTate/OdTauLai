@@ -643,6 +643,13 @@ function toggleTheme(){
   applyTheme();saveState('user');
 }
 function applyTheme(){
+  // Toggle on BOTH the html element and body so the pre-paint bootstrap in
+  // index.html (which runs before body exists) and the post-load applyTheme
+  // call agree. Without the documentElement toggle, switching theme at
+  // runtime would leave the html-class behind, causing FOUC on the next
+  // reload because the pre-paint script reads localStorage and computes
+  // the class fresh — but a stale documentElement class doesn't hurt now.
+  document.documentElement.classList.toggle('light-theme',theme==='light');
   document.body.classList.toggle('light-theme',theme==='light');
   // Theme-toggle glyph: SVG icon via the project icon system (no emoji — the
   // U+1F319 moon and U+2600 sun glyphs fall back to ✱ on Windows in many
@@ -1020,6 +1027,10 @@ function _commitChipChange(t){
 }
 function openTaskDetail(id){
   const t=findTask(id);if(!t)return;
+  // Cmd-K → search → Enter on a result is the most common path here;
+  // without this, the palette stays open behind the modal, eats focus,
+  // and consumes memory until the user explicitly Esc'es.
+  if(typeof closeCmdK==='function') closeCmdK();
   _taskModalSnapshot=JSON.parse(JSON.stringify(t));
   editingTaskId=id;
   gid('mdName').value=t.name;
@@ -1361,6 +1372,20 @@ async function closeTaskDetail(opts){
     if(si>=0){
       const snap=JSON.parse(JSON.stringify(_taskModalSnapshot));
       tasks[si]=snap;
+    } else {
+      // Cross-tab race: the task was deleted in another window while this
+      // user was editing. Without this branch, the edits silently vanish.
+      // Offer a Restore action that re-adds the snapshot under a fresh id
+      // so the work isn't lost.
+      const lost = JSON.parse(JSON.stringify(_taskModalSnapshot));
+      if(typeof showActionToast === 'function'){
+        showActionToast('Task was deleted in another tab', 'Restore', () => {
+          lost.id = ++taskIdCtr;
+          tasks.push(lost);
+          if(typeof saveState === 'function') saveState('user');
+          if(typeof renderTaskList === 'function') renderTaskList();
+        }, 12000);
+      }
     }
   }
   _taskModalSnapshot=null;
@@ -1428,6 +1453,16 @@ window._initTaskModalSwipeDismiss=_initTaskModalSwipeDismiss;
 function saveTaskDetail(){
   if(!editingTaskId)return;
   const t=findTask(editingTaskId);if(!t)return;
+  // Empty-name guard. The previous `t.name = ... || t.name` silently kept the
+  // old name if the user cleared the field — looked like the edit saved when
+  // it didn't. Now: refuse the save with a toast and bounce focus back to
+  // the input so the fix is one keystroke away.
+  const _newName = (gid('mdName').value || '').trim();
+  if(!_newName){
+    if(typeof showExportToast === 'function') showExportToast('Task name cannot be empty.');
+    const i = gid('mdName'); if(i) i.focus();
+    return;
+  }
   // C-2: snapshot the fields we'll diff against post-save so we can append
   // a per-field activity entry. Snapshot is a shallow copy of relevant fields.
   const _activityBefore = {
@@ -1447,7 +1482,7 @@ function saveTaskDetail(){
     completeHabitCycle(t);
     gid('mdCheckbox').classList.remove('checked');gid('mdCheckbox').textContent='';
   }
-  t.name=gid('mdName').value.trim()||t.name;
+  t.name=_newName;
   t.dueDate=gid('mdDue').value||null;
   if(gid('mdSnoozeUntil')) t.hiddenUntil=gid('mdSnoozeUntil').value||null;
   t.startDate=gid('mdStartDate').value||null;
@@ -1713,6 +1748,14 @@ function clearLog(){timeLog=[];renderLog();saveState('user')}
 // ========== TAB NAVIGATION ==========
 function showTab(tab){
   if(typeof closeCmdK==='function')closeCmdK();
+  // Tab switch is implicit cancel for any open modal. Without this, the
+  // task-detail modal floats over the new tab and the user can't reach
+  // the timer / settings / log surfaces under it. skipRevert=true because
+  // chip edits already auto-saved (prior round) and we don't want a
+  // confirm prompt blocking navigation.
+  if(typeof closeTaskDetail==='function' && gid('taskModal')?.classList.contains('open')){
+    closeTaskDetail({skipRevert:true});
+  }
   activeTab=tab;
   document.querySelectorAll('[data-tab]').forEach(el=>{el.hidden = !(el.dataset.tab===tab)});
   document.querySelectorAll('.nav-tab').forEach(el=>{

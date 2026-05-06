@@ -76,8 +76,24 @@ self.addEventListener('install', e => {
 self.addEventListener('activate', e => {
   e.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k))))
-      .then(() => self.clients.claim())
+      .then(keys => {
+        const stale = keys.filter(k => k !== CACHE_NAME);
+        return Promise.all(stale.map(k => caches.delete(k))).then(() => stale);
+      })
+      .then(stale => {
+        // Tell every open tab a new SW is staged so pwa.js can show a
+        // "new version ready / Refresh" toast. Notify only when a stale
+        // cache was actually swept — otherwise this is a fresh install
+        // and there's no incumbent version to replace.
+        if(stale.length){
+          try{
+            const ch = new BroadcastChannel('odtaulai-sw-status');
+            ch.postMessage({ type: 'sw-update-ready', version: CACHE_NAME });
+            ch.close();
+          }catch(_){ /* BroadcastChannel unavailable — fail silent */ }
+        }
+        return self.clients.claim();
+      })
   );
 });
 

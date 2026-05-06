@@ -763,6 +763,14 @@ function repairOrphanedTaskParents(){
       n++;
     }
   }
+  // Persist + re-render when we actually changed something — previous
+  // behavior left repaired tasks invisible until the next save/render
+  // happened to fire from another path, so users importing a backup with
+  // dangling parent refs saw "ghost" subtasks until they did anything.
+  if(n > 0){
+    if(typeof saveState === 'function') saveState('auto');
+    if(typeof renderTaskList === 'function') renderTaskList();
+  }
   return n;
 }
 window.repairOrphanedTaskParents=repairOrphanedTaskParents;

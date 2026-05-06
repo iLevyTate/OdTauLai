@@ -204,7 +204,12 @@ function hasClassificationCategory(cat){
   if(LIFE_CATS.includes(cat)) return true;
   if(typeof cfg === 'undefined' || !cfg) return false;
   ensureClassificationConfig(cfg);
-  return (cfg.categories || []).some(c => c.id === cat);
+  // Skip hidden categories: they're tombstoned, not legitimate assignment
+  // targets. Without this gate, proposeReclassifyUncategorized + the AI
+  // classification pipelines would still suggest a category the user has
+  // explicitly hidden — the suggestion would land then immediately
+  // disappear from chips, looking like a render bug.
+  return (cfg.categories || []).some(c => c.id === cat && !c.hidden);
 }
 
 function getCategoryDef(id){
@@ -567,6 +572,17 @@ async function ensureSchwartzEmbeddings(){
   if(existing) return existing;
   if(_schwartzEmbeddingsPromise) return _schwartzEmbeddingsPromise;
 
+  // Each per-value embedText call is bounded by a hard timeout so harmonize
+  // and value-alignment features can't freeze if the embed model hangs.
+  // Without this race, a stuck embed pipeline stalled the UI silently —
+  // the surrounding _aiFeatureGuard wrapper now surfaces the rejection as
+  // a Retry toast instead.
+  const SCHWARTZ_EMBED_TIMEOUT_MS = 15_000;
+  const _withTimeout = (p, label) => Promise.race([
+    p,
+    new Promise((_, rej) => setTimeout(() => rej(new Error('Schwartz embed timeout: ' + label)), SCHWARTZ_EMBED_TIMEOUT_MS)),
+  ]);
+
   _schwartzEmbeddingsPromise = (async () => {
     const keys = VALUE_KEYS;
     const S = SCHWARTZ;
@@ -574,7 +590,12 @@ async function ensureSchwartzEmbeddings(){
     for(const k of keys){
       const def = (S[k] && S[k].def) ? S[k].def : k;
       const text = `${k}: ${def}`;
-      vecs[k] = await embedText(text);
+      vecs[k] = await _withTimeout(embedText(text), k);
+    }
+    // Don't persist a partial cache — a future call should retry from
+    // scratch if any value embedding failed.
+    if(Object.keys(vecs).length !== keys.length){
+      throw new Error('Schwartz embed produced incomplete vectors');
     }
     await embedStore.setSchwartzEmbeddings(vecs);
     return vecs;

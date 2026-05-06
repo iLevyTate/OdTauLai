@@ -443,9 +443,28 @@ async function retryFailedCalFeeds(){
   _loadCalFeeds();
   const failed = (_calFeeds.feeds || []).filter(f => f && f.error);
   if(!failed.length) return;
-  await Promise.all(failed.map(f => syncCalFeed(f.id).catch(()=>{})));
+  // allSettled instead of Promise.all so one feed's rejection doesn't
+  // short-circuit the others, and so we can re-evaluate the live failed
+  // set after the round to give the user actionable feedback.
+  await Promise.allSettled(failed.map(f => syncCalFeed(f.id)));
+  _loadCalFeeds();
+  const stillFailed = (_calFeeds.feeds || []).filter(f => f && f.error);
   if(typeof renderTaskList === 'function') renderTaskList();
   if(typeof renderCalFeedsPanel === 'function') renderCalFeedsPanel();
+  if(stillFailed.length){
+    // At least one feed is still broken. Toast with another Retry so the
+    // user can keep nudging it without rummaging through settings.
+    if(typeof showActionToast === 'function'){
+      showActionToast(
+        'Calendar sync still failing for ' + stillFailed.length + ' of ' + failed.length + ' feed(s)',
+        'Retry',
+        retryFailedCalFeeds,
+        9000,
+      );
+    }
+  } else if(typeof showExportToast === 'function'){
+    showExportToast('Calendar feeds reconnected.');
+  }
 }
 if(typeof window !== 'undefined'){
   window.getFailedCalFeeds = getFailedCalFeeds;

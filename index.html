@@ -8,6 +8,26 @@
 <!-- PWA meta -->
 <meta name="color-scheme" content="dark light">
 <meta name="theme-color" content="#0a1320">
+<!--
+  Pre-paint theme bootstrap. applyTheme() runs from app.js after JS parses,
+  which means light-theme users used to see a flash of the dark default on
+  every cold load. This synchronous script reads the saved theme out of the
+  same localStorage key cfg uses (stupind_state) BEFORE the stylesheet
+  applies and toggles .light-theme on <html>. CSS selectors are rooted at
+  .light-theme (no longer body.light-theme) so the pre-paint class on the
+  html element styles everything immediately.
+-->
+<script>
+(function(){
+  try{
+    var raw = localStorage.getItem('stupind_state');
+    var t = null;
+    if(raw){ var s = JSON.parse(raw); t = s && s.theme; }
+    if(!t){ t = matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'; }
+    if(t === 'light'){ document.documentElement.classList.add('light-theme'); }
+  }catch(_){ /* corrupted LS — fall back to default dark */ }
+})();
+</script>
 <meta name="description" content="Pomodoro deep-work timer and ClickUp-style task manager that uses on-device local embeddings to intelligently route your tasks, track your time, and ensure value alignment, all without your data ever leaving your machine.">
 <!-- Link preview (Open Graph / Twitter) — og:image must be absolute; change base if Pages URL or domain differs -->
 <meta property="og:type" content="website">

@@ -45,6 +45,26 @@
   try{
     const swStatusCh = new BroadcastChannel('odtaulai-sw-status');
     swStatusCh.addEventListener('message', (ev) => {
+      // New-version-ready notification: SW activate posts this AFTER it
+      // sweeps stale caches. We give the user an explicit Refresh action
+      // instead of silently swapping mid-session via clients.claim() —
+      // an unprompted reload during typing is exactly the kind of
+      // "feels broken" surprise we're trying to avoid.
+      if(ev.data && ev.data.type === 'sw-update-ready'){
+        if(typeof showActionToast !== 'function') return;
+        showActionToast('New version ready', 'Refresh', () => {
+          try{
+            // Tell whichever SW is waiting (the new one) to skip waiting
+            // so the next page-load uses the fresh bundle.
+            navigator.serviceWorker.getRegistration().then(reg => {
+              const target = (reg && (reg.waiting || reg.installing)) || (navigator.serviceWorker.controller);
+              if(target && target.postMessage) target.postMessage({ type: 'SKIP_WAITING' });
+            }).catch(()=>{});
+          }catch(_){}
+          location.reload();
+        }, 0);
+        return;
+      }
       if(!ev.data || ev.data.type !== 'precache-incomplete') return;
       const failed = Array.isArray(ev.data.failed) ? ev.data.failed : [];
       if(!failed.length) return;

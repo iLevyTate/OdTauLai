@@ -17,7 +17,7 @@
   .toggle:focus-visible{border-radius:10px}
   input,select,textarea{font-family:inherit}
   ::selection{background:rgba(106,168,255,.25);color:var(--text-1)}
-  /* Scrollbar — themed via tokens; light-theme override at body.light-theme below.
+  /* Scrollbar — themed via tokens; light-theme override at .light-theme below.
      A second hardcoded ::-webkit-scrollbar rule used to live below this and silently
      shadowed it at equal specificity (4px wide, hex color); removed so this wins. */
   *::-webkit-scrollbar{width:8px;height:8px}
@@ -148,7 +148,7 @@
     --ring-done-color:#ff5c4d;
     color-scheme:dark;
   }
-  body.light-theme{
+  .light-theme{
     color-scheme:light;
     --bg-0:#f4f6fa;--bg-1:#fff;--bg-2:#f8fafc;--bg-3:#e3e8f0;
     /* Light-theme border lifted off --bg-3 to keep card edges visible. */
@@ -1370,7 +1370,7 @@
 
   /* Ensure datetime pickers show readable */
   input[type="date"].mfield-in,input[type="datetime-local"].mfield-in{color-scheme:dark}
-  body.light-theme input[type="date"].mfield-in,body.light-theme input[type="datetime-local"].mfield-in{color-scheme:light}
+  .light-theme input[type="date"].mfield-in,.light-theme input[type="datetime-local"].mfield-in{color-scheme:light}
 
   .qa-hint{line-height:1.8}
 
@@ -1431,42 +1431,42 @@
   .goal-add:hover{background:#7db3ff}
 
   /* Calendar day readability in light theme */
-  body.light-theme .cal-task{background:var(--bg-3);color:var(--text-1);border:1px solid var(--border)}
-  body.light-theme .cal-day.today{background:var(--accent-bg)}
-  body.light-theme .cal-day{background:var(--bg-1)}
-  body.light-theme .cal-day:hover{background:var(--bg-2)}
+  .light-theme .cal-task{background:var(--bg-3);color:var(--text-1);border:1px solid var(--border)}
+  .light-theme .cal-day.today{background:var(--accent-bg)}
+  .light-theme .cal-day{background:var(--bg-1)}
+  .light-theme .cal-day:hover{background:var(--bg-2)}
 
   /* Stat value colors in light theme */
-  body.light-theme .stat-val.wc{color:var(--accent)}
-  body.light-theme .stat-val.tc{color:var(--warning)}
-  body.light-theme .stat-val.bc{color:var(--success)}
+  .light-theme .stat-val.wc{color:var(--accent)}
+  .light-theme .stat-val.tc{color:var(--warning)}
+  .light-theme .stat-val.bc{color:var(--success)}
 
   /* Make sure the floating mini-timer pill button shows ▶/⏸ clearly */
   .mt-btn{color:#0a1320;font-weight:700;font-size:12px}
   .mt-pause{background:var(--accent)!important}
   .mt-play{background:var(--success)!important}
-  body.light-theme .mt-btn{color:#fff}
+  .light-theme .mt-btn{color:#fff}
 
   /* Light theme ring */
-  body.light-theme .ring-bg{stroke:#e3e8f0!important}
+  .light-theme .ring-bg{stroke:#e3e8f0!important}
 
   /* Light theme banner */
-  body.light-theme #banner{background:var(--bg-1)!important;border-color:var(--border)!important}
+  .light-theme #banner{background:var(--bg-1)!important;border-color:var(--border)!important}
 
   /* Modal overlay in light */
-  body.light-theme .modal-overlay{background:rgba(15,23,42,.55)}
+  .light-theme .modal-overlay{background:rgba(15,23,42,.55)}
 
   /* Done-sparkle visibility in both themes */
   .done-sparkle{filter:drop-shadow(0 0 6px var(--success))}
 
   /* Consistent scrollbar color in light */
-  body.light-theme *::-webkit-scrollbar-thumb{background:#c7d0de}
+  .light-theme *::-webkit-scrollbar-thumb{background:#c7d0de}
 
   /* Ensure number/date inputs match dark mode */
   .fi,.fi-n,.fi-s,.fi-w{color-scheme:dark}
-  body.light-theme .fi,body.light-theme .fi-n,body.light-theme .fi-s,body.light-theme .fi-w{color-scheme:light}
+  .light-theme .fi,.light-theme .fi-n,.light-theme .fi-s,.light-theme .fi-w{color-scheme:light}
   .sinput{color-scheme:dark}
-  body.light-theme .sinput{color-scheme:light}
+  .light-theme .sinput{color-scheme:light}
 
   /* Make Timer phase tabs prominent */
   .tab.active{color:#fff}
@@ -1475,7 +1475,7 @@
   .tab.active.long{background:var(--warning);color:#0a1320}
 
   /* Light theme tab label when active (dark text on light button) */
-  body.light-theme .tab.active.work,body.light-theme .tab.active.short,body.light-theme .tab.active.long{color:#0a1320}
+  .light-theme .tab.active.work,.light-theme .tab.active.short,.light-theme .tab.active.long{color:#0a1320}
 
   /* ================================================================= */
   /* ========= NEUROSCIENCE-BACKED TASK ROW (v2) ===================== */
@@ -3139,8 +3139,8 @@ body:has(.offline-indicator:not([style*="display:none"])){ padding-top:30px; }
     transform:scale(.97);
     box-shadow:0 1px 4px rgba(106,168,255,.18)
   }
-  body.light-theme .task-add{box-shadow:0 2px 8px rgba(37,99,235,.22)}
-  body.light-theme .task-add:hover{box-shadow:0 4px 14px rgba(37,99,235,.30)}
+  .light-theme .task-add{box-shadow:0 2px 8px rgba(37,99,235,.22)}
+  .light-theme .task-add:hover{box-shadow:0 4px 14px rgba(37,99,235,.30)}
 
   /* === PARETO TASK EMPHASIS === */
   .task-item--pareto{
@@ -3169,7 +3169,7 @@ body:has(.offline-indicator:not([style*="display:none"])){ padding-top:30px; }
     border-radius:8px
   }
   .nav-tab.active .nav-tab-icon{filter:none;color:var(--accent)}
-  body.light-theme .nav-tab.active{
+  .light-theme .nav-tab.active{
     background:rgba(37,99,235,.10);
     color:var(--accent);
     border-color:rgba(37,99,235,.28)
@@ -3570,7 +3570,7 @@ body:has(.offline-indicator:not([style*="display:none"])){ padding-top:30px; }
   background:var(--bg-0)!important;cursor:default!important;color:var(--text-2);
   border-color:var(--border)!important;
 }
-body.light-theme .mfield--readonly{background:var(--bg-2)!important}
+.light-theme .mfield--readonly{background:var(--bg-2)!important}
 button.hist-day{display:block;width:100%;font:inherit;cursor:pointer;background:inherit}
 .filter-display-lbl{font-size:10px;color:var(--text-3);letter-spacing:.1em;text-transform:uppercase;margin-right:6px}
 .task-toolbar-display{align-items:center;gap:8px;flex-wrap:wrap}
