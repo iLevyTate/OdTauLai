@@ -3057,19 +3057,25 @@ body:has(.offline-indicator:not([style*="display:none"])){ padding-top:30px; }
 .swipe-tip-dismiss{font-size:11px;padding:5px 12px;border-radius:8px;background:var(--accent);color:#fff;border:none}
 .cmdk-foot{font-size:11px;color:var(--text-4);padding:8px 12px;border-top:1px solid var(--border)}
 .export-toast{
-  /* bottom respects iOS home indicator / Android nav bar via safe-area-inset */
-  position:fixed;bottom:calc(28px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%) translateY(16px);z-index:9000;
+  /* Bottom-right corner so the toast never sits over the task list / task input.
+     The mobile @media block below re-centers horizontally on narrow viewports
+     where a corner anchor reads as cramped. Modals (.modal-overlay,
+     .cmdk-overlay, .what-next-overlay) are deliberately separate and stay
+     center-screen — only auto-dismiss toasts move. */
+  position:fixed;bottom:calc(16px + env(safe-area-inset-bottom,0px));right:calc(16px + env(safe-area-inset-right,0px));left:auto;transform:translateY(16px);z-index:9000;
   padding:10px 18px;border-radius:10px;background:var(--bg-2);border:1px solid var(--border);color:var(--text-1);
   font-size:13px;opacity:0;pointer-events:none;transition:opacity .2s ease,transform .2s ease;max-width:min(90vw,420px);text-align:center;
 }
-.export-toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.export-toast.show{opacity:1;transform:translateY(0)}
+/* Lift above the mini-timer pill when it's visible (mini-timer occupies the
+   same bottom-right corner at bottom:16px right:16px and is ~48px tall). */
+body:has(.mini-timer.visible) .export-toast{bottom:calc(76px + env(safe-area-inset-bottom,0px))}
 
 /* Action toast — like .export-toast but carries an inline action button
-   (Undo). Sits above the mini-timer pill on mobile via the same
-   safe-area-aware bottom offset. */
+   (Undo). Stacks above .export-toast in the same bottom-right column. */
 .action-toast{
-  position:fixed;bottom:calc(96px + env(safe-area-inset-bottom,0px));left:50%;
-  transform:translateX(-50%) translateY(16px);z-index:9100;
+  position:fixed;bottom:calc(72px + env(safe-area-inset-bottom,0px));right:calc(16px + env(safe-area-inset-right,0px));left:auto;
+  transform:translateY(16px);z-index:9100;
   display:inline-flex;align-items:center;gap:var(--space-5);
   padding:10px 12px 10px 18px;border-radius:999px;
   background:var(--bg-1);border:1px solid var(--border-strong);color:var(--text-1);
@@ -3077,7 +3083,14 @@ body:has(.offline-indicator:not([style*="display:none"])){ padding-top:30px; }
   opacity:0;pointer-events:none;transition:opacity .18s ease,transform .18s ease;
   max-width:min(90vw,420px);
 }
-.action-toast.show{opacity:1;pointer-events:auto;transform:translateX(-50%) translateY(0)}
+.action-toast.show{opacity:1;pointer-events:auto;transform:translateY(0)}
+body:has(.mini-timer.visible) .action-toast{bottom:calc(132px + env(safe-area-inset-bottom,0px))}
+@media (max-width:640px){
+  .export-toast{left:50%;right:auto;transform:translateX(-50%) translateY(16px)}
+  .export-toast.show{transform:translateX(-50%) translateY(0)}
+  .action-toast{left:50%;right:auto;transform:translateX(-50%) translateY(16px)}
+  .action-toast.show{transform:translateX(-50%) translateY(0)}
+}
 .action-toast-lbl{color:var(--text-1);font-weight:500}
 .action-toast-btn{
   appearance:none;-webkit-appearance:none;

@@ -1303,7 +1303,8 @@ function _syncAlignButton(){
   btn.disabled = !ok;
   const sub = btn.querySelector('.intel-action-btn-sub');
   if(sub){
-    sub.textContent = !ready ? 'Embedding model loading\u2026'
+    const failed = _embedChipState === 'error';
+    sub.textContent = !ready ? (failed ? 'Model unavailable \u2014 tap Retry above' : 'Embedding model loading\u2026')
       : _cfg.dominant.length < 2 ? 'Pick 2\u20133 dominant values below'
       : 'Align to ' + _cfg.dominant.join(', ');
   }
@@ -1359,7 +1360,13 @@ function renderAIPanel(){
   if(!panel) return;
   _loadCfg();
   const ready = typeof isIntelReady === 'function' && isIntelReady();
+  const failed = !ready && _embedChipState === 'error';
   const dev = typeof getIntelDevice === 'function' ? getIntelDevice() : null;
+  const statusKind = ready ? 'ok' : (failed ? 'error' : 'idle');
+  const statusText = ready
+    ? 'Ready · ' + (dev || 'CPU')
+    : (failed ? (_embedChipMsg ? String(_embedChipMsg).slice(0, 64) : 'Could not load model') : 'Loading model…');
+  const disabledSub = ready ? '' : (failed ? 'Model unavailable — tap Retry above' : 'Embedding model loading…');
 
   const embedModel = (typeof window !== 'undefined' && window.INTEL_EMBED_MODEL) || 'Xenova/bge-base-en-v1.5';
   panel.innerHTML = `
@@ -1369,8 +1376,8 @@ function renderAIPanel(){
           <h3 class="intel-card-h3">Task understanding</h3>
           <span class="intel-card-badge">On device</span>
         </div>
-        <div id="intelStatus" class="intel-status intel-status-chip intel-status--${ready ? 'ok' : 'idle'}" role="status">
-          ${ready ? 'Ready · ' + (dev || 'CPU') : 'Loading model…'}
+        <div id="intelStatus" class="intel-status intel-status-chip intel-status--${statusKind}" role="status">
+          ${statusText}
         </div>
       </div>
       <div class="intel-card-body">
@@ -1399,13 +1406,13 @@ function renderAIPanel(){
           <div class="intel-progress-info"><span id="intelProgressPct">0%</span> <span id="intelProgressTxt"></span></div>
         </div>
         <div class="intel-toolbar-row">
-          <button class="intel-tool-btn intel-tool-btn--primary" type="button" data-action="intelRetryLoad" id="intelRetryBtn" hidden>${_IC.refresh}<span>Retry load</span></button>
+          <button class="intel-tool-btn intel-tool-btn--primary" type="button" data-action="intelRetryLoad" id="intelRetryBtn"${failed ? '' : ' hidden'}>${_IC.refresh}<span>Retry load</span></button>
           <button class="intel-tool-btn" type="button" id="intelUndoBtn" data-action="aiUndo" ${_undoStack.length ? '' : 'hidden'}>${_IC.undo}<span>Undo</span></button>
         </div>
         <div class="intel-action-grid">
           <button type="button" class="intel-action-btn intel-action-btn--primary" id="alignValuesBtn" data-action="aiAlign" ${!ready || _cfg.dominant.length < 2 ? 'disabled' : ''}>
             ${_IC.bolt}
-            <span class="intel-action-btn-text"><span class="intel-action-btn-lbl">Align values only</span><span class="intel-action-btn-sub">${!ready ? 'Embedding model loading\u2026' : _cfg.dominant.length < 2 ? 'Pick 2–3 dominant values below' : 'Align to ' + _cfg.dominant.join(', ')}</span></span>
+            <span class="intel-action-btn-text"><span class="intel-action-btn-lbl">Align values only</span><span class="intel-action-btn-sub">${!ready ? disabledSub : _cfg.dominant.length < 2 ? 'Pick 2–3 dominant values below' : 'Align to ' + _cfg.dominant.join(', ')}</span></span>
           </button>
           <button type="button" class="intel-action-btn intel-action-btn--primary" data-action="intelHarmonizeFields" ${!ready ? 'disabled' : ''}
             title="Propose updates using values, life area, priority, effort, energy, and tags from embeddings and similar tasks. Review before apply.">
@@ -1415,7 +1422,7 @@ function renderAIPanel(){
           <button type="button" class="intel-action-btn" data-action="intelAutoOrganize" ${!ready || (typeof lists === 'undefined' || lists.length < 2) ? 'disabled' : ''}
             title="Route tasks into the list whose name and description match best. Edit a list description to tune routing.">
             ${_IC.folder}
-            <span class="intel-action-btn-text"><span class="intel-action-btn-lbl">Auto-organize into lists</span><span class="intel-action-btn-sub">${!ready ? 'Embedding model loading\u2026' : (typeof lists === 'undefined' || lists.length < 2) ? 'Needs at least two lists' : 'Route across ' + lists.length + ' lists'}</span></span>
+            <span class="intel-action-btn-text"><span class="intel-action-btn-lbl">Auto-organize into lists</span><span class="intel-action-btn-sub">${!ready ? disabledSub : (typeof lists === 'undefined' || lists.length < 2) ? 'Needs at least two lists' : 'Route across ' + lists.length + ' lists'}</span></span>
           </button>
           <button type="button" class="intel-action-btn" data-action="intelFindDuplicatesUI">
             ${_IC.duplicate}
@@ -1449,7 +1456,10 @@ function renderAIPanel(){
   _renderBreakdown();
   _renderUndoBtn();
   if(ready) syncHeaderAIChip('ready', `Ready via ${dev || 'CPU'}`);
-  else syncHeaderAIChip('loading', 'Loading model…');
+  else if(failed) syncHeaderAIChip('error', _embedChipMsg || 'Load failed');
+  else if(_embedChipState !== 'loading' && _embedChipState !== 'working' && _embedChipState !== 'syncing'){
+    syncHeaderAIChip('loading', 'Loading model…');
+  }
   syncSemanticSearchUi();
 }
 

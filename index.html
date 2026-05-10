@@ -395,14 +395,14 @@
     <div id="calendarView" hidden></div>
   </div>
 
-  <div class="timer-subnav" data-tab="focus">
+  <div class="timer-subnav" data-tab="focus" hidden>
     <button type="button" class="timer-sub-btn active" data-sub="pomo" data-action="setTimerSub" data-arg="pomo">Pomodoro</button>
     <button type="button" class="timer-sub-btn" data-sub="quick" data-action="setTimerSub" data-arg="quick">Quick</button>
     <button type="button" class="timer-sub-btn" data-sub="sw" data-action="setTimerSub" data-arg="sw">Stopwatch</button>
     <button type="button" class="timer-sub-btn" data-sub="chimes" data-action="setTimerSub" data-arg="chimes">Chimes</button>
   </div>
   <!-- Pomodoro Focus Timer -->
-  <div class="panel timer-sub-panel panel--timer-sub" data-tab="focus" data-timer-sub="pomo">
+  <div class="panel timer-sub-panel panel--timer-sub" data-tab="focus" data-timer-sub="pomo" hidden>
     <div class="shdr">
       <div class="sdot sdot--accent"></div>
       <h2 class="slbl">Focus Timer</h2>
@@ -482,12 +482,12 @@
   </div>
 
   <!-- Task understanding (on-device embeddings) -->
-  <div class="panel intel-tools-panel" data-tab="tools">
+  <div class="panel intel-tools-panel" data-tab="tools" hidden>
     <div id="intelPanel" class="intel-panel-root"></div>
   </div>
 
   <!-- Settings -->
-  <div class="panel panel-settings" data-tab="settings">
+  <div class="panel panel-settings" data-tab="settings" hidden>
     <div class="stitle stitle-static"><div class="sdot sdot--accent"></div><h2 class="slbl">Settings</h2></div>
     <div class="sbody sbody-static" id="settingsBody">
       <details class="set-section" open>
@@ -594,7 +594,7 @@
   </div>
 
   <!-- Today's Stats (Data tab) -->
-  <div class="panel panel-data" data-tab="data" data-data-section="stats">
+  <div class="panel panel-data" data-tab="data" data-data-section="stats" hidden>
     <div class="shdr"><div class="sdot sdot--long"></div><h2 class="slbl">Today's Stats</h2><button class="small-btn" data-action="resetStats">Reset Day</button></div>
     <dl class="stat-grid">
       <div class="stat-box"><dd class="stat-val wc" id="statPomos">0</dd><dt class="stat-lbl">Sessions</dt></div>
@@ -607,13 +607,13 @@
   </div>
 
   <!-- Time Log (Data tab) — sessions in chronological order. -->
-  <div class="panel panel-data" data-tab="data" data-data-section="log">
+  <div class="panel panel-data" data-tab="data" data-data-section="log" hidden>
     <div class="shdr"><div class="sdot sdot--long"></div><h2 class="slbl">Time Log</h2><button class="small-btn" data-action="clearLog">Clear</button></div>
     <div class="log-list" id="logList"><div class="log-empty" id="logEmpty">Completed sessions appear here</div></div>
   </div>
 
   <!-- Past Days Archive (Data tab) -->
-  <div class="panel panel-data" data-tab="data" data-data-section="archive">
+  <div class="panel panel-data" data-tab="data" data-data-section="archive" hidden>
     <div class="shdr"><div class="sdot sdot--history"></div><h2 class="slbl">Past Days</h2><span class="scnt" id="archiveCount">0 days</span></div>
     <div id="archiveList" class="archive-list"><div class="iempty" id="archiveEmpty">History will appear here after each day</div></div>
     <div class="archive-actions">
@@ -623,7 +623,7 @@
   </div>
 
   <!-- Export & Backup (Data tab) — own panel so the Stats panel stays scannable. -->
-  <div class="panel panel-data" data-tab="data" data-data-section="export">
+  <div class="panel panel-data" data-tab="data" data-data-section="export" hidden>
     <div class="shdr"><div class="sdot sdot--accent"></div><h2 class="slbl">Export &amp; Backup</h2></div>
 
     <!-- Daily report — human-readable summary -->
