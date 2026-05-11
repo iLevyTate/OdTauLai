@@ -77,6 +77,59 @@ function announce(msg){
 }
 function announceTaskAdd(name){announce('Task added: '+(name||'(unnamed)'))}
 window.announce=announce;
+
+// ── On-screen keyboard inset tracker ────────────────────────────────────────
+// Mobile browsers don't shrink `100vh` / `100dvh` when the soft keyboard
+// appears, so bottom-anchored overlays (cmdK chat, task modal, settings
+// sheets) end up hidden under the keyboard. The VisualViewport API does
+// report the real visible-area shrink — we surface that as CSS variables:
+//   --kb-inset  : pixel height of the keyboard (0 when closed)
+//   --vv-height : pixel height of the visible viewport
+// Plus a body class `kb-open` so individual rules can flip layout when needed
+// (e.g. a sheet that re-pins to the top instead of the bottom).
+//
+// Touching style + class lists on the root only when values actually change
+// keeps the resize handler cheap — it can fire many times per second during
+// keyboard animation.
+(function setupKeyboardInsetTracker(){
+  if(typeof window === 'undefined' || !window.visualViewport) return;
+  const vv = window.visualViewport;
+  const root = document.documentElement;
+  let lastInset = -1, lastVvH = -1, lastClass = false;
+  const update = () => {
+    // offsetTop is non-zero when the page scrolls inside the visual viewport
+    // (e.g. iOS pinch-zoom). Including it ensures kb-inset reflects ONLY the
+    // keyboard region, not the address-bar / zoomed-pan area.
+    const inset = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+    const vvH = Math.round(vv.height);
+    const open = inset > 80; // ≥80px reliably distinguishes a keyboard from
+                             // address-bar collapse on every mobile we tested
+    if(inset !== lastInset){ root.style.setProperty('--kb-inset', inset + 'px'); lastInset = inset; }
+    if(vvH !== lastVvH){     root.style.setProperty('--vv-height', vvH + 'px'); lastVvH = vvH; }
+    if(open !== lastClass){  root.classList.toggle('kb-open', open); lastClass = open; }
+  };
+  vv.addEventListener('resize', update);
+  vv.addEventListener('scroll', update);
+  // Initial values so CSS doesn't see an undefined custom property and fall
+  // back to the keyword default (which often isn't what the rule expects).
+  update();
+
+  // When an input gains focus inside an overlay, the browser sometimes
+  // doesn't scroll it into view above the keyboard (Safari especially when
+  // the overlay is `position: fixed`). Wait for the visualViewport resize to
+  // settle (one rAF post-event), then nudge the element into view.
+  document.addEventListener('focusin', (e) => {
+    const el = e.target;
+    if(!el || !el.matches) return;
+    if(!el.matches('input, textarea, [contenteditable="true"]')) return;
+    // Skip when the keyboard isn't actually open — avoids unnecessary jumps
+    // on desktop where focusin fires for normal tab navigation.
+    setTimeout(() => {
+      if(!root.classList.contains('kb-open')) return;
+      try{ el.scrollIntoView({ block: 'center', behavior: 'smooth' }); }catch(_){}
+    }, 160);
+  });
+})();
 window.announceTaskAdd=announceTaskAdd;
 
 /**

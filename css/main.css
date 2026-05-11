@@ -2,6 +2,11 @@
   /* Kill the default mobile tap overlay (a black rectangle that ignores
      border-radius) so press feedback follows each component's own shape. */
   html{-webkit-tap-highlight-color:transparent}
+  /* Soft-keyboard inset variables. JS (utils.js setupKeyboardInsetTracker)
+     keeps these in sync with the VisualViewport API so overlays can lift
+     above the keyboard. Defaults make CSS using these vars degrade to the
+     legacy behaviour on browsers without VisualViewport. */
+  :root{--kb-inset:0px;--vv-height:100dvh}
   /* M5: 100vh on mobile Safari reports the *maximum* visible area including the
      address bar, which pushes content behind the toolbar. Prefer 100dvh (dynamic
      viewport) and fall back to 100vh for browsers that don't support dvh. */
@@ -483,7 +488,7 @@
   .task-desc-preview{font-size:10px;color:#5a6a7a;font-style:italic;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
 
   /* Task Detail Modal */
-  .modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.75);backdrop-filter:blur(4px);z-index:var(--z-modal);display:none;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto}
+  .modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.75);backdrop-filter:blur(4px);z-index:var(--z-modal);display:none;align-items:flex-start;justify-content:center;padding:40px 16px;padding-bottom:calc(40px + var(--kb-inset, 0px));overflow-y:auto}
   .modal-overlay.open{display:flex;animation:fadeIn .2s}
   @keyframes fadeIn{from{opacity:0}to{opacity:1}}
   .modal{background:#0d1a2d;border:1px solid #1a2d44;border-radius:14px;width:100%;max-width:560px;box-shadow:0 20px 60px rgba(0,0,0,.6);animation:modalSlide .25s}
@@ -491,7 +496,7 @@
   .modal-head{display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid #152238}
   .modal-close{margin-inline-start:auto;width:28px;height:28px;background:transparent;border:1px solid var(--border-strong);border-radius:6px;color:var(--text-3);font-size:14px;cursor:pointer;font-family:inherit}
   .modal-close:hover{color:#c0392b;border-color:#3a1a1a}
-  .modal-body{padding:16px 18px;max-height:70vh;overflow-y:auto}
+  .modal-body{padding:16px 18px;max-height:70vh;max-height:min(70vh, calc(var(--vv-height, 70dvh) - 160px));overflow-y:auto}
   .mfield{margin-bottom:14px}
   .mfield-lbl{display:block;font-size:9px;color:#5a8ab5;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;margin-bottom:6px}
   .mfield-in{width:100%;padding:8px 12px;background:#071019;border:1px solid #1a2840;border-radius:8px;color:#e2e8f0;font-size:12px;font-family:inherit;outline:0;box-sizing:border-box}
@@ -1334,9 +1339,9 @@
   .cal-task-more{font-size:10px;color:var(--text-3);text-align:center;padding:2px}
 
   /* Command Palette (Cmd+K) */
-  .cmdk-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(6px);z-index:var(--z-cmdk);display:none;align-items:flex-start;justify-content:center;padding:80px 16px 16px}
+  .cmdk-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(6px);z-index:var(--z-cmdk);display:none;align-items:flex-start;justify-content:center;padding:80px 16px 16px;padding-bottom:calc(16px + var(--kb-inset, 0px))}
   .cmdk-overlay.open{display:flex;animation:fadeIn .15s}
-  .cmdk-panel{background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-lg);width:100%;max-width:560px;box-shadow:var(--shadow-3);overflow:hidden;max-height:min(90vh, 90dvh)}
+  .cmdk-panel{background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-lg);width:100%;max-width:560px;box-shadow:var(--shadow-3);overflow:hidden;max-height:min(90vh, var(--vv-height, 90dvh))}
   .cmdk-input{width:100%;padding:16px 18px;background:transparent;border:none;color:var(--text-1);font-size:15px;font-family:inherit;outline:0;border-bottom:1px solid var(--border)}
   .cmdk-input::placeholder{color:var(--text-4)}
   .cmdk-results{max-height:420px;overflow-y:auto;padding:6px}
@@ -1762,9 +1767,11 @@
     .task-item.depth-3{margin-left:42px!important}
     .task-item.depth-4{margin-left:42px!important}  /* cap to prevent horizontal squeeze */
 
-    /* Modal - bottom-sheet style */
-    .modal-overlay{align-items:flex-end;padding:0!important}
-    .modal{width:100%!important;max-width:100%!important;max-height:92vh;border-radius:16px 16px 0 0;animation:slideUp .25s ease-out}
+    /* Modal - bottom-sheet style. The keyboard-inset padding-bottom lifts
+       the sheet above the soft keyboard so input fields and Save/Close
+       chrome stay visible without the user scrolling. */
+    .modal-overlay{align-items:flex-end;padding:0 0 var(--kb-inset, 0px) 0!important}
+    .modal{width:100%!important;max-width:100%!important;max-height:92vh;max-height:calc(var(--vv-height, 92dvh) - 8px);border-radius:16px 16px 0 0;animation:slideUp .25s ease-out}
     @keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
     /* Bottom-sheet drag-handle affordance — telegraphs "swipe down to close"
        on mobile per iOS / Android sheet conventions. The header wears the
@@ -1843,9 +1850,11 @@
     .save-indicator{bottom:calc(68px + env(safe-area-inset-bottom,0px))!important;left:10px!important;right:auto!important;font-size:10px!important;padding:3px 9px!important;border-radius:999px!important}
     .save-indicator.show{opacity:.9!important}
 
-    /* Cmd+K - bottom sheet on mobile */
-    .cmdk-overlay{padding:0!important;align-items:flex-end}
-    .cmdk-panel{width:100%;max-width:100%;border-radius:16px 16px 0 0;max-height:min(80vh, 80dvh)}
+    /* Cmd+K - bottom sheet on mobile. Keyboard-inset padding lifts the
+       palette above the soft keyboard so the input + conversation stay
+       visible when the user is typing. */
+    .cmdk-overlay{padding:0 0 var(--kb-inset, 0px) 0!important;align-items:flex-end}
+    .cmdk-panel{width:100%;max-width:100%;border-radius:16px 16px 0 0;max-height:min(80vh, var(--vv-height, 80dvh))}
     .cmdk-input{font-size:16px!important;padding:16px;min-height:56px}
     .cmdk-results{max-height:min(60vh, 55dvh)}
     .cmdk-item{padding:12px;min-height:44px;font-size:14px}
@@ -2451,7 +2460,7 @@
 .task-search-semantic{font-size:11px;color:var(--text-3);display:flex;align-items:center;gap:5px;white-space:nowrap;cursor:pointer;user-select:none}
 .task-search-semantic--disabled{opacity:.65;cursor:not-allowed}
 .task-search-semantic--disabled input{cursor:not-allowed}
-.what-next-overlay{position:fixed;inset:0;background:rgba(5,10,18,.72);z-index:var(--z-overlay);display:flex;align-items:flex-start;justify-content:center;padding:max(16px, env(safe-area-inset-top)) 12px 24px;overflow:auto}
+.what-next-overlay{position:fixed;inset:0;background:rgba(5,10,18,.72);z-index:var(--z-overlay);display:flex;align-items:flex-start;justify-content:center;padding:max(16px, env(safe-area-inset-top)) 12px calc(24px + var(--kb-inset, 0px));overflow:auto}
 .what-next-panel{background:var(--bg-1);border:1px solid var(--border);border-radius:var(--r-lg);max-width:440px;width:100%;padding:16px 18px;box-shadow:var(--shadow-1);margin-top:8vh}
 .what-next-hdr{display:flex;justify-content:space-between;align-items:center;font-weight:700;font-size:15px;margin-bottom:6px}
 .what-next-x{background:none;border:none;color:var(--text-3);cursor:pointer;font-size:16px;padding:4px}
@@ -3412,7 +3421,11 @@ body:has(.mini-timer.visible) .action-toast{bottom:calc(132px + env(safe-area-in
    (.cmdk-ask-answer-body, .cmdk-ask-error, .cmdk-ask-done, .cmdk-ask-empty,
    .cmdk-ask-rejected) are reused inside the assistant bubble so we don't
    duplicate styling. */
-#cmdkAskReply{max-height:46vh;overflow-y:auto;padding-right:2px;scroll-behavior:smooth}
+#cmdkAskReply{max-height:46vh;max-height:min(46vh, calc(var(--vv-height, 46dvh) - 180px));overflow-y:auto;padding-right:2px;scroll-behavior:smooth}
+/* When the soft keyboard is open, shrink the chat scroll area further so the
+   input field stays visible. 180→260 budget covers the input row, the foot
+   hint, and the "+ New chat" toolbar without clipping any of them. */
+.kb-open #cmdkAskReply{max-height:calc(var(--vv-height, 60dvh) - 260px)}
 .cmdk-ask-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 2px 8px;border-bottom:1px solid var(--border-subtle);margin-bottom:10px;position:sticky;top:0;background:var(--bg-0,inherit);z-index:1}
 .cmdk-ask-bar-btn{appearance:none;background:transparent;border:1px solid var(--border-subtle);color:var(--text-2);font-size:12px;padding:4px 10px;border-radius:999px;cursor:pointer;line-height:1.4}
 .cmdk-ask-bar-btn:hover{color:var(--text-1);border-color:var(--text-3)}
