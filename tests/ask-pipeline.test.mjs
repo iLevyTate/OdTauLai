@@ -260,6 +260,103 @@ test('askRun: first turn returns only [] — ok:true, no writes', async () => {
   assert.equal(res.readRounds, 0);
 });
 
+test('askRun: priorTurns are threaded into the LLM message list', async () => {
+  // The Ask sheet now runs as a multi-turn chat. Follow-up questions like
+  // "now archive those" only make sense when the model can see the prior
+  // exchange ("what's overdue?" → "...electric bill..."). cognitaskRun
+  // injects opts.priorTurns between the system and the new user message
+  // so the model has that context. This test asserts the wire format:
+  // prior user/assistant pairs appear in order with the correct roles.
+  const tasks = [{ id: 1, name: 'Pay electric bill', status: 'open', archived: false, lastModified: 1 }];
+  const schemaSrc2 = readFileSync(join(root, 'js', 'tool-schema.js'), 'utf8');
+  const askSrc2 = readFileSync(join(root, 'js', 'ask.js'), 'utf8');
+  const win = {};
+  let seenMessages = null;
+  const ctx = {
+    window: win,
+    console,
+    tasks,
+    lists: [],
+    isIntelReady: () => true,
+    embedText: async () => new Float32Array(8),
+    semanticSearch: async () => [],
+    isGenReady: () => true,
+    pushAskHistory: () => {},
+    getGenCfg: () => ({ timeoutSec: 30 }),
+    getUpcomingEvents: () => [],
+    getActiveCategories: () => [],
+    intelLoad: async () => {},
+    findTask: (id) => tasks.find((t) => t.id === id) || null,
+    genGenerate: async ({ messages }) => {
+      seenMessages = messages;
+      return '[]';
+    },
+  };
+  new Function(...Object.keys(ctx), schemaSrc2)(...Object.values(ctx));
+  ctx.TOOL_SCHEMA = win.TOOL_SCHEMA;
+  ctx.validateOps = win.validateOps;
+  ctx.parseOpsJson = win.parseOpsJson;
+  ctx.toolSchemaPromptBlock = win.toolSchemaPromptBlock;
+  new Function(...Object.keys(ctx), askSrc2)(...Object.values(ctx));
+  await win.askRun('and the rent?', {
+    priorTurns: [
+      { user: 'what is overdue?', assistant: 'The electric bill is overdue.' },
+    ],
+  });
+  assert.ok(seenMessages && seenMessages.length >= 4, 'expected system + prior pair + user, got ' + JSON.stringify(seenMessages));
+  assert.equal(seenMessages[0].role, 'system');
+  assert.equal(seenMessages[1].role, 'user');
+  assert.match(seenMessages[1].content, /what is overdue\?/);
+  assert.equal(seenMessages[2].role, 'assistant');
+  assert.match(seenMessages[2].content, /electric bill/i);
+  assert.equal(seenMessages[seenMessages.length - 1].role, 'user');
+  assert.match(seenMessages[seenMessages.length - 1].content, /and the rent\?/);
+});
+
+test('askRun: priorTurns control characters are stripped before they reach the prompt', async () => {
+  // Defensive: prior assistant content is model-generated and could in
+  // theory contain control chars that break tokenization or smuggle
+  // instructions. _askStripCtrl is applied to both user and assistant
+  // strings before they hit the message list.
+  const tasks = [{ id: 1, name: 'X', status: 'open', archived: false }];
+  const schemaSrc2 = readFileSync(join(root, 'js', 'tool-schema.js'), 'utf8');
+  const askSrc2 = readFileSync(join(root, 'js', 'ask.js'), 'utf8');
+  const win = {};
+  let seenMessages = null;
+  const ctx = {
+    window: win,
+    console,
+    tasks,
+    lists: [],
+    isIntelReady: () => true,
+    embedText: async () => new Float32Array(8),
+    semanticSearch: async () => [],
+    isGenReady: () => true,
+    pushAskHistory: () => {},
+    getGenCfg: () => ({ timeoutSec: 30 }),
+    getUpcomingEvents: () => [],
+    getActiveCategories: () => [],
+    intelLoad: async () => {},
+    findTask: () => null,
+    genGenerate: async ({ messages }) => { seenMessages = messages; return '[]'; },
+  };
+  new Function(...Object.keys(ctx), schemaSrc2)(...Object.values(ctx));
+  ctx.TOOL_SCHEMA = win.TOOL_SCHEMA;
+  ctx.validateOps = win.validateOps;
+  ctx.parseOpsJson = win.parseOpsJson;
+  ctx.toolSchemaPromptBlock = win.toolSchemaPromptBlock;
+  new Function(...Object.keys(ctx), askSrc2)(...Object.values(ctx));
+  await win.askRun('next', {
+    priorTurns: [
+      { user: 'hi there', assistant: 'reply' },
+    ],
+  });
+  const prior = seenMessages.filter((m) => m.role === 'user' || m.role === 'assistant');
+  // First two should be the prior pair; assert no C0 control bytes.
+  assert.equal(prior[0].content, 'hithere');
+  assert.equal(prior[1].content, 'reply');
+});
+
 test('askRun: question-like query with ops=[] runs prose pass and returns chatAnswer', async () => {
   // Regression guard: the ops-only system prompt teaches the LLM to answer
   // "what's overdue?" with `[]`, which was correct for the ops pipeline but

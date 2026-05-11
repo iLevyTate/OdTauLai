@@ -384,9 +384,25 @@ async function cognitaskRun(query, opts){
     + 'Call read tools first if you need tasks, calendar, lists, or categories. '
     + 'Use task ids that appear in the user context. Answer with tool call(s) in the required <tool_call> format; do not add other text.';
   const user = _askUserPrompt(q, contextLines);
+  // Conversation context: prior user/assistant exchanges from the chat
+  // sheet, sanitised + capped, so follow-up turns like "now archive those"
+  // can resolve relative references against the previous answer. Each
+  // entry is { user:string, assistant:string }. Failures are silently
+  // ignored — best-effort threading, not a load-bearing path.
+  const priorMsgs = [];
+  if(opts && Array.isArray(opts.priorTurns)){
+    for(const pt of opts.priorTurns){
+      if(!pt) continue;
+      const pu = _askStripCtrl(pt.user || '').slice(0, 600);
+      const pa = _askStripCtrl(pt.assistant || '').slice(0, 600);
+      if(!pu) continue;
+      priorMsgs.push({ role: 'user', content: pu });
+      if(pa) priorMsgs.push({ role: 'assistant', content: pa });
+    }
+  }
   const messages = useNativeQwenTools
-    ? [ { role: 'system', content: systemNativeQwen }, { role: 'user', content: user } ]
-    : [ { role: 'system', content: systemJson }, { role: 'user', content: user } ];
+    ? [ { role: 'system', content: systemNativeQwen }, ...priorMsgs, { role: 'user', content: user } ]
+    : [ { role: 'system', content: systemJson },     ...priorMsgs, { role: 'user', content: user } ];
 
   const cfg = (typeof getGenCfg === 'function') ? getGenCfg() : { timeoutSec: 30 };
   const timeoutMs = Math.max(5000, (cfg.timeoutSec || 30) * 1000);
@@ -517,6 +533,7 @@ async function cognitaskRun(query, opts){
       try{
         const proseMsgs = [
           { role: 'system', content: _askProseSystemPrompt() },
+          ...priorMsgs,
           { role: 'user',   content: _askUserPrompt(q, contextLines) },
         ];
         const proseTimeoutMs = Math.max(10000, (cfg.timeoutSec || 30) * 1000);
