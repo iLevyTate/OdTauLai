@@ -322,6 +322,39 @@ function _extractProseAnswer(raw){
   return joined.length > 1200 ? joined.slice(0, 1200) + '…' : joined;
 }
 
+// Heuristic: does the user's query read as a question or info request rather
+// than a write instruction? The op-only system prompt teaches the LLM to
+// answer "what's overdue?" / "summarise my week" with `[]`, which is correct
+// for the ops pipeline but leaves the user staring at "No actionable changes."
+// When this returns true and ops come back empty we run a second, prose
+// answer turn so the user actually gets a reply.
+function _askIsQuestionLike(q){
+  if(typeof q !== 'string') return false;
+  const s = q.trim();
+  if(!s) return false;
+  if(s.endsWith('?') || s.endsWith('？')) return true;
+  // Leading-word match. Kept conservative: only words that strongly imply a
+  // request for information, not a command. "Find X" stays a command path
+  // because it's plausibly a write-side operation (filter/select).
+  return /^(what|who|when|where|why|how|which|whose|is\b|are\b|do\b|does\b|can\b|could\b|should\b|tell\b|show\b|list\b|summari[sz]e|explain|describe|count|give|name\b)/i.test(s);
+}
+
+// Build a prose-answer prompt that runs in addition to the ops pipeline when
+// the user asks a question (no write ops produced). Mirrors the same task /
+// list / calendar context the ops prompt sees so the answer is grounded in
+// the user's actual data — not a generic LLM hallucination.
+function _askProseSystemPrompt(){
+  return [
+    'You are a concise on-device assistant for the user\'s task manager.',
+    'Answer the user\'s question in plain English using ONLY the Context below.',
+    'Rules:',
+    '- 1-4 sentences, or a short bullet list (max 8 bullets) when listing items.',
+    '- Never invent task names, ids, dates, or counts. If the Context is silent on something, say so.',
+    '- Do not output JSON, code fences, tool calls, or any kind of operation. Plain prose only.',
+    '- Refer to tasks by name (not by id) so the answer reads naturally.',
+  ].join('\n');
+}
+
 /**
  * @param {string} query
  * @param {{ onToken?:(t:string)=>void, onReadRound?:(summary:object)=>void, signal?:AbortSignal }} [opts]
@@ -474,6 +507,54 @@ async function cognitaskRun(query, opts){
 
   const writeOnly = lastFinal.filter(op => op && op.name && !_schemaReadOnly(String(op.name).toUpperCase()));
   if(!writeOnly.length){
+    // The ops pipeline correctly returned [] for a non-write query, but if
+    // the user actually asked a question ("what's overdue?", "summarise my
+    // week") we owe them a real answer instead of "No actionable changes."
+    // Run a second, prose-only pass on the same context. Best-effort —
+    // failures fall through to the original empty result. Independent
+    // timeout so a slow prose turn can't trip the op-pipeline timeout.
+    if(_askIsQuestionLike(q)){
+      try{
+        const proseMsgs = [
+          { role: 'system', content: _askProseSystemPrompt() },
+          { role: 'user',   content: _askUserPrompt(q, contextLines) },
+        ];
+        const proseTimeoutMs = Math.max(10000, (cfg.timeoutSec || 30) * 1000);
+        const proseTimeoutCtl = new AbortController();
+        const proseTimer = setTimeout(() => proseTimeoutCtl.abort(), proseTimeoutMs);
+        const proseSignal = (() => {
+          const ctl = new AbortController();
+          const bail = () => ctl.abort();
+          if(opts.signal){
+            if(opts.signal.aborted) bail();
+            else opts.signal.addEventListener('abort', bail, { once: true });
+          }
+          proseTimeoutCtl.signal.addEventListener('abort', bail, { once: true });
+          return ctl.signal;
+        })();
+        let proseText = '';
+        try{
+          const full = await genGenerate({
+            messages: proseMsgs,
+            maxTokens: 384,
+            temperature: 0.4,
+            onToken: (t) => {
+              proseText += t;
+              if(typeof opts.onToken === 'function'){ try{ opts.onToken(t); }catch(e){} }
+            },
+            signal: proseSignal,
+          });
+          if(!proseText) proseText = full || '';
+        }finally{
+          clearTimeout(proseTimer);
+        }
+        const chatAnswer = _extractProseAnswer(proseText);
+        if(chatAnswer){
+          if(typeof pushAskHistory === 'function') pushAskHistory(q);
+          return { ok: true, ops: [], rejected: [], destructiveLevel: 'none', rawText: allRaw + (allRaw ? '\n' : '') + proseText, truncated: false, readRounds, chatAnswer };
+        }
+      }catch(e){ /* prose pass is best-effort */ }
+    }
     return { ok: true, ops: [], rejected: [], destructiveLevel: 'none', rawText: allRaw, truncated: false, readRounds };
   }
 
@@ -507,6 +588,8 @@ if(typeof window !== 'undefined'){
   window._askBuildContext = _askBuildContext;
   window._askUserPrompt = _askUserPrompt;
   window._askSystemPrompt = _askSystemPrompt;
+  window._askProseSystemPrompt = _askProseSystemPrompt;
+  window._askIsQuestionLike = _askIsQuestionLike;
   window._askCtx = _askCtx;
   window._askCalendarBlock = _askCalendarBlock;
 }

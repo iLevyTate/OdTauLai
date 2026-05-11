@@ -396,7 +396,12 @@ async function cmdkAskSubmit(){
         _renderAskAnswer(res.chatAnswer);
         return;
       }
-      _renderAskStatus('empty','No actionable changes — nothing will be applied.');
+      // Ops pipeline returned [] and the question heuristic in cognitaskRun
+      // did not produce a prose answer (e.g. the model was silent or the
+      // query truly had no actionable intent). Tell the user what happened
+      // instead of the old "No actionable changes" which read like the app
+      // ignored their question.
+      _renderAskStatus('empty','No changes to apply, and no answer came back. Try rephrasing — e.g. "what is overdue?" or "make task 3 urgent".');
       return;
     }
     if(typeof acceptProposedOps==='function'){

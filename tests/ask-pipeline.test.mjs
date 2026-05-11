@@ -260,6 +260,100 @@ test('askRun: first turn returns only [] — ok:true, no writes', async () => {
   assert.equal(res.readRounds, 0);
 });
 
+test('askRun: question-like query with ops=[] runs prose pass and returns chatAnswer', async () => {
+  // Regression guard: the ops-only system prompt teaches the LLM to answer
+  // "what's overdue?" with `[]`, which was correct for the ops pipeline but
+  // left the user staring at "No actionable changes." cognitaskRun now does
+  // a second prose pass for question-shaped queries so a real answer comes
+  // back. The sequence below mirrors the runtime: first call returns `[]`
+  // (ops pipeline), second call returns plain prose (the prose pass).
+  const tasks = [
+    { id: 1, name: 'Pay electric bill', status: 'open', priority: 'urgent', archived: false, lastModified: 1 },
+    { id: 2, name: 'Buy milk',          status: 'open', priority: 'normal', archived: false, lastModified: 2 },
+  ];
+  const schemaSrc2 = readFileSync(join(root, 'js', 'tool-schema.js'), 'utf8');
+  const askSrc2 = readFileSync(join(root, 'js', 'ask.js'), 'utf8');
+  const win = {};
+  let call = 0;
+  const ctx = {
+    window: win,
+    console,
+    tasks,
+    lists: [],
+    isIntelReady: () => true,
+    embedText: async () => new Float32Array(8),
+    semanticSearch: async () => [],
+    isGenReady: () => true,
+    pushAskHistory: () => {},
+    getGenCfg: () => ({ timeoutSec: 30 }),
+    getUpcomingEvents: () => [],
+    getActiveCategories: () => [],
+    intelLoad: async () => {},
+    findTask: (id) => tasks.find((t) => t.id === id) || null,
+    genGenerate: async () => {
+      call += 1;
+      if (call === 1) return '[]';
+      return 'The most urgent open task is "Pay electric bill". Nothing else is overdue.';
+    },
+  };
+  new Function(...Object.keys(ctx), schemaSrc2)(...Object.values(ctx));
+  ctx.TOOL_SCHEMA = win.TOOL_SCHEMA;
+  ctx.validateOps = win.validateOps;
+  ctx.parseOpsJson = win.parseOpsJson;
+  ctx.toolSchemaPromptBlock = win.toolSchemaPromptBlock;
+  new Function(...Object.keys(ctx), askSrc2)(...Object.values(ctx));
+  const res = await win.askRun('what is overdue?', {});
+  assert.ok(res.ok, JSON.stringify(res));
+  assert.equal(res.ops.length, 0);
+  assert.equal(call, 2, 'expected ops pass + prose pass');
+  assert.ok(res.chatAnswer && /electric bill/i.test(res.chatAnswer), 'chatAnswer must contain the answer prose: ' + res.chatAnswer);
+});
+
+test('askRun: non-question with ops=[] does NOT trigger a second pass', async () => {
+  // The prose pass is gated on question-intent so simple "nevermind"-style
+  // commands don't waste a second model turn (and don't confuse the user
+  // with a chatty answer they didn't ask for).
+  const tasks = [{ id: 1, name: 'X', status: 'open', archived: false }];
+  let calls = 0;
+  const { win } = mkSandbox({
+    tasks,
+    genResponse: '[]',
+  });
+  const _orig = win.cognitaskRun;
+  // Re-bind genGenerate via a fresh sandbox so we can count calls precisely.
+  const schemaSrc2 = readFileSync(join(root, 'js', 'tool-schema.js'), 'utf8');
+  const askSrc2 = readFileSync(join(root, 'js', 'ask.js'), 'utf8');
+  const win2 = {};
+  const ctx = {
+    window: win2,
+    console,
+    tasks,
+    lists: [],
+    isIntelReady: () => true,
+    embedText: async () => new Float32Array(8),
+    semanticSearch: async () => [],
+    isGenReady: () => true,
+    pushAskHistory: () => {},
+    getGenCfg: () => ({ timeoutSec: 30 }),
+    getUpcomingEvents: () => [],
+    getActiveCategories: () => [],
+    intelLoad: async () => {},
+    findTask: (id) => tasks.find((t) => t.id === id) || null,
+    genGenerate: async () => { calls += 1; return '[]'; },
+  };
+  new Function(...Object.keys(ctx), schemaSrc2)(...Object.values(ctx));
+  ctx.TOOL_SCHEMA = win2.TOOL_SCHEMA;
+  ctx.validateOps = win2.validateOps;
+  ctx.parseOpsJson = win2.parseOpsJson;
+  ctx.toolSchemaPromptBlock = win2.toolSchemaPromptBlock;
+  new Function(...Object.keys(ctx), askSrc2)(...Object.values(ctx));
+  const res = await win2.askRun('nevermind', {});
+  assert.ok(res.ok);
+  assert.equal(res.ops.length, 0);
+  assert.equal(res.chatAnswer, undefined);
+  assert.equal(calls, 1, 'no prose pass for non-question queries');
+});
+
 test('runReadOp GET_CALENDAR_EVENTS requests enough lookahead for distant toDate', async () => {
   const schemaSrc2 = readFileSync(join(root, 'js', 'tool-schema.js'), 'utf8');
   const askSrc2 = readFileSync(join(root, 'js', 'ask.js'), 'utf8');
