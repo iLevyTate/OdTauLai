@@ -142,6 +142,12 @@ window.announceTaskAdd=announceTaskAdd;
  */
 function showActionToast(label, actionLabel, actionFn, ms){
   const ttl = (typeof ms === 'number' && ms > 0) ? ms : 8000;
+  // Mirror the action's undo into the global undo ring so Cmd+Z keeps
+  // working after the toast fades. Only when actionLabel reads as "Undo"
+  // (a "Dismiss" or "Confirm" toast isn't an undoable action).
+  if(actionLabel && typeof actionFn === 'function' && /^\s*undo\b/i.test(String(actionLabel)) && typeof pushUndo === 'function'){
+    try{ pushUndo(label, actionFn); }catch(_){}
+  }
   let host = document.getElementById('actionToast');
   if(!host){
     host = document.createElement('div');

@@ -49,9 +49,21 @@ function _askSerializeTask(t){
  * Will lazily kick off embedding model load if the user enabled Ask but never
  * opened Tools — but won't block the Ask turn on that (retrieval is best-effort).
  */
+// Detect retrospective / archive-aware queries. When the user asks "what did
+// I finish this week?" or "show me completed accounting tasks", filtering the
+// context down to open + non-archived tasks (the default for the daily ops
+// pipeline) silently returns wrong answers. This heuristic widens the
+// context for those queries to include done + archived.
+function _askIsRetrospective(q){
+  if(typeof q !== 'string') return false;
+  const s = q.toLowerCase();
+  return /\b(complete|completed|finish|finished|done|archived|history|last week|last month|yesterday|recent(ly)?|past)\b/.test(s);
+}
+
 async function _askBuildContext(query){
   const out = [];
   const seen = new Set();
+  const retro = _askIsRetrospective(query);
 
   // Kick off embedding load in the background if it's missing. We briefly
   // await it (short timeout) so first-ever Ask turns get semantic retrieval
@@ -79,7 +91,9 @@ async function _askBuildContext(query){
 
   if(typeof tasks !== 'undefined' && Array.isArray(tasks)){
     const recents = tasks
-      .filter(t => !t.archived && t.status !== 'done')
+      // Retrospective queries see done + archived; everyday queries don't, so
+      // a normal "make X urgent" prompt isn't drowned in stale history.
+      .filter(t => retro ? true : (!t.archived && t.status !== 'done'))
       .slice()
       .sort((a, b) => (b.lastModified || 0) - (a.lastModified || 0))
       .slice(0, ASK_RECENT_MAX_TASKS);
@@ -248,15 +262,25 @@ function runReadOp(op){
       const f = (a.filter != null && a.filter !== '')
         ? String(_coerceReadKey('filter', a.filter) || '').toLowerCase()
         : '';
+      // Honour an `includeArchived`/`includeDone` flag so the LLM can opt in
+      // to retrospective queries ("what did I finish last week?"). Default
+      // stays narrow so everyday ops don't accidentally hit done/archived ids.
+      const wantDone     = a.includeDone     === true || a.includeDone     === 'true' || a.status === 'done';
+      const wantArchived = a.includeArchived === true || a.includeArchived === 'true';
       const pool = (typeof tasks !== 'undefined' && Array.isArray(tasks))
-        ? tasks.filter(t => t && !t.archived && t.status !== 'done') : [];
+        ? tasks.filter(t => {
+            if(!t) return false;
+            if(t.archived && !wantArchived) return false;
+            if(t.status === 'done' && !wantDone) return false;
+            return true;
+          }) : [];
       const picked = f
         ? pool.filter(t => {
             const desc = String(t.description || '').slice(0, 5000);
             return (String(t.name || '') + ' ' + desc).toLowerCase().includes(f);
           })
         : pool;
-      return { tasks: picked.slice(0, lim).map(t => ({ id: t.id, name: t.name, dueDate: t.dueDate, status: t.status, priority: t.priority })) };
+      return { tasks: picked.slice(0, lim).map(t => ({ id: t.id, name: t.name, dueDate: t.dueDate, status: t.status, priority: t.priority, completedAt: t.completedAt || null, archived: !!t.archived })) };
     }
     if(n === 'GET_TASK_DETAIL'){
       const id = _coerceReadKey('id', a.id);

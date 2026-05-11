@@ -14,7 +14,7 @@ function toggleSettings(){
 }
 
 // ========== STATE ==========
-let cfg={work:25,short:5,long:15,cycle:4,autoBreak:true,autoWork:false,sound:true,linkTask:true,notif:true,timerSub:'pomo',hideHabitsInMainViews:true,askSessionNote:true,focusListMode:false,phasePreset:'classic',qaHintHidden:true,askPromoHidden:true,quickAddFields:['list','due']};
+let cfg={work:25,short:5,long:15,cycle:4,autoBreak:true,autoWork:false,sound:true,linkTask:true,notif:true,timerSub:'pomo',hideHabitsInMainViews:true,askSessionNote:true,focusListMode:false,phasePreset:'classic',qaHintHidden:true,askPromoHidden:true,quickAddFields:['list','due'],cascadeCompletion:true,dueNotify:true};
 
 /** Named Pomodoro phase presets — applies to cfg.work/short/cycle on selection. */
 const PHASE_PRESETS = {

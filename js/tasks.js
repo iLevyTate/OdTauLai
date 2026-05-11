@@ -1133,17 +1133,32 @@ function setQuickReminder(offset,hour){
 function checkReminders(){
   const now=Date.now();
   let fired=false;
+  const dueNotify = !(typeof cfg !== 'undefined' && cfg && cfg.dueNotify === false);
   tasks.forEach(t=>{
-    if(!t.remindAt||t.reminderFired||t.archived||t.status==='done')return;
-    const remindTime=new Date(t.remindAt).getTime();
-    if(!Number.isFinite(remindTime)){
-      console.warn('[tasks] Invalid remindAt on task',t.id);
+    if(t.reminderFired||t.archived||t.status==='done')return;
+    // Either an explicit remindAt, or — opt-out via cfg.dueNotify — the
+    // dueDate at midday acts as the implicit reminder time. Other apps treat
+    // a due date as a reminder by default; without this, a user sets a due
+    // date and never hears about it.
+    let reminderSrc = null;
+    let remindTime = null;
+    if(t.remindAt){
+      const rt = new Date(t.remindAt).getTime();
+      if(Number.isFinite(rt)){ remindTime = rt; reminderSrc = 'remindAt'; }
+      else { console.warn('[tasks] Invalid remindAt on task', t.id); return; }
+    } else if(dueNotify && t.dueDate){
+      // Fire at 09:00 local on the due date — the same heuristic users see in
+      // Apple Reminders / Things when no specific time was set.
+      const rt = new Date(String(t.dueDate) + 'T09:00:00').getTime();
+      if(Number.isFinite(rt)){ remindTime = rt; reminderSrc = 'dueDate'; }
+      else return;
+    } else {
       return;
     }
     if(now>=remindTime){
       t.reminderFired=true;fired=true;
       const late=(now-remindTime)>5*60*1000;
-      const title=(late?'Missed: ':'Task reminder: ')+t.name;
+      const title=(late?'Missed: ':(reminderSrc === 'dueDate' ? 'Due now: ' : 'Task reminder: '))+t.name;
       if('Notification' in window&&Notification.permission==='granted'){
         try{
           if(typeof notify === 'function'){
@@ -1165,6 +1180,33 @@ function checkReminders(){
   });
   if(fired)saveState('auto')
 }
+
+// Nudge the user once when they create a remindAt / dueDate but the browser
+// notification permission is still 'default' — otherwise the reminder will
+// fire silently and feel broken. Stores a one-shot flag in localStorage so
+// the toast doesn't pester them every task. The Settings → Notifications CTA
+// remains the canonical place to grant the permission.
+function _maybeNudgeNotifPerm(){
+  try{
+    if(typeof Notification === 'undefined') return;
+    if(Notification.permission !== 'default') return;
+    if(typeof cfg !== 'undefined' && cfg && cfg.notif === false) return;
+    const k = 'stupind_reminder_perm_nudged';
+    if(localStorage.getItem(k) === '1') return;
+    localStorage.setItem(k, '1');
+    if(typeof showActionToast !== 'function') return;
+    showActionToast('Reminders need notification permission', 'Enable', async () => {
+      if(typeof reqNotifPerm === 'function'){
+        const r = await reqNotifPerm();
+        if(typeof renderNotifStatus === 'function') renderNotifStatus();
+        if(r !== 'granted' && typeof showExportToast === 'function'){
+          showExportToast('Permission ' + r + ' — enable later in Settings → Notifications.');
+        }
+      }
+    }, 8000);
+  }catch(_){}
+}
+window._maybeNudgeNotifPerm = _maybeNudgeNotifPerm;
 // Check reminders every 30s (guarded against double-init)
 let _reminderIntervalId = null;
 if (_reminderIntervalId) clearInterval(_reminderIntervalId);
@@ -1248,6 +1290,65 @@ function getHabitLoggedSecTotal(t){
   },0);
 }
 
+// ── Parent/subtask completion cascade ────────────────────────────────────────
+// Two rules, both opt-in via `cfg.cascadeCompletion` (default ON):
+//   1. Marking a parent done auto-completes every open, non-recurring child
+//      so the user doesn't have to walk the subtree by hand.
+//   2. Marking the last open subtask done auto-completes the parent.
+// Recurring tasks are skipped — they own their own completion cycle.
+// Returns an array of {id, prev} snapshots of every task we mutated, so the
+// undo path can restore the whole batch (not just the directly-clicked row).
+function _cascadeOnDone(taskId){
+  if(!(typeof cfg !== 'undefined' && cfg && cfg.cascadeCompletion !== false)) return [];
+  const affected = [];
+  const visit = (id) => {
+    const kids = getTaskChildren(id);
+    for(const k of kids){
+      if(k.archived) continue;
+      if(k.recur) continue;        // habits cycle separately
+      if(k.status === 'done') continue;
+      affected.push({ id: k.id, prev: { status: k.status, completedAt: k.completedAt } });
+      k.status = 'done';
+      k.completedAt = stampCompletion();
+      visit(k.id);
+    }
+  };
+  visit(taskId);
+  return affected;
+}
+function _cascadeOnReopen(taskId){
+  // Re-opening a parent doesn't reopen its children — that'd surprise users.
+  // No-op kept for symmetry / future opt-in.
+  return [];
+}
+function _maybeAutoCompleteParent(childId){
+  if(!(typeof cfg !== 'undefined' && cfg && cfg.cascadeCompletion !== false)) return [];
+  const child = findTask(childId);
+  if(!child || child.parentId == null) return [];
+  const parent = findTask(child.parentId);
+  if(!parent) return [];
+  if(parent.archived || parent.status === 'done' || parent.recur) return [];
+  // All non-archived siblings (including the just-completed child) must be done.
+  const siblings = tasks.filter(t => t.parentId === parent.id && !t.archived);
+  if(!siblings.length) return [];
+  const allDone = siblings.every(t => t.status === 'done');
+  if(!allDone) return [];
+  const snap = [{ id: parent.id, prev: { status: parent.status, completedAt: parent.completedAt } }];
+  parent.status = 'done';
+  parent.completedAt = stampCompletion();
+  // Recurse upward — completing a parent may complete its own parent.
+  return snap.concat(_maybeAutoCompleteParent(parent.id));
+}
+function _restoreCascade(snapshots){
+  if(!Array.isArray(snapshots)) return;
+  for(const s of snapshots){
+    const t = findTask(s.id);
+    if(!t || !s.prev) continue;
+    t.status = s.prev.status;
+    t.completedAt = s.prev.completedAt;
+  }
+}
+
 // Status/Priority quick-change
 function cycleStatus(id){
   event&&event.stopPropagation();
@@ -1255,11 +1356,18 @@ function cycleStatus(id){
   const backup=JSON.parse(JSON.stringify(t));
   const idx=STATUS_ORDER.indexOf(t.status||'open');
   const next=STATUS_ORDER[(idx+1)%STATUS_ORDER.length];
+  let cascade = [];
   if(next==='done'&&t.recur){completeHabitCycle(t)}
   else{
     t.status=next;
-    if(t.status==='done')t.completedAt=stampCompletion();
-    else t.completedAt=null;
+    if(t.status==='done'){
+      t.completedAt=stampCompletion();
+      // Mark all open children done too, then bubble up: if this completes
+      // the last sibling, the parent auto-completes.
+      cascade = cascade.concat(_cascadeOnDone(id), _maybeAutoCompleteParent(id));
+    } else {
+      t.completedAt=null;
+    }
   }
   // Status cycle may move this card under a sticky group header — FLIP it.
   const list=gid('taskList');
@@ -1267,9 +1375,12 @@ function cycleStatus(id){
   else renderTaskList();
   saveState('user');
   if(typeof showActionToast==='function'){
-    showActionToast('Status: '+STATUSES[t.status].label, 'Undo', ()=>{
+    const cascadeNote = cascade.length ? ' (+' + cascade.length + ' linked)' : '';
+    showActionToast('Status: '+STATUSES[t.status].label + cascadeNote, 'Undo', ()=>{
       const u=findTask(id);
-      if(u){Object.assign(u,backup);renderTaskList();saveState('user')}
+      if(u){Object.assign(u,backup);}
+      _restoreCascade(cascade);
+      renderTaskList();saveState('user');
     }, 4000);
   }
 }
@@ -1278,6 +1389,7 @@ function toggleTaskDoneQuick(id){
   event&&event.stopPropagation();
   const t=findTask(id);if(!t)return;
   const backup=JSON.parse(JSON.stringify(t));
+  let cascade = [];
   if(t.status==='done'){t.status='open';t.completedAt=null}
   else{
     if(t.recur){
@@ -1286,6 +1398,8 @@ function toggleTaskDoneQuick(id){
     }else{
       t.status='done';t.completedAt=stampCompletion();
       if(activeTaskId===id){toggleTask(id)}
+      // Cascade down to subtasks and bubble up if siblings are all done.
+      cascade = cascade.concat(_cascadeOnDone(id), _maybeAutoCompleteParent(id));
     }
     haptic(15);
     // Dopamine: animate the row + a little sparkle
@@ -1304,9 +1418,12 @@ function toggleTaskDoneQuick(id){
   }
   renderTaskList();saveState('user');
   if(typeof showActionToast==='function'){
-    showActionToast(t.status==='done'?'Task done':'Task reopened', 'Undo', ()=>{
+    const cascadeNote = cascade.length ? ' (+' + cascade.length + ' linked)' : '';
+    showActionToast((t.status==='done'?'Task done':'Task reopened') + cascadeNote, 'Undo', ()=>{
       const u=findTask(id);
-      if(u){Object.assign(u,backup);renderTaskList();saveState('user')}
+      if(u){Object.assign(u,backup);}
+      _restoreCascade(cascade);
+      renderTaskList();saveState('user');
     }, 4000);
   }
 }

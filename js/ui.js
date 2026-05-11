@@ -770,11 +770,69 @@ function renderCmdK(){
   }
   const matchedNav=q?navActions.filter(a=>a.label.toLowerCase().includes(q)):navActions;
   if(matchedNav.length){items.push({section:'Actions'});matchedNav.forEach(a=>items.push(a))}
-  // Match tasks
-  const matchedTasks=tasks.filter(t=>!t.archived&&(t.name.toLowerCase().includes(q)||(t.description||'').toLowerCase().includes(q))).slice(0,12);
-  if(q&&matchedTasks.length){
+  // Match tasks. Search includes name, description, AND tags so a quick-add
+  // like `#errands` finds anything tagged. Active (open/in-progress) tasks
+  // first, then a smaller "Completed & archived" section so retrospective
+  // lookups ("where did I file last quarter's notes?") aren't dead ends.
+  const matchTask = (t) => {
+    if(t.name.toLowerCase().includes(q)) return true;
+    if((t.description||'').toLowerCase().includes(q)) return true;
+    if(Array.isArray(t.tags) && t.tags.some(tg => String(tg).toLowerCase().includes(q))) return true;
+    return false;
+  };
+  const activeMatches = tasks.filter(t => !t.archived && t.status !== 'done' && matchTask(t)).slice(0, 12);
+  if(q && activeMatches.length){
     items.push({section:'Tasks'});
-    matchedTasks.forEach(t=>items.push({type:'task',label:t.name,icon:t.status==='done'?'✓':'○',desc:(t.dueDate?fmtDue(t.dueDate):'')||getTaskPath(t.id).slice(0,-1).join(' › '),run:()=>{showTab('tasks');openTaskDetail(t.id)}}));
+    activeMatches.forEach(t=>items.push({type:'task',label:t.name,icon:t.status==='done'?'✓':'○',desc:(t.dueDate?fmtDue(t.dueDate):'')||getTaskPath(t.id).slice(0,-1).join(' › '),run:()=>{showTab('tasks');openTaskDetail(t.id)}}));
+  }
+  const doneMatches = tasks.filter(t => (t.archived || t.status === 'done') && matchTask(t)).slice(0, 6);
+  if(q && doneMatches.length){
+    items.push({section:'Completed & archived'});
+    doneMatches.forEach(t=>items.push({type:'task',label:t.name,icon:t.archived?'🗂':'✓',desc:t.archived?'archived':'done',run:()=>{
+      // Switching to the matching smart view so the user can see the task in
+      // context instead of just opening it in isolation.
+      showTab('tasks');
+      if(t.archived){ if(typeof setSmartView==='function') setSmartView('archived'); }
+      else { if(typeof setSmartView==='function') setSmartView('completed'); }
+      setTimeout(() => { if(typeof openTaskDetail==='function') openTaskDetail(t.id); }, 60);
+    }}));
+  }
+  // Match lists by name.
+  if(q && typeof lists !== 'undefined' && Array.isArray(lists)){
+    const listMatches = lists.filter(l => l && (l.name||'').toLowerCase().includes(q)).slice(0, 6);
+    if(listMatches.length){
+      items.push({section:'Lists'});
+      listMatches.forEach(l => items.push({
+        type:'action', label:'Open list: '+l.name, icon: ic('folder'),
+        run: () => { showTab('tasks'); if(typeof switchList==='function') switchList(l.id); }
+      }));
+    }
+  }
+  // Settings index — when the user types a setting-y keyword, surface a jump
+  // straight to the Settings tab. Cheap and dramatically improves
+  // findability vs. scrolling the long flat settings panel.
+  if(q){
+    const settingsIndex = [
+      ['theme dark light',                 'Theme (dark / light)'],
+      ['sound chime audio',                'Sound & chimes'],
+      ['notification permission',          'Notifications'],
+      ['ai model llm embedding download',  'AI / on-device model'],
+      ['sync peer p2p webrtc',             'Sync (peer-to-peer)'],
+      ['export import backup csv json ical','Data export / import'],
+      ['encrypt password',                  'Encrypted backup'],
+      ['calendar feed ics ical',            'Calendar feeds'],
+      ['category classification',           'Categories'],
+      ['list project',                      'Lists / projects'],
+      ['phase preset pomodoro work break',  'Pomodoro presets'],
+    ];
+    const settingsHits = settingsIndex.filter(([keys]) => keys.split(' ').some(k => k.startsWith(q)) || keys.includes(q)).slice(0, 5);
+    if(settingsHits.length){
+      items.push({section:'Settings'});
+      settingsHits.forEach(([, label]) => items.push({
+        type:'action', label:'Go to: '+label, icon: ic('gear'),
+        run: () => showTab('settings')
+      }));
+    }
   }
   cmdkFilteredItems=items.filter(i=>!i.section);
   if(cmdkActiveIdx>=cmdkFilteredItems.length)cmdkActiveIdx=Math.max(0,cmdkFilteredItems.length-1);
@@ -846,7 +904,34 @@ document.addEventListener('keydown',e=>{
   }
 });
 
-// Keyboard shortcut: Ctrl+Z / Cmd+Z — undo the last action via the action toast button
+// ── Extended undo stack ─────────────────────────────────────────────────────
+// The action-toast button only lives ~4s. Anything beyond that — and any
+// action that finished without a toast — was previously irrecoverable. We
+// also push every undoable action into a small ring buffer (depth 10, ~30s
+// per entry) that Cmd+Z drains in LIFO order. The toast button still runs
+// the same undo function, but it's no longer the only path.
+const _UNDO_RING_MAX = 10;
+const _UNDO_TTL_MS = 60_000;
+const _undoRing = [];
+function _pruneUndoRing(){
+  const cutoff = Date.now() - _UNDO_TTL_MS;
+  while(_undoRing.length && _undoRing[0].ts < cutoff) _undoRing.shift();
+  while(_undoRing.length > _UNDO_RING_MAX) _undoRing.shift();
+}
+function pushUndo(label, undoFn){
+  if(typeof undoFn !== 'function') return;
+  _undoRing.push({ ts: Date.now(), label: String(label || 'Last action'), fn: undoFn });
+  _pruneUndoRing();
+}
+function popUndo(){
+  _pruneUndoRing();
+  return _undoRing.pop() || null;
+}
+window.pushUndo = pushUndo;
+window.popUndo = popUndo;
+
+// Keyboard shortcut: Ctrl+Z / Cmd+Z — undo the last action. Falls back to the
+// extended ring buffer when there's no live action-toast to click.
 document.addEventListener('keydown',(e)=>{
   if((e.ctrlKey||e.metaKey)&&e.key==='z'&&!e.shiftKey){
     const active=document.activeElement;
@@ -858,10 +943,156 @@ document.addEventListener('keydown',(e)=>{
       if(btn&&toast?.classList?.contains('show')){
         e.preventDefault();
         btn.click();
+        return;
+      }
+      // Toast already vanished — fall back to the ring buffer.
+      const entry = popUndo();
+      if(entry){
+        e.preventDefault();
+        try{ entry.fn(); }catch(err){ console.warn('[undo] failed', err); }
+        if(typeof showExportToast === 'function') showExportToast('Undone: ' + entry.label);
       }
     }
   }
 },true);
+
+// Global shortcut: Cmd/Ctrl+N (or plain "n" when not focused in a field) →
+// jump to Tasks and focus the new-task input. Matches the muscle memory from
+// Todoist/Things/Notion — quick-capture from any tab without scrolling.
+document.addEventListener('keydown',(e)=>{
+  if(_blockingOverlaysForCmdK && _blockingOverlaysForCmdK()) return;
+  const active = document.activeElement;
+  const tag = active ? active.tagName.toLowerCase() : '';
+  const inField = (tag==='input' || tag==='textarea' || tag==='select' || (active && active.isContentEditable));
+  const isMeta = (e.ctrlKey || e.metaKey);
+  const isShortcut = (isMeta && (e.key==='n' || e.key==='N')) || (!inField && !isMeta && (e.key==='n' || e.key==='N') && !e.altKey && !e.shiftKey);
+  if(!isShortcut) return;
+  // Skip native "new window" only when the meta-N combo would conflict — but
+  // Cmd+N is browser-level "new window" so we must require the focus to NOT
+  // be in a field AND the user to be in the app's primary surface.
+  if(isMeta && tag === 'input') return;
+  e.preventDefault();
+  if(typeof showTab === 'function') showTab('tasks');
+  const inp = document.getElementById('taskInput');
+  if(inp){
+    try{ inp.focus(); inp.select && inp.select(); }catch(_){}
+    inp.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+});
+
+// Global shortcut: "?" (Shift+/) when not in a field → show the keyboard
+// shortcuts cheatsheet. Discoverability: today shortcuts are scattered
+// across the codebase and there's no one place to learn them.
+document.addEventListener('keydown',(e)=>{
+  if(e.key !== '?') return;
+  if(e.ctrlKey || e.metaKey || e.altKey) return;
+  if(_blockingOverlaysForCmdK && _blockingOverlaysForCmdK()) return;
+  const active = document.activeElement;
+  const tag = active ? active.tagName.toLowerCase() : '';
+  if(tag==='input' || tag==='textarea' || tag==='select' || (active && active.isContentEditable)) return;
+  e.preventDefault();
+  if(typeof showShortcutsHelp === 'function') showShortcutsHelp();
+});
+
+function showShortcutsHelp(){
+  const groups = [
+    { title: 'Navigation', items: [
+      ['Ctrl/⌘ + K', 'Open command palette (find tasks, run actions)'],
+      ['Ctrl/⌘ + N or N', 'Focus the new-task input (jumps to Tasks)'],
+      ['1 – 5', 'Switch top-level tab (Tasks / Timer / Tools / Data / Settings)'],
+      ['Shift + D', 'Daily brief card'],
+      ['Esc', 'Close any open modal / palette / sheet'],
+    ]},
+    { title: 'Ask (AI)', items: [
+      ['?', 'Open this shortcuts help (when no field is focused)'],
+      ['? <query>', 'Type at the task input to send to Ask mode'],
+      ['Ctrl/⌘ + K, then toggle Ask', 'Open the chat sheet'],
+      ['Enter', 'Send the current message'],
+      ['↑ / ↓', 'Cycle previous Ask queries in the input'],
+      ['+ New chat', 'Clear conversation context without closing the sheet'],
+    ]},
+    { title: 'Tasks', items: [
+      ['Click a row', 'Open task detail'],
+      ['Click + on a task', 'Add subtask'],
+      ['Long-press a task (touch)', 'Enter bulk-edit mode'],
+      ['Click the status pill', 'Cycle Open → In Progress → Review → Blocked → Done'],
+      ['Type "?" at the start of the input', 'Send the rest to Ask'],
+      ['Paste multiple lines', 'Bulk-import preview'],
+    ]},
+    { title: 'Undo & feedback', items: [
+      ['Ctrl/⌘ + Z', 'Undo last action (extended — works up to 60s)'],
+      ['Click an action toast', 'Undo just that action'],
+    ]},
+    { title: 'Quick-add syntax (in task input)', items: [
+      ['tomorrow / today / next mon', 'Set due date'],
+      ['@urgent @high @normal @low', 'Priority'],
+      ['#tag1 #tag2', 'Tags'],
+      ['!star', 'Mark starred'],
+      ['~daily / ~weekdays / ~weekly / ~monthly', 'Recurrence'],
+    ]},
+  ];
+  // Build modal DOM. Reuses .modal-overlay/.modal classes so it inherits the
+  // existing keyboard-inset and mobile-sheet behaviour.
+  let ov = document.getElementById('shortcutsHelpOverlay');
+  if(ov){ ov.classList.add('open'); return; }
+  ov = document.createElement('div');
+  ov.id = 'shortcutsHelpOverlay';
+  ov.className = 'modal-overlay';
+  const close = () => { ov.classList.remove('open'); setTimeout(() => ov.remove(), 200); };
+  ov.addEventListener('click', (e) => { if(e.target === ov) close(); });
+  const m = document.createElement('div');
+  m.className = 'modal';
+  m.style.maxWidth = '640px';
+  const head = document.createElement('div');
+  head.className = 'modal-head';
+  const h = document.createElement('strong');
+  h.textContent = 'Keyboard shortcuts';
+  head.appendChild(h);
+  const x = document.createElement('button');
+  x.className = 'modal-close';
+  x.textContent = '×';
+  x.title = 'Close';
+  x.setAttribute('aria-label', 'Close shortcuts help');
+  x.onclick = close;
+  head.appendChild(x);
+  const body = document.createElement('div');
+  body.className = 'modal-body';
+  body.style.display = 'grid';
+  body.style.gap = '18px';
+  for(const g of groups){
+    const sec = document.createElement('div');
+    const st = document.createElement('div');
+    st.style.cssText = 'font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:var(--text-3);margin-bottom:8px;font-weight:600';
+    st.textContent = g.title;
+    sec.appendChild(st);
+    const tbl = document.createElement('div');
+    tbl.style.display = 'grid';
+    tbl.style.gridTemplateColumns = 'minmax(140px, max-content) 1fr';
+    tbl.style.gap = '6px 14px';
+    tbl.style.fontSize = '13px';
+    tbl.style.lineHeight = '1.55';
+    for(const [k, v] of g.items){
+      const kEl = document.createElement('kbd');
+      kEl.style.cssText = 'font-family:var(--font-mono,monospace);background:var(--bg-2);border:1px solid var(--border-subtle);padding:2px 8px;border-radius:6px;color:var(--text-1);font-size:12px;white-space:nowrap';
+      kEl.textContent = k;
+      const vEl = document.createElement('span');
+      vEl.style.color = 'var(--text-2)';
+      vEl.textContent = v;
+      tbl.appendChild(kEl);
+      tbl.appendChild(vEl);
+    }
+    sec.appendChild(tbl);
+    body.appendChild(sec);
+  }
+  m.appendChild(head); m.appendChild(body);
+  ov.appendChild(m);
+  document.body.appendChild(ov);
+  requestAnimationFrame(() => ov.classList.add('open'));
+  // Esc closes.
+  const onKey = (e) => { if(e.key === 'Escape'){ close(); document.removeEventListener('keydown', onKey); } };
+  document.addEventListener('keydown', onKey);
+}
+window.showShortcutsHelp = showShortcutsHelp;
 
 // ========== THEME TOGGLE ==========
 // Manual toggle wins over OS preference: once the user picks a theme it sticks
@@ -1005,17 +1236,38 @@ function renderTaskItem(t,depth){
   if(typeof isBulkMode === 'function' && isBulkMode() && typeof _bulkSelectedIds !== 'undefined' && _bulkSelectedIds.has(t.id)){
     d.classList.add('task-bulk-selected');
   }
-  // Swipe-to-complete for touch
+  // Swipe-to-complete + long-press-to-bulk-select for touch. Long-press is
+  // the standard mobile gesture for "select multiple" (Files, Mail, Photos);
+  // hooking it here makes bulk mode discoverable without a desktop palette.
   let touchStartX=0,touchStartY=0,touchCurrentX=0,swiping=false;
+  let _longPressId=null,_longPressFired=false;
   d.addEventListener('touchstart',function(e){
     if(e.target.closest('button')||e.target.closest('input'))return;
     touchStartX=e.touches[0].clientX;touchStartY=e.touches[0].clientY;swiping=false;
+    _longPressFired=false;
+    if(_longPressId){clearTimeout(_longPressId);_longPressId=null}
+    _longPressId=setTimeout(() => {
+      // Long-press only triggers when the finger hasn't moved enough to count
+      // as a swipe. Enters bulk mode and selects this task as the first item.
+      if(swiping) return;
+      _longPressFired=true;
+      haptic(20);
+      if(typeof isBulkMode === 'function' && !isBulkMode() && typeof toggleBulkMode === 'function'){
+        toggleBulkMode();
+      }
+      if(typeof bulkToggleSelect === 'function') bulkToggleSelect(t.id);
+      d.classList.toggle('task-bulk-selected', _bulkSelectedIds && _bulkSelectedIds.has(t.id));
+    }, 500);
   },{passive:true});
   d.addEventListener('touchmove',function(e){
     if(!touchStartX)return;
     touchCurrentX=e.touches[0].clientX;
     const dx=touchCurrentX-touchStartX,dy=e.touches[0].clientY-touchStartY;
     if(!swiping&&Math.abs(dx)>12&&Math.abs(dx)>Math.abs(dy)*1.5)swiping=true;
+    // Movement cancels the long-press timer.
+    if((Math.abs(dx) > 8 || Math.abs(dy) > 8) && _longPressId){
+      clearTimeout(_longPressId); _longPressId = null;
+    }
     if(swiping){
       if(e.cancelable)e.preventDefault();
       d.style.transform='translateX('+dx+'px)';
@@ -1024,15 +1276,22 @@ function renderTaskItem(t,depth){
     }
   },{passive:false});
   d.addEventListener('touchend',function(e){
+    if(_longPressId){ clearTimeout(_longPressId); _longPressId = null; }
     const dx=touchCurrentX-touchStartX;
     d.style.transition='transform .2s,background .2s';d.style.transform='';d.style.background='';
+    if(_longPressFired){
+      // Suppress the synthetic click that would otherwise open the detail.
+      e.preventDefault && e.preventDefault();
+      touchStartX=0;touchCurrentX=0;swiping=false;_longPressFired=false;
+      return;
+    }
     if(swiping&&Math.abs(dx)>80){
       haptic(20);
       if(dx>0){toggleTaskDoneQuick(t.id)}
       else{removeTask(t.id)}
     }
     touchStartX=0;touchCurrentX=0;swiping=false;
-  },{passive:true});
+  },{passive:false});
 
   // At rest: due chip (overdue / today / soon only) + subtask progress. Habits view: ↻ + streak. Rest on hover.
   const chevron=kids
@@ -1702,7 +1961,9 @@ function saveTaskDetail(){
     gid('mdCheckbox').classList.remove('checked');gid('mdCheckbox').textContent='';
   }
   t.name=gid('mdName').value.trim()||t.name;
-  t.dueDate=gid('mdDue').value||null;
+  const _newDue = gid('mdDue').value || null;
+  const _dueChanged = _newDue && _newDue !== t.dueDate;
+  t.dueDate = _newDue;
   if(gid('mdSnoozeUntil')) t.hiddenUntil=gid('mdSnoozeUntil').value||null;
   t.startDate=gid('mdStartDate').value||null;
   t.estimateMin=parseInt(gid('mdEstimate').value)||0;
@@ -1710,7 +1971,12 @@ function saveTaskDetail(){
   t.url=gid('mdUrl').value.trim()||null;
   t.completionNote=gid('mdCompletionNote').value.trim()||null;
   const ra=gid('mdRemindAt')?gid('mdRemindAt').value:'';
+  const _remindChanged = ra && ra !== t.remindAt;
   if(ra!==t.remindAt){t.remindAt=ra||null;t.reminderFired=false}
+  // If they set a due date or reminder but the browser's notification
+  // permission is still 'default', a one-shot toast offers to enable it.
+  // Without this, reminders silently never fire and the feature feels broken.
+  if((_dueChanged || _remindChanged) && typeof _maybeNudgeNotifPerm === 'function') _maybeNudgeNotifPerm();
   t.listId=parseInt(gid('mdList').value)||t.listId;
   if(t.status==='done'&&!t.completedAt)t.completedAt=stampCompletion();
   if(t.status!=='done')t.completedAt=null;
