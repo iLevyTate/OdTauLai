@@ -771,22 +771,62 @@ function renderCmdK(){
   const matchedNav=q?navActions.filter(a=>a.label.toLowerCase().includes(q)):navActions;
   if(matchedNav.length){items.push({section:'Actions'});matchedNav.forEach(a=>items.push(a))}
   // Match tasks. Search includes name, description, AND tags so a quick-add
-  // like `#errands` finds anything tagged. Active (open/in-progress) tasks
-  // first, then a smaller "Completed & archived" section so retrospective
-  // lookups ("where did I file last quarter's notes?") aren't dead ends.
+  // like `#errands` finds anything tagged. The same operator syntax used in
+  // the task search bar (tag: / list: / is: / priority: / due: / status:)
+  // works here too, so a power-user can type "is:overdue priority:high" in
+  // Cmd+K and see exactly that slice.
+  const parsedQ = (typeof parseTaskSearchQuery === 'function') ? parseTaskSearchQuery(rawVal) : { text: q, ops: null };
+  const freeText = parsedQ.text || '';
+  const qOps = parsedQ.ops;
+  const _matchOps = (t) => {
+    if(!qOps) return true;
+    if(qOps.tag && qOps.tag.length){
+      const tt = (t.tags || []).map(x => String(x).toLowerCase());
+      if(!qOps.tag.every(w => tt.includes(w))) return false;
+    }
+    if(qOps.priority && qOps.priority.length && !qOps.priority.includes(String(t.priority || 'none').toLowerCase())) return false;
+    if(qOps.status   && qOps.status.length   && !qOps.status.includes(String(t.status   || 'open').toLowerCase())) return false;
+    if(qOps.list && qOps.list.length){
+      const l = (typeof lists !== 'undefined' && Array.isArray(lists)) ? lists.find(x => x.id === t.listId) : null;
+      const name = l ? String(l.name || '').toLowerCase() : '';
+      if(!qOps.list.some(w => name === w || name.includes(w))) return false;
+    }
+    if(qOps.is && qOps.is.length){
+      const today = (typeof todayISO==='function') ? todayISO() : '';
+      const matchOne = (w) => {
+        if(w==='overdue')  return !!t.dueDate && t.dueDate < today && t.status !== 'done';
+        if(w==='today')    return t.dueDate === today;
+        if(w==='done')     return t.status === 'done';
+        if(w==='open')     return t.status !== 'done';
+        if(w==='archived') return !!t.archived;
+        if(w==='starred')  return !!t.starred;
+        if(w==='recurring' || w==='habit') return !!t.recur;
+        return false;
+      };
+      if(!qOps.is.every(matchOne)) return false;
+    }
+    return true;
+  };
   const matchTask = (t) => {
-    if(t.name.toLowerCase().includes(q)) return true;
-    if((t.description||'').toLowerCase().includes(q)) return true;
-    if(Array.isArray(t.tags) && t.tags.some(tg => String(tg).toLowerCase().includes(q))) return true;
+    if(!_matchOps(t)) return false;
+    if(!freeText) return true;
+    if(t.name.toLowerCase().includes(freeText)) return true;
+    if((t.description||'').toLowerCase().includes(freeText)) return true;
+    if(Array.isArray(t.tags) && t.tags.some(tg => String(tg).toLowerCase().includes(freeText))) return true;
     return false;
   };
+  // Show task hits when the user typed free text OR any operator. Operators
+  // alone (e.g. `is:overdue`) should produce results — the legacy `if(q)`
+  // gate suppressed those.
+  const hasOps = !!(qOps && (qOps.tag.length||qOps.list.length||qOps.is.length||qOps.priority.length||qOps.due.length||qOps.status.length));
+  const shouldShowTasks = !!freeText || hasOps;
   const activeMatches = tasks.filter(t => !t.archived && t.status !== 'done' && matchTask(t)).slice(0, 12);
-  if(q && activeMatches.length){
+  if(shouldShowTasks && activeMatches.length){
     items.push({section:'Tasks'});
     activeMatches.forEach(t=>items.push({type:'task',label:t.name,icon:t.status==='done'?'✓':'○',desc:(t.dueDate?fmtDue(t.dueDate):'')||getTaskPath(t.id).slice(0,-1).join(' › '),run:()=>{showTab('tasks');openTaskDetail(t.id)}}));
   }
   const doneMatches = tasks.filter(t => (t.archived || t.status === 'done') && matchTask(t)).slice(0, 6);
-  if(q && doneMatches.length){
+  if(shouldShowTasks && doneMatches.length){
     items.push({section:'Completed & archived'});
     doneMatches.forEach(t=>items.push({type:'task',label:t.name,icon:t.archived?'🗂':'✓',desc:t.archived?'archived':'done',run:()=>{
       // Switching to the matching smart view so the user can see the task in

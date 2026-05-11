@@ -262,13 +262,14 @@
         <div class="task-search-bar">
           <div class="task-search-row">
             <label class="sr-only" for="taskSearch">Search tasks</label>
-            <input type="text" class="task-search" id="taskSearch" placeholder="Search tasks…" aria-label="Search tasks" data-oninput="updateTaskFilters" autocomplete="off">
+            <input type="text" class="task-search" id="taskSearch" placeholder="Search · try tag:work is:overdue priority:high" aria-label="Search tasks. Operators: tag:, list:, is:, priority:, due:, status:" data-oninput="updateTaskFilters" autocomplete="off">
             <button type="button" class="task-search-clear" id="taskSearchClear" data-action="clearTaskSearch" hidden aria-label="Clear search">×</button>
             <span class="task-search-mode-pill" id="taskSearchSemanticPill" hidden>Semantic</span>
             <label class="task-search-semantic" title="Rank by meaning (requires model loaded)">
               <input type="checkbox" id="taskSearchSemantic" data-onchange="toggleTaskSearchSemantic"> Semantic
             </label>
           </div>
+          <div class="task-search-pills" id="taskSearchPills" hidden aria-live="polite"></div>
         </div>
 
         <!-- Compact control bar: view toggle + filters button -->

@@ -995,6 +995,18 @@
   .qpc--muted  {background:var(--bg-2);      border-color:var(--border);        color:var(--text-3)}
   .qpc--tag    {background:var(--purple-bg); border-color:var(--purple-border); color:var(--purple)}
   .qpc--star   {background:rgba(224,160,32,.12);border-color:rgba(224,160,32,.3);color:#e0a020}
+  /* Active search operator pill (tag:foo / is:overdue / etc.) shown beneath
+     the search input. Removable via the inline × so the user can drop a
+     single operator without retyping the whole query. */
+  .qpc--filter {background:var(--accent-bg); border-color:var(--accent-border); color:var(--accent)}
+  .qpc-rm{
+    appearance:none;background:transparent;border:0;color:inherit;
+    font-size:14px;line-height:1;padding:0;margin-left:2px;cursor:pointer;
+    opacity:.7;display:inline-flex;align-items:center;justify-content:center;
+    width:14px;height:14px;border-radius:50%;
+  }
+  .qpc-rm:hover{opacity:1;background:rgba(255,255,255,.12)}
+  .task-search-pills{display:flex;flex-wrap:wrap;gap:6px;padding:6px 0 2px}
   .qpc--recur  {background:var(--purple-bg); border-color:var(--purple-border); color:var(--purple)}
   .qpc--due    {background:var(--accent-bg); border-color:var(--accent-border); color:var(--accent)}
 

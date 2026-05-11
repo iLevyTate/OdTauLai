@@ -1631,8 +1631,128 @@ function updateFiltersSummary(){
 
 let _semanticSearchReqId=0;
 let _updateTaskFiltersDebounce=null;
+
+// ── Search operator parser ──────────────────────────────────────────────────
+// The task search box accepts power-user operators alongside free text:
+//
+//   tag:work          one or more tags (#work also works)
+//   list:Personal     list by name (case-insensitive)
+//   is:overdue        overdue|today|week|done|archived|starred|recurring
+//   priority:high     urgent|high|normal|low|none (@high also works)
+//   due:today         today|tomorrow|week|none|overdue|YYYY-MM-DD
+//   status:open       open|progress|review|blocked|done
+//
+// Operators are AND-combined; multiple values within one operator are OR.
+// Anything left over after stripping the operators is the free-text query.
+// Returns: { text: 'free part', ops: { tag:[], list:[], is:[], priority:[],
+//                                       due:[], status:[] } }
+function parseTaskSearchQuery(raw){
+  const ops = { tag: [], list: [], is: [], priority: [], due: [], status: [] };
+  if(typeof raw !== 'string') return { text: '', ops };
+  // Match `key:value` (quoted optional) or shorthand prefixes.
+  const opRe = /(\w+):("[^"]+"|'[^']+'|\S+)|#(\S+)|@(\S+)/g;
+  let leftover = raw;
+  let m;
+  while((m = opRe.exec(raw)) !== null){
+    if(m[3]){
+      // #tag shorthand
+      ops.tag.push(m[3].toLowerCase());
+      leftover = leftover.replace(m[0], '');
+      continue;
+    }
+    if(m[4]){
+      // @priority shorthand
+      const v = m[4].toLowerCase();
+      if(['urgent','high','normal','low','none'].includes(v)) ops.priority.push(v);
+      leftover = leftover.replace(m[0], '');
+      continue;
+    }
+    const key = m[1].toLowerCase();
+    let val = m[2];
+    if((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))){
+      val = val.slice(1, -1);
+    }
+    val = val.toLowerCase();
+    if(key === 'tag'      ) ops.tag.push(val);
+    else if(key === 'list'    ) ops.list.push(val);
+    else if(key === 'is'      ) ops.is.push(val);
+    else if(key === 'priority') ops.priority.push(val);
+    else if(key === 'due'     ) ops.due.push(val);
+    else if(key === 'status'  ) ops.status.push(val);
+    else continue; // unknown operator — leave the chars in leftover
+    leftover = leftover.replace(m[0], '');
+  }
+  const text = leftover.replace(/\s+/g, ' ').trim().toLowerCase();
+  return { text, ops };
+}
+if(typeof window !== 'undefined') window.parseTaskSearchQuery = parseTaskSearchQuery;
+
+function _opsActive(ops){
+  if(!ops) return false;
+  for(const k of Object.keys(ops)) if(ops[k] && ops[k].length) return true;
+  return false;
+}
+
+// Visualise the parsed search operators as removable chips below the search
+// input. Without this the user types `tag:work` and has to remember they did
+// so — and has no way to remove just that operator without retyping the
+// whole query. Click an X on a pill to drop that single operator.
+function renderSearchOpPills(){
+  const host = gid('taskSearchPills');
+  if(!host) return;
+  const ops = taskFilters.ops || {};
+  const active = _opsActive(ops);
+  if(!active){ host.hidden = true; host.replaceChildren(); return; }
+  host.replaceChildren();
+  host.hidden = false;
+  const order = ['is', 'tag', 'list', 'priority', 'due', 'status'];
+  const labels = { is: 'is', tag: 'tag', list: 'list', priority: 'priority', due: 'due', status: 'status' };
+  for(const key of order){
+    const vals = ops[key];
+    if(!vals || !vals.length) continue;
+    for(const v of vals){
+      const pill = document.createElement('span');
+      pill.className = 'qpc qpc--filter';
+      const label = document.createElement('span');
+      label.textContent = labels[key] + ':' + v;
+      pill.appendChild(label);
+      const rm = document.createElement('button');
+      rm.type = 'button';
+      rm.className = 'qpc-rm';
+      rm.title = 'Remove ' + labels[key] + ':' + v;
+      rm.setAttribute('aria-label', 'Remove ' + labels[key] + ':' + v);
+      rm.textContent = '×';
+      rm.onclick = () => {
+        // Strip the matching token (and the shorthand variant) from the
+        // input, then re-trigger filter update so everything stays in sync.
+        const inp = gid('taskSearch');
+        if(!inp) return;
+        const escVal = v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const patterns = [
+          new RegExp('\\b' + labels[key] + ':"?' + escVal + '"?\\s*', 'gi'),
+        ];
+        if(key === 'tag')      patterns.push(new RegExp('#' + escVal + '\\b\\s*', 'gi'));
+        if(key === 'priority') patterns.push(new RegExp('@' + escVal + '\\b\\s*', 'gi'));
+        let next = inp.value;
+        for(const p of patterns) next = next.replace(p, '');
+        inp.value = next.replace(/\s+/g, ' ').trim();
+        updateTaskFilters();
+        renderTaskList();
+      };
+      pill.appendChild(rm);
+      host.appendChild(pill);
+    }
+  }
+}
+if(typeof window !== 'undefined') window.renderSearchOpPills = renderSearchOpPills;
+
 function updateTaskFilters(){
-  taskFilters.search=gid('taskSearch').value.toLowerCase().trim();
+  const raw = gid('taskSearch').value;
+  const parsed = parseTaskSearchQuery(raw);
+  // taskFilters.search keeps the legacy free-text semantics for the substring
+  // / semantic-search code paths; parsed.ops drives the new operator filters.
+  taskFilters.search = parsed.text;
+  taskFilters.ops    = parsed.ops;
   taskFilters.status=gid('filterStatus').value;
   taskFilters.priority=gid('filterPriority').value;
   taskFilters.category=(gid('filterCategory')||{}).value||'all';
@@ -1646,6 +1766,8 @@ function updateTaskFilters(){
   if(clr) clr.hidden = !(gid('taskSearch').value.trim());
   const semPill=gid('taskSearchSemanticPill');
   if(semPill) semPill.hidden = !((gid('taskSearchSemantic')&&gid('taskSearchSemantic').checked));
+  // Render the parsed operator chips so the user sees what matched.
+  if(typeof renderSearchOpPills === 'function') renderSearchOpPills();
   if(window._taskSearchSemantic && taskFilters.search && typeof semanticSearch === 'function' && typeof isIntelReady === 'function' && isIntelReady()){
     const rawQ = gid('taskSearch').value.trim();
     const myReq=++_semanticSearchReqId;
@@ -1760,6 +1882,78 @@ function matchesFilters(t){
   if(taskFilters.priority!=='all'&&t.priority!==taskFilters.priority)return false;
   // Category filter
   if(taskFilters.category&&taskFilters.category!=='all'&&t.category!==taskFilters.category)return false;
+  // Operator filters from `tag:` / `list:` / `is:` / `priority:` / `due:` /
+  // `status:` (and #tag, @priority shorthands). AND across operator keys,
+  // OR across values within a single key.
+  const ops = taskFilters.ops;
+  if(ops){
+    if(ops.tag && ops.tag.length){
+      const tt = (t.tags || []).map(x => String(x).toLowerCase());
+      if(!ops.tag.every(want => tt.includes(want))) return false;
+    }
+    if(ops.list && ops.list.length){
+      const list = (typeof lists !== 'undefined' && Array.isArray(lists)) ? lists.find(l => l.id === t.listId) : null;
+      const name = list ? String(list.name || '').toLowerCase() : '';
+      if(!ops.list.some(want => name === want || name.includes(want))) return false;
+    }
+    if(ops.priority && ops.priority.length){
+      const p = String(t.priority || 'none').toLowerCase();
+      if(!ops.priority.includes(p)) return false;
+    }
+    if(ops.status && ops.status.length){
+      const s = String(t.status || 'open').toLowerCase();
+      if(!ops.status.includes(s)) return false;
+    }
+    if(ops.due && ops.due.length){
+      const today = todayISO();
+      const dd = t.dueDate || '';
+      const matchOne = (want) => {
+        if(want === 'none')     return !dd;
+        if(want === 'today')    return dd === today;
+        if(want === 'tomorrow'){
+          const d=new Date(); d.setDate(d.getDate()+1);
+          const iso = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+          return dd === iso;
+        }
+        if(want === 'week'){
+          if(!dd) return false;
+          const w=new Date(); w.setDate(w.getDate()+7);
+          const wIso=w.getFullYear()+'-'+String(w.getMonth()+1).padStart(2,'0')+'-'+String(w.getDate()).padStart(2,'0');
+          return dd >= today && dd <= wIso;
+        }
+        if(want === 'overdue'){
+          return !!dd && dd < today && t.status !== 'done';
+        }
+        if(/^\d{4}-\d{2}-\d{2}$/.test(want)) return dd === want;
+        return false;
+      };
+      if(!ops.due.some(matchOne)) return false;
+    }
+    if(ops.is && ops.is.length){
+      const today = todayISO();
+      const matchOne = (want) => {
+        switch(want){
+          case 'overdue':   return !!t.dueDate && t.dueDate < today && t.status !== 'done';
+          case 'today':     return t.dueDate === today;
+          case 'week':{
+            if(!t.dueDate) return false;
+            const w=new Date(); w.setDate(w.getDate()+7);
+            const wIso=w.getFullYear()+'-'+String(w.getMonth()+1).padStart(2,'0')+'-'+String(w.getDate()).padStart(2,'0');
+            return t.dueDate >= today && t.dueDate <= wIso;
+          }
+          case 'done':      return t.status === 'done';
+          case 'open':      return t.status !== 'done';
+          case 'archived':  return !!t.archived;
+          case 'starred':   return !!t.starred;
+          case 'recurring':
+          case 'habit':     return !!t.recur;
+          case 'snoozed':   return !!t.hiddenUntil && t.hiddenUntil > today;
+          default: return false;
+        }
+      };
+      if(!ops.is.every(matchOne)) return false;
+    }
+  }
   if(!habitVisibilityOk(t))return false;
   return true;
 }
