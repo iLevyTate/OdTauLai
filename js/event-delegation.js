@@ -88,6 +88,27 @@
   // `toggle` does not bubble — needs capture-phase listener (see attachEvent).
   attachEvent('toggle',  'ontoggle');
 
+  // Keyboard activation for non-button elements that opt into button semantics
+  // via role="button". The native button element handles Enter/Space already,
+  // so this only matters for divs/spans tagged role="button" (e.g. the
+  // mini-timer wrapper). Without this, keyboard-only users can focus the
+  // element but can't trigger its data-action. Synthesises a click so the
+  // existing click delegation above handles the dispatch.
+  document.addEventListener('keydown', e => {
+    if(e.key !== 'Enter' && e.key !== ' ') return;
+    const target = e.target;
+    if(!target || typeof target.closest !== 'function') return;
+    const el = target.closest('[role="button"][data-action]');
+    if(!el || el.tagName === 'BUTTON' || el.tagName === 'A') return;
+    // Skip when the focus is inside a form control sitting inside the
+    // role=button container — those have their own activation semantics.
+    const editable = target.closest('input, textarea, select, button, [contenteditable="true"]');
+    if(editable && editable !== el && el.contains(editable)) return;
+    e.preventDefault();
+    try { el.click(); }
+    catch(err){ console.error('[delegation] keyboard activation failed:', err); }
+  });
+
   // Expose for any code that wants to manually dispatch (rare).
   window.ODTAULAI_DELEGATION_READY = true;
 })();

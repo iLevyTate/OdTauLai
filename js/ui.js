@@ -747,6 +747,26 @@ function renderTaskItem(t,depth){
     }
     openTaskDetail(t.id)
   };
+  // Keyboard a11y: the row is the primary way to open the task-detail modal.
+  // Without role+tabindex+key handlers, keyboard-only users could only reach
+  // the row's inner buttons (star/play/sub/×) but never the detail view.
+  d.setAttribute('role', 'button');
+  d.setAttribute('tabindex', '0');
+  d.setAttribute('aria-label', (t.name || 'Task') + ' — Enter to open details');
+  d.addEventListener('keydown', function(e){
+    if(e.key !== 'Enter' && e.key !== ' ') return;
+    // Don't intercept when focus is on an inner control — those have their
+    // own key handlers (e.g. Space toggles a button) and we shouldn't
+    // double-fire openTaskDetail underneath them.
+    if(e.target !== d) return;
+    e.preventDefault();
+    if(typeof isBulkMode === 'function' && isBulkMode()){
+      bulkToggleSelect(t.id);
+      d.classList.toggle('task-bulk-selected', _bulkSelectedIds.has(t.id));
+      return;
+    }
+    openTaskDetail(t.id);
+  });
   // Reflect prior bulk selection on re-render
   if(typeof isBulkMode === 'function' && isBulkMode() && typeof _bulkSelectedIds !== 'undefined' && _bulkSelectedIds.has(t.id)){
     d.classList.add('task-bulk-selected');
@@ -1708,7 +1728,15 @@ document.addEventListener('keydown',e=>{
 function addLog(name,durSec,type){timeLog.unshift({id:++logIdCtr,name,durSec,type,time:timeNow()});renderLog();saveState('user')}
 function removeLog(id){timeLog=timeLog.filter(l=>l.id!==id);renderLog();saveState('user')}
 function renderLog(){const list=gid('logList');list.querySelectorAll('.log-item').forEach(e=>e.remove());if(!timeLog.length){gid('logEmpty').hidden = false;return}gid('logEmpty').hidden = true;timeLog.slice(0,40).forEach(l=>{const d=document.createElement('div');d.className='log-item';const col=l.type==='work'?'var(--work)':l.type==='short'?'var(--short)':l.type==='quick'?'#48b5e0':'var(--long)';const lid=l.id||0;const dot=document.createElement('div');dot.className='log-dot';dot.style.background=col;d.appendChild(dot);const nm=document.createElement('span');nm.className='log-name';nm.textContent=l.name;d.appendChild(nm);const dur=document.createElement('span');dur.className='log-dur';dur.textContent=fmtShort(l.durSec);d.appendChild(dur);const tm=document.createElement('span');tm.className='log-time';tm.textContent=l.time;d.appendChild(tm);if(lid){const del=document.createElement('button');del.className='log-del';del.title='Remove';del.textContent='�';del.onclick=function(){removeLog(lid)};d.appendChild(del)}list.appendChild(d)})}
-function clearLog(){timeLog=[];renderLog();saveState('user')}
+async function clearLog(){
+  if(!timeLog.length) return;
+  const msg = 'Clear ' + timeLog.length + ' time-log entr' + (timeLog.length===1?'y':'ies') + '? This cannot be undone.';
+  if(typeof showAppConfirm === 'function'){
+    if(!(await showAppConfirm(msg))) return;
+  } else if(!confirm(msg)) return;
+  timeLog=[];renderLog();saveState('user');
+}
+window.clearLog = clearLog;
 
 // ========== TAB NAVIGATION ==========
 function showTab(tab){

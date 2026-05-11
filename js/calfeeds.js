@@ -883,16 +883,49 @@ async function confirmRemoveCalFeed(feedId){
   if(typeof renderTaskList === 'function') renderTaskList();
 }
 
-// Auto-sync all feeds on app start (non-blocking, errors silent)
+// Auto-sync all feeds on app start (non-blocking, errors silent), and again
+// every CAL_REFRESH_MS while the tab is open. Long-running PWA sessions used
+// to show stale events all day because the only fetch path was boot-time.
+const CAL_REFRESH_MS = 30 * 60 * 1000; // 30 min — balances freshness vs CORS-proxy load
+let _calRefreshTimer = null;
+function _hasFetchableFeeds(){
+  _loadCalFeeds();
+  return !!(_calFeeds && _calFeeds.feeds && _calFeeds.feeds.some(f => f && f.url));
+}
+async function _refreshCalFeedsTick(){
+  if(!_hasFetchableFeeds()) return;
+  // Skip when the tab is hidden — Page Visibility API gates the work so we
+  // don't hammer CORS proxies for tabs the user isn't even looking at; a
+  // visibilitychange listener below catches up the moment they return.
+  if(typeof document !== 'undefined' && document.hidden) return;
+  try{
+    await syncAllCalFeeds();
+    renderCalFeedsPanel();
+    if(typeof renderTaskList === 'function') renderTaskList();
+  }catch(e){ console.warn('[calfeeds] periodic refresh', e); }
+}
+function _ensureCalRefreshTimer(){
+  if(_calRefreshTimer != null) return;
+  if(!_hasFetchableFeeds()) return;
+  _calRefreshTimer = setInterval(_refreshCalFeedsTick, CAL_REFRESH_MS);
+}
 function autoSyncCalFeedsOnBoot(){
   _loadCalFeeds();
-  if(!_calFeeds.feeds.length) return;
-  // Only auto-sync feeds with URLs (paste-mode feeds don't need fetching)
+  if(!_calFeeds.feeds.length){ _ensureCalRefreshTimer(); return; }
   const fetchable = _calFeeds.feeds.filter(f => f.url);
-  if(!fetchable.length) return;
+  if(!fetchable.length){ _ensureCalRefreshTimer(); return; }
   setTimeout(async () => {
     await syncAllCalFeeds();
     renderCalFeedsPanel();
     if(typeof renderTaskList === 'function') renderTaskList();
+    _ensureCalRefreshTimer();
   }, 2000); // let the app finish rendering first
+  if(typeof document !== 'undefined' && !document._calRefreshVisListener){
+    document._calRefreshVisListener = true;
+    document.addEventListener('visibilitychange', () => {
+      // Catch up once on return from hidden so the user doesn't have to wait
+      // up to CAL_REFRESH_MS after unlocking their phone or refocusing.
+      if(!document.hidden) _refreshCalFeedsTick();
+    });
+  }
 }

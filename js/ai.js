@@ -180,7 +180,7 @@ function _renderHeaderAIChip(state, msg){
     else if(state === 'error') label.textContent = '!';
     else label.textContent = 'AI';
   }
-  let desc = 'Task understanding (on-device)';
+  let desc = 'Task understanding — ~33 MB one-time download. Tap to set up.';
   if(state === 'loading' || state === 'working' || state === 'syncing'){
     const m = (msg || '').trim();
     desc = m ? 'Loading model: ' + m.slice(0, 100) : 'Loading model…';
@@ -199,7 +199,7 @@ function _renderHeaderAIChip(state, msg){
   }else if(state === 'ready' || state === 'ok'){
     chip.title = (msg && String(msg).length < 80) ? String(msg) : 'Task understanding — open Tools';
   }else{
-    chip.title = 'Task understanding (on-device) — open Tools';
+    chip.title = 'Task understanding — ~33 MB one-time download (cached after). Tap to open setup.';
   }
 }
 

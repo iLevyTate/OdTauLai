@@ -507,7 +507,11 @@ setTimeout(() => {
     });
   }catch(_){}
 })();
-setPhaseTime();
+// Only initialise a fresh phase when storage didn't restore one.
+// _timerStateRehydrated is set by _applyState when valid pomoLive is found —
+// otherwise setPhaseTime resets remaining/totalDuration to a full phase and
+// wipes any in-progress focus session the user just reloaded into.
+if(!window._timerStateRehydrated) setPhaseTime();
 if(typeof restoreTaskToolbarPrefs==='function') restoreTaskToolbarPrefs();
 if(typeof refreshClassificationUi==='function') refreshClassificationUi();
 renderAll();
@@ -525,6 +529,36 @@ setTaskView(taskView);
 setSmartView(smartView);
 if(typeof hydrateIcons==='function') hydrateIcons();
 updateMiniTimer();
+
+// Pomodoro post-rehydrate reconciliation. If the timer was running at save
+// time, either resume the tick interval (and re-schedule phase-end audio) or,
+// if the phase would have completed while the tab was closed, fire the
+// completion flow now so the user sees the correct end state rather than a
+// frozen mid-phase display.
+if(window._timerStateRehydrated){
+  try{
+    if(running && remaining > 0){
+      clearInterval(tickId);
+      tickId = setInterval(tick, 250);
+      if(typeof schedulePhaseAudio === 'function' && cfg.sound) schedulePhaseAudio();
+      if(typeof startKeepalive === 'function') startKeepalive();
+      if(typeof _syncRingState === 'function') _syncRingState();
+      if(typeof renderCtrls === 'function') renderCtrls();
+    } else if(window._timerNeedsCompletion && typeof onPhaseComplete === 'function'){
+      // Phase ended while away — run the completion flow once. running was
+      // already cleared in _applyState; onPhaseComplete handles the rest
+      // (pip update, log entry, optional auto-advance).
+      running = false;
+      remaining = 0;
+      try{ onPhaseComplete(); }catch(e){ console.warn('[app] onPhaseComplete on rehydrate', e); }
+      window._timerNeedsCompletion = false;
+    } else {
+      // Paused mid-phase — just refresh the display so the ring and digits
+      // show the correct remaining time instead of a stale full phase.
+      if(typeof renderTimerChrome === 'function') renderTimerChrome();
+    }
+  }catch(e){ console.warn('[app] timer rehydrate reconcile', e); }
+}
 // Apply saved active tab without scroll
 document.querySelectorAll('[data-tab]').forEach(el=>{el.hidden = !(el.dataset.tab===activeTab)});
 document.querySelectorAll('.nav-tab').forEach(el=>{const on=el.dataset.navtab===activeTab;el.classList.toggle('active',on);el.setAttribute('aria-selected',on?'true':'false')});

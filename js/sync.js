@@ -57,6 +57,28 @@ function _genPeerId() {
   return 'stupind-' + s.toLowerCase();
 }
 
+// Map a PeerJS / DataConnection error to a human-readable string.
+// Without this, users see raw tokens like "peer-unavailable" or "network"
+// in the sync panel and assume the app is broken. Falls through to the raw
+// message when no mapping is known so we never lose information.
+function _friendlySyncError(err){
+  const t = (err && (err.type || err.code)) || '';
+  const map = {
+    'peer-unavailable':     'Code not found — other device is offline or the code is mistyped.',
+    'network':              'Network error — check your internet connection.',
+    'server-error':         'Matchmaking server unreachable — retrying.',
+    'socket-error':         'Lost connection to matchmaking server — retrying.',
+    'socket-closed':        'Matchmaking connection closed — retrying.',
+    'disconnected':         'Disconnected from the broker — reconnecting.',
+    'browser-incompatible': 'Browser does not support WebRTC data channels.',
+    'webrtc':               'WebRTC negotiation failed — try Reconnect or pairing again.',
+    'unavailable-id':       'Code conflict — generating a new one.',
+  };
+  if(t && map[t]) return map[t];
+  if(err && err.message) return String(err.message);
+  return 'Connection failed';
+}
+
 function _setSyncStatus(status, msg) {
   _syncStatus = status;
   const el = document.getElementById('syncStatus');
@@ -418,7 +440,7 @@ function _wireConn(conn) {
     console.warn('[sync] conn error', err);
     _conn = null;
     if (_connectTimeoutId) { clearTimeout(_connectTimeoutId); _connectTimeoutId = null; }
-    _setSyncStatus('error', (err && (err.type || err.message)) || 'Connection failed');
+    _setSyncStatus('error', _friendlySyncError(err));
     if (_lastConnectCode) _scheduleSyncReconnect();
   });
 }
@@ -540,7 +562,7 @@ async function syncInit() {
       _setSyncStatus('error', 'Browser does not support WebRTC data channels');
       return;
     }
-    _setSyncStatus('error', t || (err && err.message) || 'Peer error');
+    _setSyncStatus('error', _friendlySyncError(err));
   });
 
   _peer.on('disconnected', () => {

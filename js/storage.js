@@ -298,6 +298,17 @@ function saveState(reason){
     if(t) t.totalSec += Math.floor((Date.now()-taskStartedAt)/1000);
   }
   stateEpoch = Date.now();
+  // Pomodoro live-state snapshot. Persisting these lets a tab-reload mid-focus
+  // pick up where it left off (wall-clock based) instead of resetting to a
+  // fresh 25:00 — losing minutes the user just earned. Mirrors the quick-timer
+  // rehydration in _applyState. taskStartedAt is folded into the active task's
+  // totalSec on save so it never compounds; on load it stays null until the
+  // user resumes the timer.
+  const _pomoLive = {
+    running, finished,
+    startedAt, pausedRemaining, remaining, totalDuration,
+    pomoSavedAt: Date.now(),
+  };
   const state = {
     v:SCHEMA_VERSION, date:todayKey(),
     cfg, goals, goalIdCtr,
@@ -305,6 +316,7 @@ function saveState(reason){
     timeLog,logIdCtr,
     totalPomos, totalBreaks, totalFocusSec, sessionHistory,
     pomosInCycle, phase,
+    pomoLive: _pomoLive,
     intervals, intIdCtr,
     quickTimers, qtIdCtr,
     activeTab,
@@ -614,6 +626,45 @@ function _applyState(s){
     if(Array.isArray(s.sessionHistory)) sessionHistory = s.sessionHistory;
     if(s.pomosInCycle !=null)        pomosInCycle  = _int(s.pomosInCycle,0);
     if(s.phase && ['work','short','long'].includes(s.phase)) phase = s.phase;
+
+    // Pomodoro live-state rehydration. Without this, app.js's post-load
+    // `setPhaseTime()` clobbers any saved progress back to a full phase.
+    // We compute remaining from wall-clock for a running timer and let
+    // app.js complete the rehydration (restart tick, fire completion if
+    // the phase would have ended while the tab was closed).
+    if(s.pomoLive && typeof s.pomoLive === 'object'){
+      const p = s.pomoLive;
+      const td = _int(p.totalDuration, 0);
+      if(td > 0){
+        totalDuration = td;
+        if(p.running && typeof p.startedAt === 'number' && p.startedAt > 0){
+          const pr = _int(p.pausedRemaining, td);
+          const elapsed = Math.max(0, Math.floor((Date.now() - p.startedAt) / 1000));
+          const rem = Math.max(0, pr - elapsed);
+          pausedRemaining = pr;
+          remaining = rem;
+          startedAt = p.startedAt;
+          running = rem > 0;
+          finished = rem <= 0;
+          // Distinguish "phase completed while tab was closed" (we owe the user
+          // pip + log + auto-advance) from "phase completed normally before
+          // save, then reload" (bookkeeping already in saved state). The flag
+          // only fires the catch-up completion when the saved state was still
+          // running at save time but would have ended since.
+          window._timerNeedsCompletion = rem <= 0;
+        } else {
+          pausedRemaining = _int(p.pausedRemaining, td);
+          remaining = _int(p.remaining, pausedRemaining);
+          if(remaining < 0) remaining = 0;
+          if(remaining > td) remaining = td;
+          running = false;
+          finished = !!p.finished && remaining <= 0;
+          startedAt = 0;
+          window._timerNeedsCompletion = false;
+        }
+        window._timerStateRehydrated = true;
+      }
+    }
 
     // Intervals + quick timers
     if(Array.isArray(s.intervals)){  intervals = s.intervals.map(iv=>({...iv, target: iv.target || 'pomo'})); intIdCtr = _int(s.intIdCtr,0); }
