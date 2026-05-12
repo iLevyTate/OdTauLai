@@ -147,10 +147,56 @@ function _askSystemPrompt(){
     'Examples:',
     'User: make task 12 urgent\n→ [{"name":"UPDATE_TASK","args":{"id":12,"priority":"urgent"}}]',
     'User: create a task "buy milk" due tomorrow tagged shopping\n→ [{"name":"CREATE_TASK","args":{"name":"buy milk","dueDate":"<tomorrow>","tags":["shopping"]}}]',
+    'User: remind me to call mom tomorrow at 9am\n→ [{"name":"CREATE_TASK","args":{"name":"Call mom","dueDate":"<tomorrow>","remindAt":"<tomorrow>T09:00"}}]',
+    'User: add "submit expenses" to my Work list, due friday, high priority\n→ [{"name":"CREATE_TASK","args":{"name":"Submit expenses","listName":"Work","dueDate":"<friday>","priority":"high"}}]',
+    'User: schedule the dentist next monday\n→ [{"name":"CREATE_TASK","args":{"name":"Dentist","dueDate":"<next monday>"}}]',
+    'User: move the rent task to Personal\n→ [{"name":"UPDATE_TASK","args":{"id":<id>,"listName":"Personal"}}]',
+    'User: snooze task 7 for a week\n→ [{"name":"UPDATE_TASK","args":{"id":7,"hiddenUntil":"<+7d>"}}]',
     'User: mark all my #errands as done\n→ [{"name":"MARK_DONE","args":{"id":<id>}}, ...]',
     'User: archive everything already completed last week\n→ [{"name":"ARCHIVE_TASK","args":{"id":<id>}}, ...]',
     'User: what should I do next?\n→ []',
     'User: nevermind\n→ []',
+  ].join('\n');
+}
+
+// Detect imperative / write-intent queries — "remind me to X", "add X",
+// "schedule Y", "create a task", etc. These should produce ops; if the ops
+// pipeline returns [] for one we owe the user a retry pass rather than
+// silently giving up. Mutually exclusive with _askIsQuestionLike in practice
+// but we let question take precedence at the call site.
+function _askIsImperative(q){
+  if(typeof q !== 'string') return false;
+  const s = q.trim();
+  if(!s) return false;
+  // Leading-verb match — covers the common phrasings without being too
+  // greedy ("show me" stays a question, "find the X" stays a question).
+  return /^(remind|add|create|make|schedule|move|archive|delete|complete|finish|done|mark|set|tag|untag|star|unstar|rename|update|change|reschedule|snooze|unsnooze|prioriti[sz]e|deprioriti[sz]e|assign|note|note that|cancel|reopen|undo|note|book|plan|put|drop)\b/i.test(s);
+}
+
+// Stronger second-pass prompt for imperatives the ops pipeline missed.
+// The original system prompt is conservative ("return [] if ambiguous"); a
+// retry replaces that with an aggressive "you MUST produce a CREATE_TASK or
+// explain what's missing" instruction so the user actually gets the task or
+// a clear blocker. Date placeholders are rendered concrete in the user
+// message body so the LLM doesn't have to do that arithmetic itself.
+function _askWriteRetrySystemPrompt(){
+  const schema = (typeof toolSchemaPromptBlock === 'function') ? toolSchemaPromptBlock() : '';
+  return [
+    'You are a write-only task assistant. The user asked you to make a change.',
+    'You MUST return a JSON array containing one or more write operations from the schema below, or, if you truly cannot, an explanation in this exact form:',
+    '  [{"name":"NOOP","args":{"reason":"<one short sentence: what info is missing>"}}]',
+    'Default to CREATE_TASK if the user is asking to add / remind / schedule something new. Default to UPDATE_TASK if they refer to an existing task in the Context.',
+    'Return ONLY the JSON array. No prose, no code fences.',
+    '',
+    'Allowed write ops:',
+    schema,
+    '',
+    'Rules:',
+    '- Each element is {"name":"OP_NAME","args":{...}}.',
+    '- Use ISO dates (YYYY-MM-DD) and ISO-local datetimes (YYYY-MM-DDTHH:MM).',
+    '- Pull task ids from the Context block. Do not invent ids.',
+    '- Never DELETE_TASK unless the user explicitly says "delete forever".',
+    '- If the user said "remind me to X", create the task with name=X and set remindAt to the named time.',
   ].join('\n');
 }
 
@@ -547,6 +593,91 @@ async function cognitaskRun(query, opts){
 
   const writeOnly = lastFinal.filter(op => op && op.name && !_schemaReadOnly(String(op.name).toUpperCase()));
   if(!writeOnly.length){
+    // Imperative write-retry. The ops pipeline is conservative ("return []
+    // if ambiguous"); when the user clearly asked for a write — "remind me
+    // to call mom tomorrow", "schedule the dentist next monday" — and the
+    // first pass gave us nothing, run a second pass with a stronger
+    // system prompt that REQUIRES either a write op or an explicit NOOP
+    // explaining what's missing. Without this, imperatives silently
+    // produce "no changes" and the user wonders if Ask is broken.
+    if(_askIsImperative(q) && !_askIsQuestionLike(q)){
+      try{
+        const retryMsgs = [
+          { role: 'system', content: _askWriteRetrySystemPrompt() },
+          ...priorMsgs,
+          { role: 'user',   content: _askUserPrompt(q, contextLines) },
+        ];
+        const retryTimeoutMs = Math.max(8000, (cfg.timeoutSec || 30) * 1000);
+        const retryTimeoutCtl = new AbortController();
+        const retryTimer = setTimeout(() => retryTimeoutCtl.abort(), retryTimeoutMs);
+        const retrySignal = (() => {
+          const ctl = new AbortController();
+          const bail = () => ctl.abort();
+          if(opts.signal){
+            if(opts.signal.aborted) bail();
+            else opts.signal.addEventListener('abort', bail, { once: true });
+          }
+          retryTimeoutCtl.signal.addEventListener('abort', bail, { once: true });
+          return ctl.signal;
+        })();
+        let retryRaw = '';
+        try{
+          const full = await genGenerate({
+            messages: retryMsgs,
+            maxTokens: 384,
+            temperature: 0.1,
+            onToken: (t) => {
+              retryRaw += t;
+              if(typeof opts.onToken === 'function'){ try{ opts.onToken(t); }catch(e){} }
+            },
+            signal: retrySignal,
+          });
+          if(!retryRaw) retryRaw = full || '';
+        }finally{ clearTimeout(retryTimer); }
+
+        let retryParsed = null;
+        try{ retryParsed = parseOpsJson(retryRaw); }catch(_){}
+        if(Array.isArray(retryParsed)){
+          // Filter out the synthetic NOOP placeholder we instructed the model
+          // to emit when it's stuck. If we get one, surface its reason as a
+          // chat-style explanation so the user knows what to add.
+          const noop = retryParsed.find(o => o && String(o.name).toUpperCase() === 'NOOP');
+          const real = retryParsed.filter(o => o && o.name && String(o.name).toUpperCase() !== 'NOOP' && !_schemaReadOnly(String(o.name).toUpperCase()));
+          if(real.length){
+            const ctx = (typeof _askCtx === 'function') ? _askCtx() : { tasksById: new Map(), listsById: new Map() };
+            const val = validateOps(real, ctx);
+            if(val.valid.length){
+              if(typeof pushAskHistory === 'function') pushAskHistory(q);
+              return {
+                ok: true,
+                ops: val.valid,
+                rejected: val.rejected,
+                destructiveLevel: val.destructiveLevel,
+                rawText: allRaw + '\n--- write-retry ---\n' + retryRaw,
+                truncated: !!val.truncated,
+                readRounds,
+              };
+            }
+          }
+          if(noop && noop.args && typeof noop.args.reason === 'string'){
+            const reason = String(noop.args.reason).slice(0, 300);
+            if(typeof pushAskHistory === 'function') pushAskHistory(q);
+            return {
+              ok: true, ops: [], rejected: [], destructiveLevel: 'none',
+              rawText: allRaw + '\n--- write-retry ---\n' + retryRaw,
+              truncated: false, readRounds,
+              chatAnswer: 'I couldn\'t create that yet — ' + reason + ' Try rephrasing with the missing detail.',
+            };
+          }
+        }
+        // Last resort prose pass: just surface what the retry model said.
+        const retryProse = _extractProseAnswer(retryRaw);
+        if(retryProse){
+          if(typeof pushAskHistory === 'function') pushAskHistory(q);
+          return { ok: true, ops: [], rejected: [], destructiveLevel: 'none', rawText: allRaw + '\n' + retryRaw, truncated: false, readRounds, chatAnswer: retryProse };
+        }
+      }catch(e){ /* write-retry is best-effort */ }
+    }
     // The ops pipeline correctly returned [] for a non-write query, but if
     // the user actually asked a question ("what's overdue?", "summarise my
     // week") we owe them a real answer instead of "No actionable changes."
@@ -630,7 +761,9 @@ if(typeof window !== 'undefined'){
   window._askUserPrompt = _askUserPrompt;
   window._askSystemPrompt = _askSystemPrompt;
   window._askProseSystemPrompt = _askProseSystemPrompt;
+  window._askWriteRetrySystemPrompt = _askWriteRetrySystemPrompt;
   window._askIsQuestionLike = _askIsQuestionLike;
+  window._askIsImperative = _askIsImperative;
   window._askCtx = _askCtx;
   window._askCalendarBlock = _askCalendarBlock;
 }

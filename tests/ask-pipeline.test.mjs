@@ -357,6 +357,97 @@ test('askRun: priorTurns control characters are stripped before they reach the p
   assert.equal(prior[1].content, 'reply');
 });
 
+test('askRun: imperative with ops=[] runs write-retry and surfaces valid ops', async () => {
+  // Regression for the "remind me to call mom tomorrow" gap. The first
+  // ops pass returns [] (LLM being conservative); the write-retry pass
+  // gets a stronger system prompt and produces a CREATE_TASK that
+  // validateOps accepts. End state: ok:true with one op, no chatAnswer.
+  const tasks = [];
+  const schemaSrc2 = readFileSync(join(root, 'js', 'tool-schema.js'), 'utf8');
+  const askSrc2 = readFileSync(join(root, 'js', 'ask.js'), 'utf8');
+  const win = {};
+  let calls = 0;
+  const ctx = {
+    window: win,
+    console,
+    tasks,
+    lists: [],
+    isIntelReady: () => true,
+    embedText: async () => new Float32Array(8),
+    semanticSearch: async () => [],
+    isGenReady: () => true,
+    pushAskHistory: () => {},
+    getGenCfg: () => ({ timeoutSec: 30 }),
+    getUpcomingEvents: () => [],
+    getActiveCategories: () => [],
+    intelLoad: async () => {},
+    findTask: () => null,
+    genGenerate: async () => {
+      calls += 1;
+      // First call (ops pipeline) — conservative, returns [].
+      if (calls === 1) return '[]';
+      // Second call (write-retry) — stronger prompt produces CREATE_TASK.
+      return '[{"name":"CREATE_TASK","args":{"name":"Call mom","dueDate":"2026-05-12"}}]';
+    },
+  };
+  new Function(...Object.keys(ctx), schemaSrc2)(...Object.values(ctx));
+  ctx.TOOL_SCHEMA = win.TOOL_SCHEMA;
+  ctx.validateOps = win.validateOps;
+  ctx.parseOpsJson = win.parseOpsJson;
+  ctx.toolSchemaPromptBlock = win.toolSchemaPromptBlock;
+  new Function(...Object.keys(ctx), askSrc2)(...Object.values(ctx));
+  const res = await win.askRun('remind me to call mom tomorrow', {});
+  assert.ok(res.ok, JSON.stringify(res));
+  assert.equal(calls, 2, 'expected ops pass + write-retry');
+  assert.equal(res.ops.length, 1);
+  assert.equal(res.ops[0].name, 'CREATE_TASK');
+  assert.equal(res.ops[0].args.name, 'Call mom');
+  // No chat answer needed — we got the real op.
+  assert.equal(res.chatAnswer, undefined);
+});
+
+test('askRun: imperative with NOOP retry surfaces the missing-info reason', async () => {
+  // When the retry model can't figure out enough detail, it emits the
+  // synthetic NOOP placeholder with a `reason`. We convert that into a
+  // chat-style answer so the user knows what to add.
+  const tasks = [];
+  const schemaSrc2 = readFileSync(join(root, 'js', 'tool-schema.js'), 'utf8');
+  const askSrc2 = readFileSync(join(root, 'js', 'ask.js'), 'utf8');
+  const win = {};
+  let calls = 0;
+  const ctx = {
+    window: win,
+    console,
+    tasks,
+    lists: [],
+    isIntelReady: () => true,
+    embedText: async () => new Float32Array(8),
+    semanticSearch: async () => [],
+    isGenReady: () => true,
+    pushAskHistory: () => {},
+    getGenCfg: () => ({ timeoutSec: 30 }),
+    getUpcomingEvents: () => [],
+    getActiveCategories: () => [],
+    intelLoad: async () => {},
+    findTask: () => null,
+    genGenerate: async () => {
+      calls += 1;
+      if (calls === 1) return '[]';
+      return '[{"name":"NOOP","args":{"reason":"I need a date for the dentist appointment."}}]';
+    },
+  };
+  new Function(...Object.keys(ctx), schemaSrc2)(...Object.values(ctx));
+  ctx.TOOL_SCHEMA = win.TOOL_SCHEMA;
+  ctx.validateOps = win.validateOps;
+  ctx.parseOpsJson = win.parseOpsJson;
+  ctx.toolSchemaPromptBlock = win.toolSchemaPromptBlock;
+  new Function(...Object.keys(ctx), askSrc2)(...Object.values(ctx));
+  const res = await win.askRun('schedule the dentist', {});
+  assert.ok(res.ok);
+  assert.equal(res.ops.length, 0);
+  assert.ok(res.chatAnswer && /dentist appointment/i.test(res.chatAnswer));
+});
+
 test('askRun: question-like query with ops=[] runs prose pass and returns chatAnswer', async () => {
   // Regression guard: the ops-only system prompt teaches the LLM to answer
   // "what's overdue?" with `[]`, which was correct for the ops pipeline but
