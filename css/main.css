@@ -2959,6 +2959,50 @@ body:has(.offline-indicator:not([style*="display:none"])){ padding-top:30px; }
 }
 .task-tb-check input{accent-color:var(--accent)}
 
+/* Settings navigation bar — jump-links + inline filter. Sticky at the top
+   of the Settings panel so the user can land on the exact section without
+   scrolling through every prior block. Hides the jump pill when the filter
+   is active so the user's focus stays on the search results. */
+.set-nav{
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:8px 10px;margin:0 0 10px;
+  background:var(--bg-1);border:1px solid var(--border-subtle);border-radius:var(--r-md,10px);
+  position:sticky;top:0;z-index:5;
+}
+.set-nav-jump{display:flex;gap:6px;flex-wrap:wrap;flex:1}
+.set-nav-btn{
+  appearance:none;background:transparent;border:1px solid var(--border-subtle);
+  color:var(--text-2);font:inherit;font-size:12px;font-weight:500;
+  padding:5px 12px;border-radius:999px;cursor:pointer;
+  transition:background .15s,color .15s,border-color .15s;
+  white-space:nowrap;
+}
+.set-nav-btn:hover{color:var(--text-1);border-color:var(--text-3)}
+.set-nav-btn.active{background:var(--accent-bg);border-color:var(--accent-border);color:var(--accent)}
+.set-nav-filter{position:relative;flex:0 0 220px;max-width:100%}
+.set-nav-filter-input{width:100%;font-size:12px;padding:6px 28px 6px 10px}
+.set-nav-filter-clear{
+  position:absolute;right:6px;top:50%;transform:translateY(-50%);
+  background:transparent;border:0;color:var(--text-3);cursor:pointer;
+  font-size:16px;line-height:1;padding:2px 6px;border-radius:4px;
+}
+.set-nav-filter-clear:hover{color:var(--text-1);background:rgba(255,255,255,.06)}
+/* Hide section headings that have no matching rows beneath them, and
+   highlight rows whose label matched. The hide-row class is applied by JS
+   to .srow / .set-section-body > * containers. */
+.set-section.set-section--hidden{display:none}
+.srow.srow--filter-hidden{display:none!important}
+.srow.srow--filter-match{outline:1px solid var(--accent-border);outline-offset:-1px;border-radius:6px}
+@media (max-width:640px){
+  .set-nav{padding:8px;gap:8px;border-radius:8px;flex-direction:column;align-items:stretch}
+  .set-nav-jump{
+    overflow-x:auto;flex-wrap:nowrap;
+    scrollbar-width:none;-ms-overflow-style:none;
+  }
+  .set-nav-jump::-webkit-scrollbar{display:none}
+  .set-nav-filter{flex:1}
+}
+
 /* Settings + task modal accordions */
 .set-section,.md-section{
   border:1px solid var(--border);border-radius:var(--r-md);

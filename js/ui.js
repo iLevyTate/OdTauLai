@@ -852,25 +852,36 @@ function renderCmdK(){
   // straight to the Settings tab. Cheap and dramatically improves
   // findability vs. scrolling the long flat settings panel.
   if(q){
+    // Each entry: [keywords, label, target-section-id]. The id lets the
+    // command palette jump straight into the matching Settings section
+    // instead of just landing the user on the (long, flat) Settings tab.
     const settingsIndex = [
-      ['theme dark light',                 'Theme (dark / light)'],
-      ['sound chime audio',                'Sound & chimes'],
-      ['notification permission',          'Notifications'],
-      ['ai model llm embedding download',  'AI / on-device model'],
-      ['sync peer p2p webrtc',             'Sync (peer-to-peer)'],
-      ['export import backup csv json ical','Data export / import'],
-      ['encrypt password',                  'Encrypted backup'],
-      ['calendar feed ics ical',            'Calendar feeds'],
-      ['category classification',           'Categories'],
-      ['list project',                      'Lists / projects'],
-      ['phase preset pomodoro work break',  'Pomodoro presets'],
+      ['theme dark light',                  'Theme (dark / light)',          'set-general'],
+      ['sound chime audio',                 'Sound & chimes',                'set-general'],
+      ['notification permission',           'Notifications',                 'set-general'],
+      ['ai model llm embedding download',   'AI / on-device model',          'set-integrations'],
+      ['sync peer p2p webrtc',              'Sync (peer-to-peer)',           'set-integrations'],
+      ['export import backup csv json ical','Data export / import',          'set-about'],
+      ['encrypt password',                  'Encrypted backup',              'set-about'],
+      ['calendar feed ics ical',            'Calendar feeds',                'set-integrations'],
+      ['category classification',           'Categories',                    'set-classifications'],
+      ['list project',                      'Lists / projects',              'set-lists'],
+      ['phase preset pomodoro work break',  'Pomodoro presets',              'set-general'],
+      ['install pwa app',                   'Install as App',                'set-about'],
+      ['storage quota system info',         'System info / storage',         'set-about'],
     ];
-    const settingsHits = settingsIndex.filter(([keys]) => keys.split(' ').some(k => k.startsWith(q)) || keys.includes(q)).slice(0, 5);
+    const settingsHits = settingsIndex.filter(([keys]) => keys.split(' ').some(k => k.startsWith(q)) || keys.includes(q)).slice(0, 6);
     if(settingsHits.length){
       items.push({section:'Settings'});
-      settingsHits.forEach(([, label]) => items.push({
+      settingsHits.forEach(([, label, target]) => items.push({
         type:'action', label:'Go to: '+label, icon: ic('gear'),
-        run: () => showTab('settings')
+        run: () => {
+          showTab('settings');
+          // requestAnimationFrame so the tab swap lands before we measure.
+          requestAnimationFrame(() => {
+            if(typeof jumpToSettingsSection === 'function') jumpToSettingsSection(target);
+          });
+        }
       }));
     }
   }
@@ -1142,6 +1153,124 @@ const _THEME_MANUAL_KEY = 'stupind_theme_manual';
 function _isThemeManual(){
   try{ return localStorage.getItem(_THEME_MANUAL_KEY) === '1'; }catch(_){ return false; }
 }
+// ── Settings navigation: jump-links + inline filter ────────────────────────
+// Click a jump-link → expand the section, scroll into view (accounting for
+// the sticky nav bar's height), and mark the link active. Settings filter
+// hides rows whose label text doesn't match the query so a user can type
+// "notif" and only see notification-related controls across all sections.
+
+function _setNavBarHeight(){
+  const bar = document.querySelector('.set-nav');
+  return bar ? bar.getBoundingClientRect().height : 0;
+}
+function _setActiveJumpLink(id){
+  document.querySelectorAll('.set-nav-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.arg === id);
+  });
+}
+function jumpToSettingsSection(id){
+  const sec = document.getElementById(id);
+  if(!sec) return;
+  // Open the details so the body is in the layout flow before we measure
+  // scroll target. Settings sections are <details>; setting `open` is the
+  // canonical disclosure operation and triggers our ontoggle handlers.
+  try{ sec.open = true; }catch(_){}
+  _setActiveJumpLink(id);
+  // requestAnimationFrame lets the open-state layout settle so getBoundingClientRect
+  // returns the post-expansion position instead of the closed-collapsed one.
+  requestAnimationFrame(() => {
+    const rect = sec.getBoundingClientRect();
+    const offset = _setNavBarHeight() + 8;
+    const top = window.scrollY + rect.top - offset;
+    window.scrollTo({ top, behavior: 'smooth' });
+  });
+}
+window.jumpToSettingsSection = jumpToSettingsSection;
+
+// Filter every .srow by its label text (and a few sibling fragments). Hides
+// the row when nothing matches; hides the whole section when none of its
+// rows match. Empty query restores everything. Survives across re-renders
+// of the dynamic sub-panels (classifications, lists, sync, AI) by being
+// called once after each render via the document.querySelectorAll sweep.
+let _settingsFilterRaf = null;
+function filterSettingsRows(){
+  if(_settingsFilterRaf) cancelAnimationFrame(_settingsFilterRaf);
+  _settingsFilterRaf = requestAnimationFrame(_filterSettingsRowsImmediate);
+}
+function _filterSettingsRowsImmediate(){
+  _settingsFilterRaf = null;
+  const inp = document.getElementById('settingsFilter');
+  const clr = document.getElementById('settingsFilterClear');
+  const q = inp ? inp.value.trim().toLowerCase() : '';
+  if(clr) clr.hidden = !q;
+  const sections = document.querySelectorAll('#settingsBody .set-section');
+  sections.forEach(sec => {
+    if(!q){
+      sec.classList.remove('set-section--hidden');
+      sec.querySelectorAll('.srow').forEach(r => {
+        r.classList.remove('srow--filter-hidden');
+        r.classList.remove('srow--filter-match');
+      });
+      return;
+    }
+    // Auto-open the section so matches are visible without manual expansion.
+    try{ sec.open = true; }catch(_){}
+    let anyMatch = false;
+    sec.querySelectorAll('.srow').forEach(row => {
+      const txt = row.textContent.toLowerCase();
+      const hit = txt.includes(q);
+      row.classList.toggle('srow--filter-hidden', !hit);
+      row.classList.toggle('srow--filter-match', hit);
+      if(hit) anyMatch = true;
+    });
+    // Some sections embed dynamic non-.srow content (classification manager,
+    // lists manager, sync panel, AI settings). Treat the section-body's
+    // textContent as a fallback so a hit on "category labels" or "peer code"
+    // still surfaces the relevant section even without .srow markup.
+    if(!anyMatch){
+      const body = sec.querySelector('.set-section-body');
+      if(body && body.textContent.toLowerCase().includes(q)) anyMatch = true;
+    }
+    sec.classList.toggle('set-section--hidden', !anyMatch);
+  });
+}
+function clearSettingsFilter(){
+  const inp = document.getElementById('settingsFilter');
+  if(inp){ inp.value = ''; }
+  filterSettingsRows();
+  if(inp) inp.focus();
+}
+window.filterSettingsRows = filterSettingsRows;
+window.clearSettingsFilter = clearSettingsFilter;
+
+// When a settings section is opened/closed manually (without a jump-link
+// click) — and when the user scrolls Settings — keep the active jump-link
+// in sync with the section currently in view. Helps the user track where
+// they are in a long Settings page without re-scanning the buttons.
+(function setupSettingsScrollSpy(){
+  if(typeof window === 'undefined' || !('IntersectionObserver' in window)) return;
+  // Wait for DOMContentLoaded so #settingsBody exists.
+  const wire = () => {
+    const sections = document.querySelectorAll('#settingsBody .set-section');
+    if(!sections.length) return;
+    const observer = new IntersectionObserver((entries) => {
+      // Only one section is "active" at a time — the topmost intersecting one.
+      const visible = entries
+        .filter(e => e.isIntersecting)
+        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+      if(visible.length){
+        _setActiveJumpLink(visible[0].target.id);
+      }
+    }, { rootMargin: '-80px 0px -60% 0px', threshold: 0 });
+    sections.forEach(s => observer.observe(s));
+  };
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', wire);
+  } else {
+    wire();
+  }
+})();
+
 function toggleTheme(){
   theme=theme==='dark'?'light':'dark';
   try{ localStorage.setItem(_THEME_MANUAL_KEY, '1'); }catch(_){}

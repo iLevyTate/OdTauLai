@@ -496,8 +496,28 @@
   <!-- Settings -->
   <div class="panel panel-settings" data-tab="settings" hidden>
     <div class="stitle stitle-static"><div class="sdot sdot--accent"></div><h2 class="slbl">Settings</h2></div>
+
+    <!-- Jump-link bar + inline filter. Sticky at the top of the Settings
+         panel so a user can land on the exact section without scrolling
+         the long flat list. Mobile collapses to a horizontally-scrolling
+         pill row. Filter input narrows the rows by label text so a user
+         can type "notif" and see only relevant settings across all sections. -->
+    <div class="set-nav" role="navigation" aria-label="Settings sections">
+      <div class="set-nav-jump" role="tablist">
+        <button type="button" class="set-nav-btn" data-action="jumpToSettingsSection" data-arg="set-general">General</button>
+        <button type="button" class="set-nav-btn" data-action="jumpToSettingsSection" data-arg="set-classifications">Categories</button>
+        <button type="button" class="set-nav-btn" data-action="jumpToSettingsSection" data-arg="set-lists">Lists</button>
+        <button type="button" class="set-nav-btn" data-action="jumpToSettingsSection" data-arg="set-integrations">Integrations</button>
+        <button type="button" class="set-nav-btn" data-action="jumpToSettingsSection" data-arg="set-about">About</button>
+      </div>
+      <div class="set-nav-filter">
+        <input type="search" id="settingsFilter" class="sinput set-nav-filter-input" placeholder="Filter settings… (e.g. notif, theme, sync)" aria-label="Filter settings" data-oninput="filterSettingsRows" autocomplete="off">
+        <button type="button" class="set-nav-filter-clear" id="settingsFilterClear" data-action="clearSettingsFilter" hidden aria-label="Clear filter">×</button>
+      </div>
+    </div>
+
     <div class="sbody sbody-static" id="settingsBody">
-      <details class="set-section" open>
+      <details class="set-section" id="set-general" open>
         <summary class="set-section-sum">General</summary>
         <div class="set-section-body">
           <div class="srow"><span class="sr-lbl">Preset</span>
@@ -541,15 +561,15 @@
         </div>
       </details>
 
-      <details class="set-section">
-        <summary class="set-section-sum">Classifications</summary>
+      <details class="set-section" id="set-classifications">
+        <summary class="set-section-sum">Categories</summary>
         <div class="set-section-body">
           <p class="text-hint--block">Customize life areas (7 default groups). Task data stores stable ids; rename labels and accent colors anytime.</p>
           <div id="classificationManager"></div>
         </div>
       </details>
 
-      <details class="set-section">
+      <details class="set-section" id="set-lists">
         <summary class="set-section-sum">Lists</summary>
         <div class="set-section-body">
           <p class="text-hint--block">
@@ -560,7 +580,7 @@
         </div>
       </details>
 
-      <details class="set-section">
+      <details class="set-section" id="set-integrations">
         <summary class="set-section-sum">Integrations</summary>
         <div class="set-section-body">
           <div class="srow srow--spread">
@@ -582,7 +602,7 @@
         </div>
       </details>
 
-      <details class="set-section">
+      <details class="set-section" id="set-about">
         <summary class="set-section-sum">About</summary>
         <div class="set-section-body">
           <div class="srow srow--no-top">
