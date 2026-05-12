@@ -1145,6 +1145,80 @@ function showShortcutsHelp(){
 }
 window.showShortcutsHelp = showShortcutsHelp;
 
+// Quick-add syntax cheatsheet — anchored from the "?" button next to the
+// task input. Smaller surface than showShortcutsHelp (single subject, no
+// app-wide cross-section), so we render as a popover positioned beneath
+// the input rather than a modal. Click-outside / Esc dismisses.
+function showQuickAddSyntaxHint(){
+  const existing = document.getElementById('taskSyntaxPopover');
+  if(existing){ existing.remove(); return; }
+  const anchor = document.getElementById('taskSyntaxHintBtn');
+  const input = document.getElementById('taskInput');
+  if(!anchor && !input) return;
+  const pop = document.createElement('div');
+  pop.id = 'taskSyntaxPopover';
+  pop.className = 'task-syntax-popover';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-label', 'Quick-add syntax cheatsheet');
+  const items = [
+    ['tomorrow / today / next mon', 'Set due date'],
+    ['fri / sat / sun (next occurrence)', 'Day-of-week shortcuts'],
+    ['in 3 days', 'Relative date'],
+    ['@urgent / @high / @normal / @low', 'Priority'],
+    ['#tag1 #tag2', 'Tags (multiple allowed)'],
+    ['!star', 'Mark starred'],
+    ['~daily / ~weekdays / ~weekly / ~monthly', 'Recurrence'],
+    ['? <question>', 'Send the rest to Ask'],
+  ];
+  const head = document.createElement('div'); head.className = 'task-syntax-popover-head';
+  const h = document.createElement('strong'); h.textContent = 'Quick-add syntax';
+  head.appendChild(h);
+  const ex = document.createElement('button');
+  ex.type = 'button'; ex.className = 'task-syntax-popover-close'; ex.textContent = '×';
+  ex.setAttribute('aria-label', 'Close cheatsheet');
+  ex.onclick = () => pop.remove();
+  head.appendChild(ex);
+  pop.appendChild(head);
+  const tbl = document.createElement('div'); tbl.className = 'task-syntax-popover-tbl';
+  for(const [k, v] of items){
+    const kEl = document.createElement('code'); kEl.textContent = k;
+    const vEl = document.createElement('span'); vEl.textContent = v;
+    tbl.appendChild(kEl); tbl.appendChild(vEl);
+  }
+  pop.appendChild(tbl);
+  const ex2 = document.createElement('div');
+  ex2.className = 'task-syntax-popover-example';
+  ex2.innerHTML = 'Example: <code>Buy milk tomorrow @urgent #shopping</code>';
+  pop.appendChild(ex2);
+  document.body.appendChild(pop);
+  // Anchor positioning — beneath the input, right-aligned to its trailing edge
+  // so the "?" button reads as the source. requestAnimationFrame so the
+  // popover dimensions are known before we measure.
+  requestAnimationFrame(() => {
+    const r = (input || anchor).getBoundingClientRect();
+    const pw = pop.offsetWidth;
+    const vw = window.innerWidth;
+    let left = Math.min(r.right - pw, vw - pw - 8);
+    if(left < 8) left = 8;
+    pop.style.left = left + 'px';
+    pop.style.top = (r.bottom + window.scrollY + 6) + 'px';
+  });
+  // Outside-click + Esc close.
+  const off = (e) => {
+    if(!pop.contains(e.target) && e.target !== anchor){
+      pop.remove();
+      document.removeEventListener('mousedown', off, true);
+      document.removeEventListener('keydown', onKey, true);
+    }
+  };
+  const onKey = (e) => { if(e.key === 'Escape'){ pop.remove(); document.removeEventListener('keydown', onKey, true); document.removeEventListener('mousedown', off, true); } };
+  setTimeout(() => {
+    document.addEventListener('mousedown', off, true);
+    document.addEventListener('keydown', onKey, true);
+  }, 50);
+}
+window.showQuickAddSyntaxHint = showQuickAddSyntaxHint;
+
 // ========== THEME TOGGLE ==========
 // Manual toggle wins over OS preference: once the user picks a theme it sticks
 // across reloads (persisted in localStorage). The OS auto-apply only takes

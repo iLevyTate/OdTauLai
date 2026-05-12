@@ -170,6 +170,22 @@ function _renderHeaderAIChip(state, msg){
   chip.classList.add(cls);
   const busy = state === 'loading' || state === 'working' || state === 'syncing';
   chip.setAttribute('aria-busy', busy ? 'true' : 'false');
+  // First-run badge: until the model has been downloaded at least once,
+  // tag the chip with a small "setup" dot so users notice it's an action
+  // rather than a passive status indicator. Cleared automatically as soon
+  // as the model state advances past idle.
+  const firstRun = state === 'idle' && (() => {
+    try{
+      if(typeof isGenDownloaded === 'function' && typeof getGenCfg === 'function'){
+        const cfg = getGenCfg() || {};
+        if(cfg.modelId && isGenDownloaded(cfg.modelId)) return false;
+      }
+    }catch(_){}
+    // Embedding model: never downloaded either?
+    try{ if(typeof isIntelReady === 'function' && isIntelReady()) return false; }catch(_){}
+    return true;
+  })();
+  chip.classList.toggle('ai-chip--firstrun', firstRun);
   const label = chip.querySelector('.ai-chip-label');
   if(label){
     if(state === 'loading' || state === 'working' || state === 'syncing'){
@@ -1092,6 +1108,15 @@ async function intelApplyPending(){
     if(typeof renderBanner === 'function') renderBanner();
     if(typeof renderLists === 'function') renderLists();
     _renderUndoBtn();
+    // Action toast with Undo — the Tools-tab "Undo" button is easy to miss
+    // and Cmd+Z had no surface to bind to. The toast routes through the
+    // ring buffer in utils.js so Cmd+Z keeps working after the toast fades.
+    if(typeof showActionToast === 'function'){
+      const label = `Applied ${applied} change${applied !== 1 ? 's' : ''}${_pendingSource ? ' (' + _pendingSource + ')' : ''}`;
+      showActionToast(label, 'Undo', () => {
+        if(typeof aiUndo === 'function') aiUndo();
+      }, 6000);
+    }
     const changedIds = new Set();
     snaps.forEach(s => {
       if(s.type === 'batch' && Array.isArray(s.snaps)) s.snaps.forEach(x => x.id && changedIds.add(x.id));

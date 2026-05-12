@@ -2774,6 +2774,49 @@ function _initTaskListSortable(){
     scrollSpeed: 14,
     bubbleScroll: true,
     onEnd: function(evt){
+      // Cross-surface drop-on-calendar (mobile). The calendar view uses
+      // HTML5 ondragover/ondrop on .cal-day for desktop; Sortable's
+      // synthetic-touch path doesn't propagate to those handlers, so we
+      // probe the release point here. If the user released over a
+      // .cal-day we update the task's dueDate instead of treating the
+      // event as a reorder. evt.originalEvent is the underlying touch /
+      // pointer event Sortable was tracking.
+      let calDropApplied = false;
+      try{
+        const oe = evt.originalEvent || (evt.touches && evt.touches[0]);
+        const point = oe ? (oe.changedTouches && oe.changedTouches[0]) || oe : null;
+        if(point && Number.isFinite(point.clientX) && Number.isFinite(point.clientY)){
+          // dragged item's ghost intercepts elementFromPoint at release; hide
+          // it briefly before the lookup so we see the underlying drop target.
+          const ghost = document.querySelector('.task-item--dragging, .task-item--ghost');
+          const prev = ghost ? ghost.style.visibility : null;
+          if(ghost) ghost.style.visibility = 'hidden';
+          const el = document.elementFromPoint(point.clientX, point.clientY);
+          if(ghost) ghost.style.visibility = prev || '';
+          const day = el && el.closest && el.closest('.cal-day');
+          if(day && day.dataset && day.dataset.date){
+            const taskId = parseInt((evt.item && evt.item.dataset && evt.item.dataset.taskId) || '', 10);
+            if(Number.isFinite(taskId) && typeof findTask === 'function'){
+              const t = findTask(taskId);
+              if(t){
+                t.dueDate = day.dataset.date;
+                t.reminderFired = false;
+                if(typeof saveState === 'function') saveState('user');
+                if(typeof renderTaskList === 'function') renderTaskList();
+                if(typeof showActionToast === 'function'){
+                  const oldDue = (evt.item && evt.item.dataset && evt.item.dataset.prevDue) || null;
+                  showActionToast('Due ' + ((typeof fmtDue === 'function') ? fmtDue(day.dataset.date) : day.dataset.date), 'Undo', () => {
+                    const u = findTask(taskId);
+                    if(u){ u.dueDate = oldDue || null; saveState('user'); renderTaskList(); }
+                  }, 4500);
+                }
+                calDropApplied = true;
+              }
+            }
+          }
+        }
+      }catch(e){ console.warn('[sortable] cross-surface drop probe', e); }
+      if(calDropApplied) return;
       // Read new DOM order, persist as t.order. Force manual sort so the
       // user-driven order survives across renders that would otherwise
       // re-sort by smart heuristics.
@@ -2795,6 +2838,13 @@ function _initTaskListSortable(){
         }
         if(typeof saveState === 'function') saveState('user');
       }
+    },
+    onStart: function(evt){
+      // Stash the original dueDate so the cross-surface drop's Undo button
+      // can restore it without re-querying for a possibly-stale value.
+      const id = parseInt((evt.item && evt.item.dataset && evt.item.dataset.taskId) || '', 10);
+      const t = Number.isFinite(id) && typeof findTask === 'function' ? findTask(id) : null;
+      if(t && evt.item){ evt.item.dataset.prevDue = t.dueDate || ''; }
     },
   });
 }
