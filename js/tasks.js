@@ -1133,17 +1133,32 @@ function setQuickReminder(offset,hour){
 function checkReminders(){
   const now=Date.now();
   let fired=false;
+  const dueNotify = !(typeof cfg !== 'undefined' && cfg && cfg.dueNotify === false);
   tasks.forEach(t=>{
-    if(!t.remindAt||t.reminderFired||t.archived||t.status==='done')return;
-    const remindTime=new Date(t.remindAt).getTime();
-    if(!Number.isFinite(remindTime)){
-      console.warn('[tasks] Invalid remindAt on task',t.id);
+    if(t.reminderFired||t.archived||t.status==='done')return;
+    // Either an explicit remindAt, or — opt-out via cfg.dueNotify — the
+    // dueDate at midday acts as the implicit reminder time. Other apps treat
+    // a due date as a reminder by default; without this, a user sets a due
+    // date and never hears about it.
+    let reminderSrc = null;
+    let remindTime = null;
+    if(t.remindAt){
+      const rt = new Date(t.remindAt).getTime();
+      if(Number.isFinite(rt)){ remindTime = rt; reminderSrc = 'remindAt'; }
+      else { console.warn('[tasks] Invalid remindAt on task', t.id); return; }
+    } else if(dueNotify && t.dueDate){
+      // Fire at 09:00 local on the due date — the same heuristic users see in
+      // Apple Reminders / Things when no specific time was set.
+      const rt = new Date(String(t.dueDate) + 'T09:00:00').getTime();
+      if(Number.isFinite(rt)){ remindTime = rt; reminderSrc = 'dueDate'; }
+      else return;
+    } else {
       return;
     }
     if(now>=remindTime){
       t.reminderFired=true;fired=true;
       const late=(now-remindTime)>5*60*1000;
-      const title=(late?'Missed: ':'Task reminder: ')+t.name;
+      const title=(late?'Missed: ':(reminderSrc === 'dueDate' ? 'Due now: ' : 'Task reminder: '))+t.name;
       if('Notification' in window&&Notification.permission==='granted'){
         try{
           if(typeof notify === 'function'){
@@ -1165,10 +1180,43 @@ function checkReminders(){
   });
   if(fired)saveState('auto')
 }
-// Check reminders every 30s (guarded against double-init)
-let _reminderIntervalId = null;
-if (_reminderIntervalId) clearInterval(_reminderIntervalId);
-_reminderIntervalId = setInterval(checkReminders, 30000);
+
+// Nudge the user once when they create a remindAt / dueDate but the browser
+// notification permission is still 'default' — otherwise the reminder will
+// fire silently and feel broken. Stores a one-shot flag in localStorage so
+// the toast doesn't pester them every task. The Settings → Notifications CTA
+// remains the canonical place to grant the permission.
+function _maybeNudgeNotifPerm(){
+  try{
+    if(typeof Notification === 'undefined') return;
+    if(Notification.permission !== 'default') return;
+    if(typeof cfg !== 'undefined' && cfg && cfg.notif === false) return;
+    const k = 'stupind_reminder_perm_nudged';
+    if(localStorage.getItem(k) === '1') return;
+    localStorage.setItem(k, '1');
+    if(typeof showActionToast !== 'function') return;
+    showActionToast('Reminders need notification permission', 'Enable', async () => {
+      if(typeof reqNotifPerm === 'function'){
+        const r = await reqNotifPerm();
+        if(typeof renderNotifStatus === 'function') renderNotifStatus();
+        if(r !== 'granted' && typeof showExportToast === 'function'){
+          showExportToast('Permission ' + r + ' — enable later in Settings → Notifications.');
+        }
+      }
+    }, 8000);
+  }catch(_){}
+}
+window._maybeNudgeNotifPerm = _maybeNudgeNotifPerm;
+// Check reminders every 30s. Managed so a bfcache restore reinstates the
+// loop cleanly and a hot-reload doesn't pile up duplicate tickers.
+if(typeof setManagedInterval === 'function'){
+  setManagedInterval('reminders', checkReminders, 30000);
+  if(typeof onBfcacheRestore === 'function'){
+    onBfcacheRestore(() => setManagedInterval('reminders', checkReminders, 30000));
+  }
+} else {
+  setInterval(checkReminders, 30000);
+}
 // And once on load
 setTimeout(checkReminders, 1000);
 
@@ -1248,6 +1296,65 @@ function getHabitLoggedSecTotal(t){
   },0);
 }
 
+// ── Parent/subtask completion cascade ────────────────────────────────────────
+// Two rules, both opt-in via `cfg.cascadeCompletion` (default ON):
+//   1. Marking a parent done auto-completes every open, non-recurring child
+//      so the user doesn't have to walk the subtree by hand.
+//   2. Marking the last open subtask done auto-completes the parent.
+// Recurring tasks are skipped — they own their own completion cycle.
+// Returns an array of {id, prev} snapshots of every task we mutated, so the
+// undo path can restore the whole batch (not just the directly-clicked row).
+function _cascadeOnDone(taskId){
+  if(!(typeof cfg !== 'undefined' && cfg && cfg.cascadeCompletion !== false)) return [];
+  const affected = [];
+  const visit = (id) => {
+    const kids = getTaskChildren(id);
+    for(const k of kids){
+      if(k.archived) continue;
+      if(k.recur) continue;        // habits cycle separately
+      if(k.status === 'done') continue;
+      affected.push({ id: k.id, prev: { status: k.status, completedAt: k.completedAt } });
+      k.status = 'done';
+      k.completedAt = stampCompletion();
+      visit(k.id);
+    }
+  };
+  visit(taskId);
+  return affected;
+}
+function _cascadeOnReopen(taskId){
+  // Re-opening a parent doesn't reopen its children — that'd surprise users.
+  // No-op kept for symmetry / future opt-in.
+  return [];
+}
+function _maybeAutoCompleteParent(childId){
+  if(!(typeof cfg !== 'undefined' && cfg && cfg.cascadeCompletion !== false)) return [];
+  const child = findTask(childId);
+  if(!child || child.parentId == null) return [];
+  const parent = findTask(child.parentId);
+  if(!parent) return [];
+  if(parent.archived || parent.status === 'done' || parent.recur) return [];
+  // All non-archived siblings (including the just-completed child) must be done.
+  const siblings = tasks.filter(t => t.parentId === parent.id && !t.archived);
+  if(!siblings.length) return [];
+  const allDone = siblings.every(t => t.status === 'done');
+  if(!allDone) return [];
+  const snap = [{ id: parent.id, prev: { status: parent.status, completedAt: parent.completedAt } }];
+  parent.status = 'done';
+  parent.completedAt = stampCompletion();
+  // Recurse upward — completing a parent may complete its own parent.
+  return snap.concat(_maybeAutoCompleteParent(parent.id));
+}
+function _restoreCascade(snapshots){
+  if(!Array.isArray(snapshots)) return;
+  for(const s of snapshots){
+    const t = findTask(s.id);
+    if(!t || !s.prev) continue;
+    t.status = s.prev.status;
+    t.completedAt = s.prev.completedAt;
+  }
+}
+
 // Status/Priority quick-change
 function cycleStatus(id){
   event&&event.stopPropagation();
@@ -1255,11 +1362,18 @@ function cycleStatus(id){
   const backup=JSON.parse(JSON.stringify(t));
   const idx=STATUS_ORDER.indexOf(t.status||'open');
   const next=STATUS_ORDER[(idx+1)%STATUS_ORDER.length];
+  let cascade = [];
   if(next==='done'&&t.recur){completeHabitCycle(t)}
   else{
     t.status=next;
-    if(t.status==='done')t.completedAt=stampCompletion();
-    else t.completedAt=null;
+    if(t.status==='done'){
+      t.completedAt=stampCompletion();
+      // Mark all open children done too, then bubble up: if this completes
+      // the last sibling, the parent auto-completes.
+      cascade = cascade.concat(_cascadeOnDone(id), _maybeAutoCompleteParent(id));
+    } else {
+      t.completedAt=null;
+    }
   }
   // Status cycle may move this card under a sticky group header — FLIP it.
   const list=gid('taskList');
@@ -1267,9 +1381,12 @@ function cycleStatus(id){
   else renderTaskList();
   saveState('user');
   if(typeof showActionToast==='function'){
-    showActionToast('Status: '+STATUSES[t.status].label, 'Undo', ()=>{
+    const cascadeNote = cascade.length ? ' (+' + cascade.length + ' linked)' : '';
+    showActionToast('Status: '+STATUSES[t.status].label + cascadeNote, 'Undo', ()=>{
       const u=findTask(id);
-      if(u){Object.assign(u,backup);renderTaskList();saveState('user')}
+      if(u){Object.assign(u,backup);}
+      _restoreCascade(cascade);
+      renderTaskList();saveState('user');
     }, 4000);
   }
 }
@@ -1278,6 +1395,7 @@ function toggleTaskDoneQuick(id){
   event&&event.stopPropagation();
   const t=findTask(id);if(!t)return;
   const backup=JSON.parse(JSON.stringify(t));
+  let cascade = [];
   if(t.status==='done'){t.status='open';t.completedAt=null}
   else{
     if(t.recur){
@@ -1286,6 +1404,8 @@ function toggleTaskDoneQuick(id){
     }else{
       t.status='done';t.completedAt=stampCompletion();
       if(activeTaskId===id){toggleTask(id)}
+      // Cascade down to subtasks and bubble up if siblings are all done.
+      cascade = cascade.concat(_cascadeOnDone(id), _maybeAutoCompleteParent(id));
     }
     haptic(15);
     // Dopamine: animate the row + a little sparkle
@@ -1304,9 +1424,12 @@ function toggleTaskDoneQuick(id){
   }
   renderTaskList();saveState('user');
   if(typeof showActionToast==='function'){
-    showActionToast(t.status==='done'?'Task done':'Task reopened', 'Undo', ()=>{
+    const cascadeNote = cascade.length ? ' (+' + cascade.length + ' linked)' : '';
+    showActionToast((t.status==='done'?'Task done':'Task reopened') + cascadeNote, 'Undo', ()=>{
       const u=findTask(id);
-      if(u){Object.assign(u,backup);renderTaskList();saveState('user')}
+      if(u){Object.assign(u,backup);}
+      _restoreCascade(cascade);
+      renderTaskList();saveState('user');
     }, 4000);
   }
 }
@@ -1514,8 +1637,271 @@ function updateFiltersSummary(){
 
 let _semanticSearchReqId=0;
 let _updateTaskFiltersDebounce=null;
+
+// ── Search operator parser ──────────────────────────────────────────────────
+// The task search box accepts power-user operators alongside free text:
+//
+//   tag:work          one or more tags (#work also works)
+//   list:Personal     list by name (case-insensitive)
+//   is:overdue        overdue|today|week|done|archived|starred|recurring
+//   priority:high     urgent|high|normal|low|none (@high also works)
+//   due:today         today|tomorrow|week|none|overdue|YYYY-MM-DD
+//   status:open       open|progress|review|blocked|done
+//
+// Operators are AND-combined; multiple values within one operator are OR.
+// Anything left over after stripping the operators is the free-text query.
+// Returns: { text: 'free part', ops: { tag:[], list:[], is:[], priority:[],
+//                                       due:[], status:[] } }
+function parseTaskSearchQuery(raw){
+  const ops = { tag: [], list: [], is: [], priority: [], due: [], status: [] };
+  if(typeof raw !== 'string') return { text: '', ops };
+  // Match `key:value` (quoted optional) or shorthand prefixes.
+  const opRe = /(\w+):("[^"]+"|'[^']+'|\S+)|#(\S+)|@(\S+)/g;
+  let leftover = raw;
+  let m;
+  while((m = opRe.exec(raw)) !== null){
+    if(m[3]){
+      // #tag shorthand
+      ops.tag.push(m[3].toLowerCase());
+      leftover = leftover.replace(m[0], '');
+      continue;
+    }
+    if(m[4]){
+      // @priority shorthand
+      const v = m[4].toLowerCase();
+      if(['urgent','high','normal','low','none'].includes(v)) ops.priority.push(v);
+      leftover = leftover.replace(m[0], '');
+      continue;
+    }
+    const key = m[1].toLowerCase();
+    let val = m[2];
+    if((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))){
+      val = val.slice(1, -1);
+    }
+    val = val.toLowerCase();
+    if(key === 'tag'      ) ops.tag.push(val);
+    else if(key === 'list'    ) ops.list.push(val);
+    else if(key === 'is'      ) ops.is.push(val);
+    else if(key === 'priority') ops.priority.push(val);
+    else if(key === 'due'     ) ops.due.push(val);
+    else if(key === 'status'  ) ops.status.push(val);
+    else continue; // unknown operator — leave the chars in leftover
+    leftover = leftover.replace(m[0], '');
+  }
+  const text = leftover.replace(/\s+/g, ' ').trim().toLowerCase();
+  return { text, ops };
+}
+if(typeof window !== 'undefined') window.parseTaskSearchQuery = parseTaskSearchQuery;
+
+function _opsActive(ops){
+  if(!ops) return false;
+  for(const k of Object.keys(ops)) if(ops[k] && ops[k].length) return true;
+  return false;
+}
+
+// Build a single removable chip — used by renderActiveFilters for every
+// filter source so the bar reads as one consistent row of pills.
+function _afChip(cls, labelText, ariaText, onRemove){
+  const pill = document.createElement('span');
+  pill.className = 'qpc ' + (cls || 'qpc--filter');
+  const lbl = document.createElement('span');
+  lbl.textContent = labelText;
+  pill.appendChild(lbl);
+  if(typeof onRemove === 'function'){
+    const rm = document.createElement('button');
+    rm.type = 'button';
+    rm.className = 'qpc-rm';
+    rm.title = 'Remove ' + (ariaText || labelText);
+    rm.setAttribute('aria-label', 'Remove ' + (ariaText || labelText));
+    rm.textContent = '×';
+    rm.onclick = onRemove;
+    pill.appendChild(rm);
+  }
+  return pill;
+}
+
+// Strip a search-operator token (and its shorthand variant) from the live
+// taskSearch input value, then re-run filtering. Shared by the operator
+// chips so each one knows how to remove just itself.
+function _afStripOperatorFromInput(key, value){
+  const inp = gid('taskSearch');
+  if(!inp) return;
+  const escVal = String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const patterns = [ new RegExp('\\b' + key + ':"?' + escVal + '"?\\s*', 'gi') ];
+  if(key === 'tag')      patterns.push(new RegExp('#' + escVal + '\\b\\s*', 'gi'));
+  if(key === 'priority') patterns.push(new RegExp('@' + escVal + '\\b\\s*', 'gi'));
+  let next = inp.value;
+  for(const p of patterns) next = next.replace(p, '');
+  inp.value = next.replace(/\s+/g, ' ').trim();
+  updateTaskFilters();
+  renderTaskList();
+}
+
+// Unified "active filters" bar. Renders ONE chip per active filter from
+// every source (smart view, active list, free-text search, search
+// operators, filter-panel status/priority/category). Each chip's × clears
+// just that filter; a "Clear all" button appears when ≥2 filters are
+// active. Self-hides when nothing is active.
+function renderActiveFilters(){
+  const host = gid('activeFiltersBar');
+  if(!host) return;
+  host.replaceChildren();
+  const chips = [];
+
+  // Smart view (anything other than 'all' is an active narrowing).
+  if(typeof smartView !== 'undefined' && smartView && smartView !== 'all'){
+    const labelMap = {
+      inbox:'Inbox', today:'Today', week:'This week', overdue:'Overdue',
+      unscheduled:'Unscheduled', starred:'Starred', impact:'Impact',
+      waiting:'Waiting', stuck:'Stuck', snoozed:'Snoozed',
+      habits:'Habits', completed:'Done', archived:'Archive',
+    };
+    const label = labelMap[smartView] || smartView;
+    chips.push(_afChip('qpc--view', 'View: ' + label, 'view ' + label,
+      () => { if(typeof setSmartView === 'function') setSmartView('all'); }));
+  }
+
+  // Free-text search residue (after operator stripping).
+  if(taskFilters.search){
+    const txt = taskFilters.search.length > 32 ? taskFilters.search.slice(0, 30) + '…' : taskFilters.search;
+    chips.push(_afChip('qpc--search', '“' + txt + '”', 'search ' + txt,
+      () => {
+        const inp = gid('taskSearch');
+        if(!inp) return;
+        // Strip everything that ISN'T an operator token — leave operators
+        // (tag:foo, #x, @y, key:val) in place so the user doesn't lose
+        // them when clearing just the free-text portion.
+        const opRe = /(\w+:("[^"]+"|'[^']+'|\S+))|#\S+|@\S+/g;
+        const kept = (inp.value.match(opRe) || []).join(' ');
+        inp.value = kept;
+        updateTaskFilters();
+        renderTaskList();
+      }));
+  }
+
+  // Search operators (tag/list/is/priority/due/status). Skip ops.priority
+  // when the filter-panel priority dropdown is non-'all' to avoid showing
+  // two chips for the same effective filter.
+  const ops = taskFilters.ops || {};
+  const opOrder = ['is', 'tag', 'list', 'priority', 'due', 'status'];
+  const opLabels = { is:'is', tag:'tag', list:'list', priority:'priority', due:'due', status:'status' };
+  for(const key of opOrder){
+    const vals = ops[key];
+    if(!vals || !vals.length) continue;
+    for(const v of vals){
+      chips.push(_afChip('qpc--filter', opLabels[key] + ':' + v, opLabels[key] + ' ' + v,
+        () => _afStripOperatorFromInput(key, v)));
+    }
+  }
+
+  // Filter-panel status (anything other than 'all').
+  if(taskFilters.status && taskFilters.status !== 'all'){
+    const sLabel = taskFilters.status === 'active' ? 'Active' :
+      (typeof STATUSES === 'object' && STATUSES && STATUSES[taskFilters.status] && STATUSES[taskFilters.status].label) || taskFilters.status;
+    chips.push(_afChip('qpc--accent', 'status: ' + sLabel, 'status filter',
+      () => {
+        const sel = gid('filterStatus'); if(sel) sel.value = 'all';
+        if(typeof updateTaskFilters === 'function') updateTaskFilters();
+        renderTaskList();
+      }));
+  }
+  // Filter-panel priority.
+  if(taskFilters.priority && taskFilters.priority !== 'all'){
+    chips.push(_afChip('qpc--accent', 'priority: ' + taskFilters.priority, 'priority filter',
+      () => {
+        const sel = gid('filterPriority'); if(sel) sel.value = 'all';
+        if(typeof updateTaskFilters === 'function') updateTaskFilters();
+        renderTaskList();
+      }));
+  }
+  // Filter-panel category.
+  if(taskFilters.category && taskFilters.category !== 'all'){
+    let catLabel = taskFilters.category;
+    if(typeof getCategoryDef === 'function'){
+      const d = getCategoryDef(taskFilters.category);
+      if(d && d.label) catLabel = d.label;
+    }
+    chips.push(_afChip('qpc--tag', 'category: ' + catLabel, 'category filter',
+      () => {
+        if(typeof setFilterCategory === 'function') setFilterCategory('all');
+        else {
+          const sel = gid('filterCategory'); if(sel) sel.value = 'all';
+          if(typeof updateTaskFilters === 'function') updateTaskFilters();
+        }
+        renderTaskList();
+      }));
+  }
+  // Active list. Only chip when focusListMode is ON — that's the only state
+  // the user can explicitly clear ("remove the list narrowing"). The default
+  // implicit "All view scopes to active list" narrowing isn't user-removable
+  // (the only way out is to switch lists or change smart view), so showing a
+  // removable chip for it produces a phantom that re-renders on every tick.
+  if(typeof activeListId !== 'undefined' && activeListId
+     && typeof cfg === 'object' && cfg && cfg.focusListMode
+     && Array.isArray(lists) && lists.length > 1){
+    const l = lists.find(x => x.id === activeListId);
+    if(l){
+      chips.push(_afChip('qpc--list', 'list: ' + (l.name || '') + ' (focus)', 'list focus on ' + (l.name || ''),
+        () => {
+          // Turn off the focus-list opt-in so other lists return to view.
+          // activeListId stays as a pointer; the user can re-enter focus via
+          // the lists strip toggle.
+          if(typeof cfg === 'object' && cfg) cfg.focusListMode = false;
+          try{ document.body.classList.remove('app-focus-list'); }catch(_){}
+          if(typeof renderTaskList === 'function') renderTaskList();
+          if(typeof saveState === 'function') saveState('user');
+        }));
+    }
+  }
+
+  if(!chips.length){ host.hidden = true; return; }
+  host.hidden = false;
+
+  const lbl = document.createElement('span');
+  lbl.className = 'af-label';
+  lbl.textContent = 'Filters';
+  host.appendChild(lbl);
+  for(const c of chips) host.appendChild(c);
+
+  if(chips.length >= 2){
+    const clearAll = document.createElement('button');
+    clearAll.type = 'button';
+    clearAll.className = 'af-clear-all';
+    clearAll.textContent = 'Clear all';
+    clearAll.title = 'Reset every active filter';
+    clearAll.onclick = () => {
+      // Reset every filter source in turn. Smart view returns to 'all'
+      // which itself triggers renderTaskList; we still clobber the search
+      // input and the filter-panel selects explicitly so the user sees
+      // them empty too.
+      const inp = gid('taskSearch'); if(inp) inp.value = '';
+      const fS = gid('filterStatus');    if(fS) fS.value = 'all';
+      const fP = gid('filterPriority');  if(fP) fP.value = 'all';
+      const fC = gid('filterCategory');  if(fC) fC.value = 'all';
+      if(typeof cfg === 'object' && cfg) cfg.focusListMode = false;
+      try{ document.body.classList.remove('app-focus-list'); }catch(_){}
+      if(typeof setSmartView === 'function') setSmartView('all');
+      if(typeof updateTaskFilters === 'function') updateTaskFilters();
+      renderTaskList();
+    };
+    host.appendChild(clearAll);
+  }
+}
+if(typeof window !== 'undefined') window.renderActiveFilters = renderActiveFilters;
+
+// Back-compat shim — older call sites still invoke renderSearchOpPills.
+// Route them through the unified renderActiveFilters so we keep one render
+// path and one source of truth.
+function renderSearchOpPills(){ if(typeof renderActiveFilters === 'function') renderActiveFilters(); }
+if(typeof window !== 'undefined') window.renderSearchOpPills = renderSearchOpPills;
+
 function updateTaskFilters(){
-  taskFilters.search=gid('taskSearch').value.toLowerCase().trim();
+  const raw = gid('taskSearch').value;
+  const parsed = parseTaskSearchQuery(raw);
+  // taskFilters.search keeps the legacy free-text semantics for the substring
+  // / semantic-search code paths; parsed.ops drives the new operator filters.
+  taskFilters.search = parsed.text;
+  taskFilters.ops    = parsed.ops;
   taskFilters.status=gid('filterStatus').value;
   taskFilters.priority=gid('filterPriority').value;
   taskFilters.category=(gid('filterCategory')||{}).value||'all';
@@ -1529,6 +1915,8 @@ function updateTaskFilters(){
   if(clr) clr.hidden = !(gid('taskSearch').value.trim());
   const semPill=gid('taskSearchSemanticPill');
   if(semPill) semPill.hidden = !((gid('taskSearchSemantic')&&gid('taskSearchSemantic').checked));
+  // Render the parsed operator chips so the user sees what matched.
+  if(typeof renderSearchOpPills === 'function') renderSearchOpPills();
   if(window._taskSearchSemantic && taskFilters.search && typeof semanticSearch === 'function' && typeof isIntelReady === 'function' && isIntelReady()){
     const rawQ = gid('taskSearch').value.trim();
     const myReq=++_semanticSearchReqId;
@@ -1643,6 +2031,78 @@ function matchesFilters(t){
   if(taskFilters.priority!=='all'&&t.priority!==taskFilters.priority)return false;
   // Category filter
   if(taskFilters.category&&taskFilters.category!=='all'&&t.category!==taskFilters.category)return false;
+  // Operator filters from `tag:` / `list:` / `is:` / `priority:` / `due:` /
+  // `status:` (and #tag, @priority shorthands). AND across operator keys,
+  // OR across values within a single key.
+  const ops = taskFilters.ops;
+  if(ops){
+    if(ops.tag && ops.tag.length){
+      const tt = (t.tags || []).map(x => String(x).toLowerCase());
+      if(!ops.tag.every(want => tt.includes(want))) return false;
+    }
+    if(ops.list && ops.list.length){
+      const list = (typeof lists !== 'undefined' && Array.isArray(lists)) ? lists.find(l => l.id === t.listId) : null;
+      const name = list ? String(list.name || '').toLowerCase() : '';
+      if(!ops.list.some(want => name === want || name.includes(want))) return false;
+    }
+    if(ops.priority && ops.priority.length){
+      const p = String(t.priority || 'none').toLowerCase();
+      if(!ops.priority.includes(p)) return false;
+    }
+    if(ops.status && ops.status.length){
+      const s = String(t.status || 'open').toLowerCase();
+      if(!ops.status.includes(s)) return false;
+    }
+    if(ops.due && ops.due.length){
+      const today = todayISO();
+      const dd = t.dueDate || '';
+      const matchOne = (want) => {
+        if(want === 'none')     return !dd;
+        if(want === 'today')    return dd === today;
+        if(want === 'tomorrow'){
+          const d=new Date(); d.setDate(d.getDate()+1);
+          const iso = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+          return dd === iso;
+        }
+        if(want === 'week'){
+          if(!dd) return false;
+          const w=new Date(); w.setDate(w.getDate()+7);
+          const wIso=w.getFullYear()+'-'+String(w.getMonth()+1).padStart(2,'0')+'-'+String(w.getDate()).padStart(2,'0');
+          return dd >= today && dd <= wIso;
+        }
+        if(want === 'overdue'){
+          return !!dd && dd < today && t.status !== 'done';
+        }
+        if(/^\d{4}-\d{2}-\d{2}$/.test(want)) return dd === want;
+        return false;
+      };
+      if(!ops.due.some(matchOne)) return false;
+    }
+    if(ops.is && ops.is.length){
+      const today = todayISO();
+      const matchOne = (want) => {
+        switch(want){
+          case 'overdue':   return !!t.dueDate && t.dueDate < today && t.status !== 'done';
+          case 'today':     return t.dueDate === today;
+          case 'week':{
+            if(!t.dueDate) return false;
+            const w=new Date(); w.setDate(w.getDate()+7);
+            const wIso=w.getFullYear()+'-'+String(w.getMonth()+1).padStart(2,'0')+'-'+String(w.getDate()).padStart(2,'0');
+            return t.dueDate >= today && t.dueDate <= wIso;
+          }
+          case 'done':      return t.status === 'done';
+          case 'open':      return t.status !== 'done';
+          case 'archived':  return !!t.archived;
+          case 'starred':   return !!t.starred;
+          case 'recurring':
+          case 'habit':     return !!t.recur;
+          case 'snoozed':   return !!t.hiddenUntil && t.hiddenUntil > today;
+          default: return false;
+        }
+      };
+      if(!ops.is.every(matchOne)) return false;
+    }
+  }
   if(!habitVisibilityOk(t))return false;
   return true;
 }
@@ -1830,9 +2290,142 @@ function renderSmartViewCounts(){
 }
 
 // Main render (list view)
+// ── Daily momentum (progress ring + streak + 7-day sparkline) ──────────────
+// Cheap to compute and called from renderTaskList so it always reflects the
+// current task state without a separate change feed. All work is O(N over
+// non-archived tasks) — fine for the bounded list sizes the app supports.
+function _ymd(d){
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function _dailyMomentumStats(){
+  const today = (typeof todayISO === 'function') ? todayISO() : _ymd(new Date());
+  // Today: open tasks due today (or earlier) + tasks completed today.
+  let dueToday = 0, doneToday = 0;
+  // 7-day completion histogram (oldest → newest including today).
+  const days = [];
+  const dayKeys = [];
+  for(let i = 6; i >= 0; i--){
+    const d = new Date(); d.setDate(d.getDate() - i);
+    dayKeys.push(_ymd(d));
+    days.push(0);
+  }
+  // Per-day completed-count set for streak math.
+  const completedDays = new Set();
+  for(const t of tasks){
+    if(!t || t.archived) continue;
+    if(t.status === 'done'){
+      const k = (typeof completionDateKey === 'function') ? completionDateKey(t.completedAt) : null;
+      if(k){
+        completedDays.add(k);
+        const idx = dayKeys.indexOf(k);
+        if(idx >= 0) days[idx] += 1;
+        if(k === today) doneToday += 1;
+      }
+    } else {
+      // Counts toward today's "due" denominator only if it's due today (or overdue but still open).
+      if(t.dueDate && t.dueDate <= today) dueToday += 1;
+    }
+  }
+  // Streak: walk backwards from today while each day has ≥1 completion.
+  // Today not yet completed doesn't break a streak that ran through
+  // yesterday — we treat today as "in progress" so the user isn't punished
+  // for opening the app at 9am before finishing anything.
+  let streak = 0;
+  const d = new Date();
+  if(!completedDays.has(today)) d.setDate(d.getDate() - 1);
+  while(completedDays.has(_ymd(d))){
+    streak += 1;
+    d.setDate(d.getDate() - 1);
+  }
+  const total = dueToday + doneToday;
+  const pct = total > 0 ? Math.round((doneToday / total) * 100) : 0;
+  return { dueToday, doneToday, total, pct, streak, days, dayKeys, today };
+}
+function renderDailyMomentum(){
+  const host = gid('dailyMomentum');
+  if(!host) return;
+  // Hide on Archive smart view — momentum doesn't make sense there. Also
+  // hide while the welcome card is up (no tasks yet — no momentum to show).
+  if(!Array.isArray(tasks) || !tasks.length){ host.hidden = true; host.replaceChildren(); return; }
+  if(smartView === 'archived'){ host.hidden = true; return; }
+  const s = _dailyMomentumStats();
+  host.hidden = false;
+  host.replaceChildren();
+  const mkCell = (cls, label, valueText, valueClass, onClick, ariaLabel) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'dm-cell';
+    if(onClick) b.onclick = onClick;
+    if(ariaLabel) b.setAttribute('aria-label', ariaLabel);
+    const inner = document.createElement('div');
+    inner.style.display = 'flex'; inner.style.flexDirection = 'column'; inner.style.gap = '2px'; inner.style.alignItems = 'flex-start';
+    const lbl = document.createElement('span'); lbl.className = 'dm-cell-label'; lbl.textContent = label;
+    const val = document.createElement('span'); val.className = 'dm-cell-value' + (valueClass ? ' ' + valueClass : ''); val.textContent = valueText;
+    inner.appendChild(lbl); inner.appendChild(val);
+    b.appendChild(inner);
+    return b;
+  };
+  // Progress ring (today). Tappable → switch to Today smart view.
+  const ringWrap = document.createElement('button');
+  ringWrap.type = 'button';
+  ringWrap.className = 'dm-cell';
+  ringWrap.setAttribute('aria-label', s.doneToday + ' of ' + s.total + ' tasks done today');
+  ringWrap.onclick = () => { if(typeof setSmartView === 'function') setSmartView('today'); };
+  const ring = document.createElement('div'); ring.className = 'dm-ring';
+  const r = 14, c = 2 * Math.PI * r;
+  ring.innerHTML = '<svg viewBox="0 0 36 36"><circle class="dm-ring-bg" cx="18" cy="18" r="' + r + '"/><circle class="dm-ring-fg" cx="18" cy="18" r="' + r + '" stroke-dasharray="' + c.toFixed(2) + '" stroke-dashoffset="' + (c - (c * s.pct / 100)).toFixed(2) + '"/></svg>';
+  const txt = document.createElement('div'); txt.className = 'dm-ring-text'; txt.textContent = s.pct + '%';
+  ring.appendChild(txt);
+  ringWrap.appendChild(ring);
+  const ringMeta = document.createElement('div');
+  ringMeta.style.display = 'flex'; ringMeta.style.flexDirection = 'column'; ringMeta.style.alignItems = 'flex-start';
+  const ringLbl = document.createElement('span'); ringLbl.className = 'dm-cell-label'; ringLbl.textContent = 'Today';
+  const ringVal = document.createElement('span'); ringVal.className = 'dm-cell-value';
+  ringVal.textContent = s.doneToday + ' / ' + s.total;
+  ringMeta.appendChild(ringLbl); ringMeta.appendChild(ringVal);
+  ringWrap.appendChild(ringMeta);
+  host.appendChild(ringWrap);
+
+  // Streak (consecutive days with ≥1 completion).
+  const streakCls = s.streak >= 7 ? 'dm-cell-value--success' : (s.streak >= 1 ? 'dm-cell-value--accent' : '');
+  const streakLabel = s.streak === 0 ? '—' : (s.streak + ' day' + (s.streak !== 1 ? 's' : ''));
+  host.appendChild(mkCell('streak', 'Streak', streakLabel, streakCls,
+    () => { if(typeof setSmartView === 'function') setSmartView('completed'); },
+    'Current completion streak: ' + s.streak + ' day' + (s.streak !== 1 ? 's' : '')));
+
+  // 7-day sparkline of completions.
+  const sparkCell = document.createElement('button');
+  sparkCell.type = 'button';
+  sparkCell.className = 'dm-cell';
+  sparkCell.setAttribute('aria-label', '7-day completion sparkline');
+  sparkCell.onclick = () => { if(typeof setSmartView === 'function') setSmartView('completed'); };
+  const sparkMeta = document.createElement('div');
+  sparkMeta.style.display = 'flex'; sparkMeta.style.flexDirection = 'column'; sparkMeta.style.alignItems = 'flex-start'; sparkMeta.style.gap = '2px';
+  const sparkLbl = document.createElement('span'); sparkLbl.className = 'dm-cell-label'; sparkLbl.textContent = 'Last 7 days';
+  const spark = document.createElement('div'); spark.className = 'dm-spark';
+  const max = Math.max(1, ...s.days);
+  s.days.forEach((n, i) => {
+    const bar = document.createElement('div');
+    bar.className = 'dm-spark-bar' + (n === 0 ? ' dm-spark-bar--zero' : '');
+    bar.style.height = (4 + Math.round((n / max) * 24)) + 'px';
+    bar.title = s.dayKeys[i] + ' — ' + n + ' done';
+    spark.appendChild(bar);
+  });
+  sparkMeta.appendChild(sparkLbl);
+  sparkMeta.appendChild(spark);
+  sparkCell.appendChild(sparkMeta);
+  host.appendChild(sparkCell);
+}
+if(typeof window !== 'undefined') window.renderDailyMomentum = renderDailyMomentum;
+
 function renderTaskList(){
   const list=gid('taskList');
   if(!list)return;
+  // Refresh the momentum tile every render — cheap and always correct.
+  if(typeof renderDailyMomentum === 'function') renderDailyMomentum();
+  // Same for the unified active-filters bar so a smart-view change /
+  // list switch / status filter etc. always updates the chips.
+  if(typeof renderActiveFilters === 'function') renderActiveFilters();
   // Apply density class — exactly one of the three modifiers is active.
   if(list){
     const _d = (typeof getCardDensity==='function' ? getCardDensity() : 'cozy');
@@ -1881,7 +2474,26 @@ function renderTaskList(){
       b.textContent = text;
       empty.appendChild(b);
     };
-    if(tasks.length){
+    // Smart-view-specific empty states first so a user landing on Stuck /
+    // Snoozed / Waiting learns what the view means rather than getting the
+    // generic "no tasks match your filters" hint that doesn't apply.
+    if(tasks.length && smartView === 'stuck'){
+      empty.appendChild(buildIcon('alertCircle'));
+      addBlock('task-empty-title', 'Nothing stuck — nice');
+      addBlock('task-empty-help',  'Tasks land here when they\'ve been open for 14+ days without an edit. The fact this list is empty means nothing\'s been hibernating in your backlog.');
+    } else if(tasks.length && smartView === 'snoozed'){
+      empty.appendChild(buildIcon('moon'));
+      addBlock('task-empty-title', 'No snoozed tasks');
+      addBlock('task-empty-help',  'Snooze hides a task until a chosen date — useful when something can\'t move until next week. Set a snooze from the task detail modal.');
+    } else if(tasks.length && smartView === 'waiting'){
+      empty.appendChild(buildIcon('hourglass'));
+      addBlock('task-empty-title', 'Nothing waiting on others');
+      addBlock('task-empty-help',  'Mark a task type = "waiting" in its detail modal when you\'re blocked on someone else. They show up here so you can chase them at the right moment.');
+    } else if(tasks.length && smartView === 'unscheduled'){
+      empty.appendChild(buildIcon('circleDashed'));
+      addBlock('task-empty-title', 'Every open task has a date');
+      addBlock('task-empty-help',  'Tasks without a due date show up here so they don\'t fall through the cracks. Empty = healthy queue.');
+    } else if(tasks.length){
       // Has tasks, but filter/view excludes all.
       empty.appendChild(buildIcon('filter'));
       addBlock('task-empty-title', 'No tasks match your filters');
@@ -2182,6 +2794,49 @@ function _initTaskListSortable(){
     scrollSpeed: 14,
     bubbleScroll: true,
     onEnd: function(evt){
+      // Cross-surface drop-on-calendar (mobile). The calendar view uses
+      // HTML5 ondragover/ondrop on .cal-day for desktop; Sortable's
+      // synthetic-touch path doesn't propagate to those handlers, so we
+      // probe the release point here. If the user released over a
+      // .cal-day we update the task's dueDate instead of treating the
+      // event as a reorder. evt.originalEvent is the underlying touch /
+      // pointer event Sortable was tracking.
+      let calDropApplied = false;
+      try{
+        const oe = evt.originalEvent || (evt.touches && evt.touches[0]);
+        const point = oe ? (oe.changedTouches && oe.changedTouches[0]) || oe : null;
+        if(point && Number.isFinite(point.clientX) && Number.isFinite(point.clientY)){
+          // dragged item's ghost intercepts elementFromPoint at release; hide
+          // it briefly before the lookup so we see the underlying drop target.
+          const ghost = document.querySelector('.task-item--dragging, .task-item--ghost');
+          const prev = ghost ? ghost.style.visibility : null;
+          if(ghost) ghost.style.visibility = 'hidden';
+          const el = document.elementFromPoint(point.clientX, point.clientY);
+          if(ghost) ghost.style.visibility = prev || '';
+          const day = el && el.closest && el.closest('.cal-day');
+          if(day && day.dataset && day.dataset.date){
+            const taskId = parseInt((evt.item && evt.item.dataset && evt.item.dataset.taskId) || '', 10);
+            if(Number.isFinite(taskId) && typeof findTask === 'function'){
+              const t = findTask(taskId);
+              if(t){
+                t.dueDate = day.dataset.date;
+                t.reminderFired = false;
+                if(typeof saveState === 'function') saveState('user');
+                if(typeof renderTaskList === 'function') renderTaskList();
+                if(typeof showActionToast === 'function'){
+                  const oldDue = (evt.item && evt.item.dataset && evt.item.dataset.prevDue) || null;
+                  showActionToast('Due ' + ((typeof fmtDue === 'function') ? fmtDue(day.dataset.date) : day.dataset.date), 'Undo', () => {
+                    const u = findTask(taskId);
+                    if(u){ u.dueDate = oldDue || null; saveState('user'); renderTaskList(); }
+                  }, 4500);
+                }
+                calDropApplied = true;
+              }
+            }
+          }
+        }
+      }catch(e){ console.warn('[sortable] cross-surface drop probe', e); }
+      if(calDropApplied) return;
       // Read new DOM order, persist as t.order. Force manual sort so the
       // user-driven order survives across renders that would otherwise
       // re-sort by smart heuristics.
@@ -2203,6 +2858,13 @@ function _initTaskListSortable(){
         }
         if(typeof saveState === 'function') saveState('user');
       }
+    },
+    onStart: function(evt){
+      // Stash the original dueDate so the cross-surface drop's Undo button
+      // can restore it without re-querying for a possibly-stale value.
+      const id = parseInt((evt.item && evt.item.dataset && evt.item.dataset.taskId) || '', 10);
+      const t = Number.isFinite(id) && typeof findTask === 'function' ? findTask(id) : null;
+      if(t && evt.item){ evt.item.dataset.prevDue = t.dueDate || ''; }
     },
   });
 }

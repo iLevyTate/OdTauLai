@@ -49,9 +49,21 @@ function _askSerializeTask(t){
  * Will lazily kick off embedding model load if the user enabled Ask but never
  * opened Tools — but won't block the Ask turn on that (retrieval is best-effort).
  */
+// Detect retrospective / archive-aware queries. When the user asks "what did
+// I finish this week?" or "show me completed accounting tasks", filtering the
+// context down to open + non-archived tasks (the default for the daily ops
+// pipeline) silently returns wrong answers. This heuristic widens the
+// context for those queries to include done + archived.
+function _askIsRetrospective(q){
+  if(typeof q !== 'string') return false;
+  const s = q.toLowerCase();
+  return /\b(complete|completed|finish|finished|done|archived|history|last week|last month|yesterday|recent(ly)?|past)\b/.test(s);
+}
+
 async function _askBuildContext(query){
   const out = [];
   const seen = new Set();
+  const retro = _askIsRetrospective(query);
 
   // Kick off embedding load in the background if it's missing. We briefly
   // await it (short timeout) so first-ever Ask turns get semantic retrieval
@@ -79,7 +91,9 @@ async function _askBuildContext(query){
 
   if(typeof tasks !== 'undefined' && Array.isArray(tasks)){
     const recents = tasks
-      .filter(t => !t.archived && t.status !== 'done')
+      // Retrospective queries see done + archived; everyday queries don't, so
+      // a normal "make X urgent" prompt isn't drowned in stale history.
+      .filter(t => retro ? true : (!t.archived && t.status !== 'done'))
       .slice()
       .sort((a, b) => (b.lastModified || 0) - (a.lastModified || 0))
       .slice(0, ASK_RECENT_MAX_TASKS);
@@ -133,10 +147,56 @@ function _askSystemPrompt(){
     'Examples:',
     'User: make task 12 urgent\n→ [{"name":"UPDATE_TASK","args":{"id":12,"priority":"urgent"}}]',
     'User: create a task "buy milk" due tomorrow tagged shopping\n→ [{"name":"CREATE_TASK","args":{"name":"buy milk","dueDate":"<tomorrow>","tags":["shopping"]}}]',
+    'User: remind me to call mom tomorrow at 9am\n→ [{"name":"CREATE_TASK","args":{"name":"Call mom","dueDate":"<tomorrow>","remindAt":"<tomorrow>T09:00"}}]',
+    'User: add "submit expenses" to my Work list, due friday, high priority\n→ [{"name":"CREATE_TASK","args":{"name":"Submit expenses","listName":"Work","dueDate":"<friday>","priority":"high"}}]',
+    'User: schedule the dentist next monday\n→ [{"name":"CREATE_TASK","args":{"name":"Dentist","dueDate":"<next monday>"}}]',
+    'User: move the rent task to Personal\n→ [{"name":"UPDATE_TASK","args":{"id":<id>,"listName":"Personal"}}]',
+    'User: snooze task 7 for a week\n→ [{"name":"UPDATE_TASK","args":{"id":7,"hiddenUntil":"<+7d>"}}]',
     'User: mark all my #errands as done\n→ [{"name":"MARK_DONE","args":{"id":<id>}}, ...]',
     'User: archive everything already completed last week\n→ [{"name":"ARCHIVE_TASK","args":{"id":<id>}}, ...]',
     'User: what should I do next?\n→ []',
     'User: nevermind\n→ []',
+  ].join('\n');
+}
+
+// Detect imperative / write-intent queries — "remind me to X", "add X",
+// "schedule Y", "create a task", etc. These should produce ops; if the ops
+// pipeline returns [] for one we owe the user a retry pass rather than
+// silently giving up. Mutually exclusive with _askIsQuestionLike in practice
+// but we let question take precedence at the call site.
+function _askIsImperative(q){
+  if(typeof q !== 'string') return false;
+  const s = q.trim();
+  if(!s) return false;
+  // Leading-verb match — covers the common phrasings without being too
+  // greedy ("show me" stays a question, "find the X" stays a question).
+  return /^(remind|add|create|make|schedule|move|archive|delete|complete|finish|done|mark|set|tag|untag|star|unstar|rename|update|change|reschedule|snooze|unsnooze|prioriti[sz]e|deprioriti[sz]e|assign|note|note that|cancel|reopen|undo|note|book|plan|put|drop)\b/i.test(s);
+}
+
+// Stronger second-pass prompt for imperatives the ops pipeline missed.
+// The original system prompt is conservative ("return [] if ambiguous"); a
+// retry replaces that with an aggressive "you MUST produce a CREATE_TASK or
+// explain what's missing" instruction so the user actually gets the task or
+// a clear blocker. Date placeholders are rendered concrete in the user
+// message body so the LLM doesn't have to do that arithmetic itself.
+function _askWriteRetrySystemPrompt(){
+  const schema = (typeof toolSchemaPromptBlock === 'function') ? toolSchemaPromptBlock() : '';
+  return [
+    'You are a write-only task assistant. The user asked you to make a change.',
+    'You MUST return a JSON array containing one or more write operations from the schema below, or, if you truly cannot, an explanation in this exact form:',
+    '  [{"name":"NOOP","args":{"reason":"<one short sentence: what info is missing>"}}]',
+    'Default to CREATE_TASK if the user is asking to add / remind / schedule something new. Default to UPDATE_TASK if they refer to an existing task in the Context.',
+    'Return ONLY the JSON array. No prose, no code fences.',
+    '',
+    'Allowed write ops:',
+    schema,
+    '',
+    'Rules:',
+    '- Each element is {"name":"OP_NAME","args":{...}}.',
+    '- Use ISO dates (YYYY-MM-DD) and ISO-local datetimes (YYYY-MM-DDTHH:MM).',
+    '- Pull task ids from the Context block. Do not invent ids.',
+    '- Never DELETE_TASK unless the user explicitly says "delete forever".',
+    '- If the user said "remind me to X", create the task with name=X and set remindAt to the named time.',
   ].join('\n');
 }
 
@@ -248,15 +308,25 @@ function runReadOp(op){
       const f = (a.filter != null && a.filter !== '')
         ? String(_coerceReadKey('filter', a.filter) || '').toLowerCase()
         : '';
+      // Honour an `includeArchived`/`includeDone` flag so the LLM can opt in
+      // to retrospective queries ("what did I finish last week?"). Default
+      // stays narrow so everyday ops don't accidentally hit done/archived ids.
+      const wantDone     = a.includeDone     === true || a.includeDone     === 'true' || a.status === 'done';
+      const wantArchived = a.includeArchived === true || a.includeArchived === 'true';
       const pool = (typeof tasks !== 'undefined' && Array.isArray(tasks))
-        ? tasks.filter(t => t && !t.archived && t.status !== 'done') : [];
+        ? tasks.filter(t => {
+            if(!t) return false;
+            if(t.archived && !wantArchived) return false;
+            if(t.status === 'done' && !wantDone) return false;
+            return true;
+          }) : [];
       const picked = f
         ? pool.filter(t => {
             const desc = String(t.description || '').slice(0, 5000);
             return (String(t.name || '') + ' ' + desc).toLowerCase().includes(f);
           })
         : pool;
-      return { tasks: picked.slice(0, lim).map(t => ({ id: t.id, name: t.name, dueDate: t.dueDate, status: t.status, priority: t.priority })) };
+      return { tasks: picked.slice(0, lim).map(t => ({ id: t.id, name: t.name, dueDate: t.dueDate, status: t.status, priority: t.priority, completedAt: t.completedAt || null, archived: !!t.archived })) };
     }
     if(n === 'GET_TASK_DETAIL'){
       const id = _coerceReadKey('id', a.id);
@@ -322,6 +392,39 @@ function _extractProseAnswer(raw){
   return joined.length > 1200 ? joined.slice(0, 1200) + '…' : joined;
 }
 
+// Heuristic: does the user's query read as a question or info request rather
+// than a write instruction? The op-only system prompt teaches the LLM to
+// answer "what's overdue?" / "summarise my week" with `[]`, which is correct
+// for the ops pipeline but leaves the user staring at "No actionable changes."
+// When this returns true and ops come back empty we run a second, prose
+// answer turn so the user actually gets a reply.
+function _askIsQuestionLike(q){
+  if(typeof q !== 'string') return false;
+  const s = q.trim();
+  if(!s) return false;
+  if(s.endsWith('?') || s.endsWith('？')) return true;
+  // Leading-word match. Kept conservative: only words that strongly imply a
+  // request for information, not a command. "Find X" stays a command path
+  // because it's plausibly a write-side operation (filter/select).
+  return /^(what|who|when|where|why|how|which|whose|is\b|are\b|do\b|does\b|can\b|could\b|should\b|tell\b|show\b|list\b|summari[sz]e|explain|describe|count|give|name\b)/i.test(s);
+}
+
+// Build a prose-answer prompt that runs in addition to the ops pipeline when
+// the user asks a question (no write ops produced). Mirrors the same task /
+// list / calendar context the ops prompt sees so the answer is grounded in
+// the user's actual data — not a generic LLM hallucination.
+function _askProseSystemPrompt(){
+  return [
+    'You are a concise on-device assistant for the user\'s task manager.',
+    'Answer the user\'s question in plain English using ONLY the Context below.',
+    'Rules:',
+    '- 1-4 sentences, or a short bullet list (max 8 bullets) when listing items.',
+    '- Never invent task names, ids, dates, or counts. If the Context is silent on something, say so.',
+    '- Do not output JSON, code fences, tool calls, or any kind of operation. Plain prose only.',
+    '- Refer to tasks by name (not by id) so the answer reads naturally.',
+  ].join('\n');
+}
+
 /**
  * @param {string} query
  * @param {{ onToken?:(t:string)=>void, onReadRound?:(summary:object)=>void, signal?:AbortSignal }} [opts]
@@ -351,9 +454,25 @@ async function cognitaskRun(query, opts){
     + 'Call read tools first if you need tasks, calendar, lists, or categories. '
     + 'Use task ids that appear in the user context. Answer with tool call(s) in the required <tool_call> format; do not add other text.';
   const user = _askUserPrompt(q, contextLines);
+  // Conversation context: prior user/assistant exchanges from the chat
+  // sheet, sanitised + capped, so follow-up turns like "now archive those"
+  // can resolve relative references against the previous answer. Each
+  // entry is { user:string, assistant:string }. Failures are silently
+  // ignored — best-effort threading, not a load-bearing path.
+  const priorMsgs = [];
+  if(opts && Array.isArray(opts.priorTurns)){
+    for(const pt of opts.priorTurns){
+      if(!pt) continue;
+      const pu = _askStripCtrl(pt.user || '').slice(0, 600);
+      const pa = _askStripCtrl(pt.assistant || '').slice(0, 600);
+      if(!pu) continue;
+      priorMsgs.push({ role: 'user', content: pu });
+      if(pa) priorMsgs.push({ role: 'assistant', content: pa });
+    }
+  }
   const messages = useNativeQwenTools
-    ? [ { role: 'system', content: systemNativeQwen }, { role: 'user', content: user } ]
-    : [ { role: 'system', content: systemJson }, { role: 'user', content: user } ];
+    ? [ { role: 'system', content: systemNativeQwen }, ...priorMsgs, { role: 'user', content: user } ]
+    : [ { role: 'system', content: systemJson },     ...priorMsgs, { role: 'user', content: user } ];
 
   const cfg = (typeof getGenCfg === 'function') ? getGenCfg() : { timeoutSec: 30 };
   const timeoutMs = Math.max(5000, (cfg.timeoutSec || 30) * 1000);
@@ -474,6 +593,148 @@ async function cognitaskRun(query, opts){
 
   const writeOnly = lastFinal.filter(op => op && op.name && !_schemaReadOnly(String(op.name).toUpperCase()));
   if(!writeOnly.length){
+    // Imperative write-retry. The ops pipeline is conservative ("return []
+    // if ambiguous"); when the user clearly asked for a write — "remind me
+    // to call mom tomorrow", "schedule the dentist next monday" — and the
+    // first pass gave us nothing, run a second pass with a stronger
+    // system prompt that REQUIRES either a write op or an explicit NOOP
+    // explaining what's missing. Without this, imperatives silently
+    // produce "no changes" and the user wonders if Ask is broken.
+    if(_askIsImperative(q) && !_askIsQuestionLike(q)){
+      try{
+        const retryMsgs = [
+          { role: 'system', content: _askWriteRetrySystemPrompt() },
+          ...priorMsgs,
+          { role: 'user',   content: _askUserPrompt(q, contextLines) },
+        ];
+        const retryTimeoutMs = Math.max(8000, (cfg.timeoutSec || 30) * 1000);
+        const retryTimeoutCtl = new AbortController();
+        const retryTimer = setTimeout(() => retryTimeoutCtl.abort(), retryTimeoutMs);
+        const retrySignal = (() => {
+          const ctl = new AbortController();
+          const bail = () => ctl.abort();
+          if(opts.signal){
+            if(opts.signal.aborted) bail();
+            else opts.signal.addEventListener('abort', bail, { once: true });
+          }
+          retryTimeoutCtl.signal.addEventListener('abort', bail, { once: true });
+          return ctl.signal;
+        })();
+        let retryRaw = '';
+        try{
+          const full = await genGenerate({
+            messages: retryMsgs,
+            maxTokens: 384,
+            temperature: 0.1,
+            onToken: (t) => {
+              retryRaw += t;
+              if(typeof opts.onToken === 'function'){ try{ opts.onToken(t); }catch(e){} }
+            },
+            signal: retrySignal,
+          });
+          if(!retryRaw) retryRaw = full || '';
+        }finally{ clearTimeout(retryTimer); }
+
+        let retryParsed = null;
+        try{ retryParsed = parseOpsJson(retryRaw); }catch(_){}
+        if(Array.isArray(retryParsed)){
+          // Filter out the synthetic NOOP placeholder we instructed the model
+          // to emit when it's stuck. If we get one, surface its reason as a
+          // chat-style explanation so the user knows what to add.
+          const noop = retryParsed.find(o => o && String(o.name).toUpperCase() === 'NOOP');
+          const real = retryParsed.filter(o => o && o.name && String(o.name).toUpperCase() !== 'NOOP' && !_schemaReadOnly(String(o.name).toUpperCase()));
+          if(real.length){
+            const ctx = (typeof _askCtx === 'function') ? _askCtx() : { tasksById: new Map(), listsById: new Map() };
+            const val = validateOps(real, ctx);
+            if(val.valid.length){
+              if(typeof pushAskHistory === 'function') pushAskHistory(q);
+              return {
+                ok: true,
+                ops: val.valid,
+                rejected: val.rejected,
+                destructiveLevel: val.destructiveLevel,
+                rawText: allRaw + '\n--- write-retry ---\n' + retryRaw,
+                truncated: !!val.truncated,
+                readRounds,
+              };
+            }
+          }
+          if(noop){
+            // Reason is the canonical field but some models drop it. Fall
+            // back to a generic chat answer rather than letting the path
+            // return ops:[] with no answer, which the UI renders as a
+            // bare "No actionable changes" and confuses the user.
+            const reason = (noop.args && typeof noop.args.reason === 'string' && noop.args.reason.trim())
+              ? String(noop.args.reason).slice(0, 300)
+              : '';
+            const msg = reason
+              ? ('I couldn\'t create that yet — ' + reason + ' Try rephrasing with the missing detail.')
+              : 'I couldn\'t figure out enough detail to create that — try adding a name or due date (e.g. "remind me to call mom tomorrow at 9am").';
+            if(typeof pushAskHistory === 'function') pushAskHistory(q);
+            return {
+              ok: true, ops: [], rejected: [], destructiveLevel: 'none',
+              rawText: allRaw + '\n--- write-retry ---\n' + retryRaw,
+              truncated: false, readRounds, chatAnswer: msg,
+            };
+          }
+        }
+        // Last resort prose pass: just surface what the retry model said.
+        const retryProse = _extractProseAnswer(retryRaw);
+        if(retryProse){
+          if(typeof pushAskHistory === 'function') pushAskHistory(q);
+          return { ok: true, ops: [], rejected: [], destructiveLevel: 'none', rawText: allRaw + '\n' + retryRaw, truncated: false, readRounds, chatAnswer: retryProse };
+        }
+      }catch(e){ /* write-retry is best-effort */ }
+    }
+    // The ops pipeline correctly returned [] for a non-write query, but if
+    // the user actually asked a question ("what's overdue?", "summarise my
+    // week") we owe them a real answer instead of "No actionable changes."
+    // Run a second, prose-only pass on the same context. Best-effort —
+    // failures fall through to the original empty result. Independent
+    // timeout so a slow prose turn can't trip the op-pipeline timeout.
+    if(_askIsQuestionLike(q)){
+      try{
+        const proseMsgs = [
+          { role: 'system', content: _askProseSystemPrompt() },
+          ...priorMsgs,
+          { role: 'user',   content: _askUserPrompt(q, contextLines) },
+        ];
+        const proseTimeoutMs = Math.max(10000, (cfg.timeoutSec || 30) * 1000);
+        const proseTimeoutCtl = new AbortController();
+        const proseTimer = setTimeout(() => proseTimeoutCtl.abort(), proseTimeoutMs);
+        const proseSignal = (() => {
+          const ctl = new AbortController();
+          const bail = () => ctl.abort();
+          if(opts.signal){
+            if(opts.signal.aborted) bail();
+            else opts.signal.addEventListener('abort', bail, { once: true });
+          }
+          proseTimeoutCtl.signal.addEventListener('abort', bail, { once: true });
+          return ctl.signal;
+        })();
+        let proseText = '';
+        try{
+          const full = await genGenerate({
+            messages: proseMsgs,
+            maxTokens: 384,
+            temperature: 0.4,
+            onToken: (t) => {
+              proseText += t;
+              if(typeof opts.onToken === 'function'){ try{ opts.onToken(t); }catch(e){} }
+            },
+            signal: proseSignal,
+          });
+          if(!proseText) proseText = full || '';
+        }finally{
+          clearTimeout(proseTimer);
+        }
+        const chatAnswer = _extractProseAnswer(proseText);
+        if(chatAnswer){
+          if(typeof pushAskHistory === 'function') pushAskHistory(q);
+          return { ok: true, ops: [], rejected: [], destructiveLevel: 'none', rawText: allRaw + (allRaw ? '\n' : '') + proseText, truncated: false, readRounds, chatAnswer };
+        }
+      }catch(e){ /* prose pass is best-effort */ }
+    }
     return { ok: true, ops: [], rejected: [], destructiveLevel: 'none', rawText: allRaw, truncated: false, readRounds };
   }
 
@@ -507,6 +768,10 @@ if(typeof window !== 'undefined'){
   window._askBuildContext = _askBuildContext;
   window._askUserPrompt = _askUserPrompt;
   window._askSystemPrompt = _askSystemPrompt;
+  window._askProseSystemPrompt = _askProseSystemPrompt;
+  window._askWriteRetrySystemPrompt = _askWriteRetrySystemPrompt;
+  window._askIsQuestionLike = _askIsQuestionLike;
+  window._askIsImperative = _askIsImperative;
   window._askCtx = _askCtx;
   window._askCalendarBlock = _askCalendarBlock;
 }

@@ -70,6 +70,14 @@
 
 </head>
 <body>
+<noscript>
+  <div style="max-width:560px;margin:48px auto;padding:24px;background:#0d1a2d;border:1px solid #1a2d44;border-radius:14px;color:#c8d6e5;font:14px/1.55 system-ui,sans-serif">
+    <h1 style="margin:0 0 12px;font-size:20px;color:#fff">OdTauLai needs JavaScript</h1>
+    <p style="margin:0 0 12px;color:#a0b1c5">This is a local-first PWA that runs entirely in your browser — task data, Pomodoro state, and the optional on-device AI all live on this device. Nothing leaves the page.</p>
+    <p style="margin:0 0 12px;color:#a0b1c5">Without JavaScript enabled, none of that can run. There is no server-rendered fallback, no account, no remote data to fetch. Re-enabling JS for this origin is the only path.</p>
+    <p style="margin:0;color:#5a8ab5;font-size:12px">Source: <a href="https://github.com/iLevyTate/odtaulai" style="color:#48b5e0">github.com/iLevyTate/odtaulai</a></p>
+  </div>
+</noscript>
 <a class="skip-link" href="#mainTabpanels">Skip to main content</a>
 <!-- Polite live region: announces task add/remove/done events to screen readers
      without interrupting whatever the user is doing. -->
@@ -168,6 +176,15 @@
       <span class="scnt" id="taskCountBadge">0 active</span>
     </div>
 
+    <!-- Daily progress + streak summary. Renders momentum signals at the top
+         of the Tasks panel so the user sees their daily completion rate and
+         their consecutive-day streak without hunting through Cmd+K. JS owns
+         the content; hidden until renderDailyMomentum populates it. -->
+    <!-- Non-live: the momentum tile is static numbers a sighted user *looks
+         at*; announcing it on every renderTaskList stacks 3-line speech on
+         every filter tap. The labels stay readable via normal navigation. -->
+    <div class="daily-momentum" id="dailyMomentum" hidden></div>
+
     <!-- Add task form: TOP — primary action -->
     <div class="task-form">
       <label class="sr-only" for="taskInput">New task</label>
@@ -180,6 +197,7 @@
         <button class="task-enhance-btn" id="taskEnhanceBtn" data-action="smartAddEnhance" hidden title="Suggest metadata from your task history (embeddings)" data-icon="sparkles" aria-label="Smart-add suggestions"></button>
         <button class="task-enhance-btn task-enhance-btn--llm" id="taskParseBtn" data-action="smartAddParseWithLLM" hidden title="Parse this freeform sentence with the on-device LLM" data-icon="wand" aria-label="Parse with LLM"></button>
         <button class="task-enhance-btn task-voice-btn" id="taskVoiceBtn" data-action="toggleVoiceInput" hidden title="Voice input (on-device speech recognition)" data-icon="mic" aria-label="Voice input"></button>
+        <button class="task-enhance-btn task-syntax-hint-btn" id="taskSyntaxHintBtn" data-action="showQuickAddSyntaxHint" title="Show quick-add syntax (tomorrow, @urgent, #tag, ~daily)" aria-label="Quick-add syntax help" type="button">?</button>
       </div>
       <button class="task-add" data-action="addTaskOrApplyPreview">+ Add</button>
     </div>
@@ -262,7 +280,7 @@
         <div class="task-search-bar">
           <div class="task-search-row">
             <label class="sr-only" for="taskSearch">Search tasks</label>
-            <input type="text" class="task-search" id="taskSearch" placeholder="Search tasks…" aria-label="Search tasks" data-oninput="updateTaskFilters" autocomplete="off">
+            <input type="text" class="task-search" id="taskSearch" placeholder="Search · try tag:work is:overdue priority:high" aria-label="Search tasks. Operators: tag:, list:, is:, priority:, due:, status:" data-oninput="updateTaskFilters" autocomplete="off">
             <button type="button" class="task-search-clear" id="taskSearchClear" data-action="clearTaskSearch" hidden aria-label="Clear search">×</button>
             <span class="task-search-mode-pill" id="taskSearchSemanticPill" hidden>Semantic</span>
             <label class="task-search-semantic" title="Rank by meaning (requires model loaded)">
@@ -271,6 +289,15 @@
           </div>
         </div>
 
+        <!-- Unified active-filter bar. Single source of truth for every
+             filter currently narrowing the list: smart view, active list,
+             search text, search operators (tag/list/is/...), and the
+             filter-panel status/priority/category selections. Each chip
+             has an inline × to clear just that filter; the bar self-hides
+             when nothing is active. Replaces the previous separate
+             "operator pills" row — one row to scan, one place to clear. -->
+        <div class="active-filters-bar" id="activeFiltersBar" hidden aria-live="polite"></div>
+
         <!-- Compact control bar: view toggle + filters button -->
         <div class="task-controlbar">
           <div class="view-toggle">
@@ -278,7 +305,11 @@
             <button id="viewBoard" data-action="setTaskView" data-arg="board">Board</button>
             <button id="viewCal" data-action="setTaskView" data-arg="calendar">Cal</button>
           </div>
-          <span class="filters-summary" id="filtersSummary" aria-live="polite"></span>
+          <!-- Non-live: the active-filters bar above is the canonical
+               announce surface for filter changes. The summary span is the
+               sort/group descriptor, not an event, so let it be read on
+               demand rather than fired on every rerender. -->
+          <span class="filters-summary" id="filtersSummary"></span>
           <button type="button" class="filters-toggle" id="filtersToggle" data-action="toggleFiltersPanel" title="Filters & sort" aria-expanded="false" aria-controls="filtersPanel">
             <span class="ft-icon">⚙</span>
             <span class="ft-label">Filters</span>
@@ -489,8 +520,28 @@
   <!-- Settings -->
   <div class="panel panel-settings" data-tab="settings" hidden>
     <div class="stitle stitle-static"><div class="sdot sdot--accent"></div><h2 class="slbl">Settings</h2></div>
+
+    <!-- Jump-link bar + inline filter. Sticky at the top of the Settings
+         panel so a user can land on the exact section without scrolling
+         the long flat list. Mobile collapses to a horizontally-scrolling
+         pill row. Filter input narrows the rows by label text so a user
+         can type "notif" and see only relevant settings across all sections. -->
+    <div class="set-nav" role="navigation" aria-label="Settings sections">
+      <div class="set-nav-jump" role="tablist">
+        <button type="button" class="set-nav-btn" data-action="jumpToSettingsSection" data-arg="set-general">General</button>
+        <button type="button" class="set-nav-btn" data-action="jumpToSettingsSection" data-arg="set-classifications">Categories</button>
+        <button type="button" class="set-nav-btn" data-action="jumpToSettingsSection" data-arg="set-lists">Lists</button>
+        <button type="button" class="set-nav-btn" data-action="jumpToSettingsSection" data-arg="set-integrations">Integrations</button>
+        <button type="button" class="set-nav-btn" data-action="jumpToSettingsSection" data-arg="set-about">About</button>
+      </div>
+      <div class="set-nav-filter">
+        <input type="search" id="settingsFilter" class="sinput set-nav-filter-input" placeholder="Filter settings… (e.g. notif, theme, sync)" aria-label="Filter settings" data-oninput="filterSettingsRows" autocomplete="off">
+        <button type="button" class="set-nav-filter-clear" id="settingsFilterClear" data-action="clearSettingsFilter" hidden aria-label="Clear filter">×</button>
+      </div>
+    </div>
+
     <div class="sbody sbody-static" id="settingsBody">
-      <details class="set-section" open>
+      <details class="set-section" id="set-general" open>
         <summary class="set-section-sum">General</summary>
         <div class="set-section-body">
           <div class="srow"><span class="sr-lbl">Preset</span>
@@ -534,15 +585,15 @@
         </div>
       </details>
 
-      <details class="set-section">
-        <summary class="set-section-sum">Classifications</summary>
+      <details class="set-section" id="set-classifications">
+        <summary class="set-section-sum">Categories</summary>
         <div class="set-section-body">
           <p class="text-hint--block">Customize life areas (7 default groups). Task data stores stable ids; rename labels and accent colors anytime.</p>
           <div id="classificationManager"></div>
         </div>
       </details>
 
-      <details class="set-section">
+      <details class="set-section" id="set-lists">
         <summary class="set-section-sum">Lists</summary>
         <div class="set-section-body">
           <p class="text-hint--block">
@@ -553,7 +604,7 @@
         </div>
       </details>
 
-      <details class="set-section">
+      <details class="set-section" id="set-integrations">
         <summary class="set-section-sum">Integrations</summary>
         <div class="set-section-body">
           <div class="srow srow--spread">
@@ -575,7 +626,7 @@
         </div>
       </details>
 
-      <details class="set-section">
+      <details class="set-section" id="set-about">
         <summary class="set-section-sum">About</summary>
         <div class="set-section-body">
           <div class="srow srow--no-top">
@@ -679,7 +730,7 @@
 
 
 <!-- Floating Mini Timer -->
-<div class="mini-timer" id="miniTimer" data-action="showTab" data-arg="focus">
+<div class="mini-timer" id="miniTimer" data-action="showTab" data-arg="focus" role="button" tabindex="0" aria-label="Open focus timer">
   <div class="mt-phase-dot" id="mtDot"></div>
   <div class="mt-info">
     <div class="mt-label" id="mtLabel">FOCUS</div>
@@ -688,6 +739,13 @@
   <button class="mt-btn mt-play" id="mtToggle" aria-label="Play or pause focus timer" data-action="miniTimerToggle">▶</button>
   <div class="mt-open" id="mtTaskHint" hidden>⇢ open</div>
 </div>
+
+<!-- Floating Quick-Add button (mobile / touch). Always-on quick capture so a
+     user on Timer / Tools / Settings can drop a task without scrolling or
+     tab-hunting. Hidden on desktop — Cmd/Ctrl+N covers that case. -->
+<button type="button" id="quickAddFab" class="quick-add-fab" aria-label="Add task" title="Add task (N)" data-action="quickAddFabClick">
+  <span class="quick-add-fab-icon" aria-hidden="true">+</span>
+</button>
 
 <!-- What next? overlay -->
 <div id="whatNextOverlay" class="what-next-overlay" hidden data-action="closeWhatNextOnBackdrop">

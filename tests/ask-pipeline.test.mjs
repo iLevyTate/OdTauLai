@@ -260,6 +260,288 @@ test('askRun: first turn returns only [] — ok:true, no writes', async () => {
   assert.equal(res.readRounds, 0);
 });
 
+test('askRun: priorTurns are threaded into the LLM message list', async () => {
+  // The Ask sheet now runs as a multi-turn chat. Follow-up questions like
+  // "now archive those" only make sense when the model can see the prior
+  // exchange ("what's overdue?" → "...electric bill..."). cognitaskRun
+  // injects opts.priorTurns between the system and the new user message
+  // so the model has that context. This test asserts the wire format:
+  // prior user/assistant pairs appear in order with the correct roles.
+  const tasks = [{ id: 1, name: 'Pay electric bill', status: 'open', archived: false, lastModified: 1 }];
+  const schemaSrc2 = readFileSync(join(root, 'js', 'tool-schema.js'), 'utf8');
+  const askSrc2 = readFileSync(join(root, 'js', 'ask.js'), 'utf8');
+  const win = {};
+  let seenMessages = null;
+  const ctx = {
+    window: win,
+    console,
+    tasks,
+    lists: [],
+    isIntelReady: () => true,
+    embedText: async () => new Float32Array(8),
+    semanticSearch: async () => [],
+    isGenReady: () => true,
+    pushAskHistory: () => {},
+    getGenCfg: () => ({ timeoutSec: 30 }),
+    getUpcomingEvents: () => [],
+    getActiveCategories: () => [],
+    intelLoad: async () => {},
+    findTask: (id) => tasks.find((t) => t.id === id) || null,
+    genGenerate: async ({ messages }) => {
+      seenMessages = messages;
+      return '[]';
+    },
+  };
+  new Function(...Object.keys(ctx), schemaSrc2)(...Object.values(ctx));
+  ctx.TOOL_SCHEMA = win.TOOL_SCHEMA;
+  ctx.validateOps = win.validateOps;
+  ctx.parseOpsJson = win.parseOpsJson;
+  ctx.toolSchemaPromptBlock = win.toolSchemaPromptBlock;
+  new Function(...Object.keys(ctx), askSrc2)(...Object.values(ctx));
+  await win.askRun('and the rent?', {
+    priorTurns: [
+      { user: 'what is overdue?', assistant: 'The electric bill is overdue.' },
+    ],
+  });
+  assert.ok(seenMessages && seenMessages.length >= 4, 'expected system + prior pair + user, got ' + JSON.stringify(seenMessages));
+  assert.equal(seenMessages[0].role, 'system');
+  assert.equal(seenMessages[1].role, 'user');
+  assert.match(seenMessages[1].content, /what is overdue\?/);
+  assert.equal(seenMessages[2].role, 'assistant');
+  assert.match(seenMessages[2].content, /electric bill/i);
+  assert.equal(seenMessages[seenMessages.length - 1].role, 'user');
+  assert.match(seenMessages[seenMessages.length - 1].content, /and the rent\?/);
+});
+
+test('askRun: priorTurns control characters are stripped before they reach the prompt', async () => {
+  // Defensive: prior assistant content is model-generated and could in
+  // theory contain control chars that break tokenization or smuggle
+  // instructions. _askStripCtrl is applied to both user and assistant
+  // strings before they hit the message list.
+  const tasks = [{ id: 1, name: 'X', status: 'open', archived: false }];
+  const schemaSrc2 = readFileSync(join(root, 'js', 'tool-schema.js'), 'utf8');
+  const askSrc2 = readFileSync(join(root, 'js', 'ask.js'), 'utf8');
+  const win = {};
+  let seenMessages = null;
+  const ctx = {
+    window: win,
+    console,
+    tasks,
+    lists: [],
+    isIntelReady: () => true,
+    embedText: async () => new Float32Array(8),
+    semanticSearch: async () => [],
+    isGenReady: () => true,
+    pushAskHistory: () => {},
+    getGenCfg: () => ({ timeoutSec: 30 }),
+    getUpcomingEvents: () => [],
+    getActiveCategories: () => [],
+    intelLoad: async () => {},
+    findTask: () => null,
+    genGenerate: async ({ messages }) => { seenMessages = messages; return '[]'; },
+  };
+  new Function(...Object.keys(ctx), schemaSrc2)(...Object.values(ctx));
+  ctx.TOOL_SCHEMA = win.TOOL_SCHEMA;
+  ctx.validateOps = win.validateOps;
+  ctx.parseOpsJson = win.parseOpsJson;
+  ctx.toolSchemaPromptBlock = win.toolSchemaPromptBlock;
+  new Function(...Object.keys(ctx), askSrc2)(...Object.values(ctx));
+  await win.askRun('next', {
+    priorTurns: [
+      { user: 'hi there', assistant: 'reply' },
+    ],
+  });
+  const prior = seenMessages.filter((m) => m.role === 'user' || m.role === 'assistant');
+  // First two should be the prior pair; assert no C0 control bytes.
+  assert.equal(prior[0].content, 'hithere');
+  assert.equal(prior[1].content, 'reply');
+});
+
+test('askRun: imperative with ops=[] runs write-retry and surfaces valid ops', async () => {
+  // Regression for the "remind me to call mom tomorrow" gap. The first
+  // ops pass returns [] (LLM being conservative); the write-retry pass
+  // gets a stronger system prompt and produces a CREATE_TASK that
+  // validateOps accepts. End state: ok:true with one op, no chatAnswer.
+  const tasks = [];
+  const schemaSrc2 = readFileSync(join(root, 'js', 'tool-schema.js'), 'utf8');
+  const askSrc2 = readFileSync(join(root, 'js', 'ask.js'), 'utf8');
+  const win = {};
+  let calls = 0;
+  const ctx = {
+    window: win,
+    console,
+    tasks,
+    lists: [],
+    isIntelReady: () => true,
+    embedText: async () => new Float32Array(8),
+    semanticSearch: async () => [],
+    isGenReady: () => true,
+    pushAskHistory: () => {},
+    getGenCfg: () => ({ timeoutSec: 30 }),
+    getUpcomingEvents: () => [],
+    getActiveCategories: () => [],
+    intelLoad: async () => {},
+    findTask: () => null,
+    genGenerate: async () => {
+      calls += 1;
+      // First call (ops pipeline) — conservative, returns [].
+      if (calls === 1) return '[]';
+      // Second call (write-retry) — stronger prompt produces CREATE_TASK.
+      return '[{"name":"CREATE_TASK","args":{"name":"Call mom","dueDate":"2026-05-12"}}]';
+    },
+  };
+  new Function(...Object.keys(ctx), schemaSrc2)(...Object.values(ctx));
+  ctx.TOOL_SCHEMA = win.TOOL_SCHEMA;
+  ctx.validateOps = win.validateOps;
+  ctx.parseOpsJson = win.parseOpsJson;
+  ctx.toolSchemaPromptBlock = win.toolSchemaPromptBlock;
+  new Function(...Object.keys(ctx), askSrc2)(...Object.values(ctx));
+  const res = await win.askRun('remind me to call mom tomorrow', {});
+  assert.ok(res.ok, JSON.stringify(res));
+  assert.equal(calls, 2, 'expected ops pass + write-retry');
+  assert.equal(res.ops.length, 1);
+  assert.equal(res.ops[0].name, 'CREATE_TASK');
+  assert.equal(res.ops[0].args.name, 'Call mom');
+  // No chat answer needed — we got the real op.
+  assert.equal(res.chatAnswer, undefined);
+});
+
+test('askRun: imperative with NOOP retry surfaces the missing-info reason', async () => {
+  // When the retry model can't figure out enough detail, it emits the
+  // synthetic NOOP placeholder with a `reason`. We convert that into a
+  // chat-style answer so the user knows what to add.
+  const tasks = [];
+  const schemaSrc2 = readFileSync(join(root, 'js', 'tool-schema.js'), 'utf8');
+  const askSrc2 = readFileSync(join(root, 'js', 'ask.js'), 'utf8');
+  const win = {};
+  let calls = 0;
+  const ctx = {
+    window: win,
+    console,
+    tasks,
+    lists: [],
+    isIntelReady: () => true,
+    embedText: async () => new Float32Array(8),
+    semanticSearch: async () => [],
+    isGenReady: () => true,
+    pushAskHistory: () => {},
+    getGenCfg: () => ({ timeoutSec: 30 }),
+    getUpcomingEvents: () => [],
+    getActiveCategories: () => [],
+    intelLoad: async () => {},
+    findTask: () => null,
+    genGenerate: async () => {
+      calls += 1;
+      if (calls === 1) return '[]';
+      return '[{"name":"NOOP","args":{"reason":"I need a date for the dentist appointment."}}]';
+    },
+  };
+  new Function(...Object.keys(ctx), schemaSrc2)(...Object.values(ctx));
+  ctx.TOOL_SCHEMA = win.TOOL_SCHEMA;
+  ctx.validateOps = win.validateOps;
+  ctx.parseOpsJson = win.parseOpsJson;
+  ctx.toolSchemaPromptBlock = win.toolSchemaPromptBlock;
+  new Function(...Object.keys(ctx), askSrc2)(...Object.values(ctx));
+  const res = await win.askRun('schedule the dentist', {});
+  assert.ok(res.ok);
+  assert.equal(res.ops.length, 0);
+  assert.ok(res.chatAnswer && /dentist appointment/i.test(res.chatAnswer));
+});
+
+test('askRun: question-like query with ops=[] runs prose pass and returns chatAnswer', async () => {
+  // Regression guard: the ops-only system prompt teaches the LLM to answer
+  // "what's overdue?" with `[]`, which was correct for the ops pipeline but
+  // left the user staring at "No actionable changes." cognitaskRun now does
+  // a second prose pass for question-shaped queries so a real answer comes
+  // back. The sequence below mirrors the runtime: first call returns `[]`
+  // (ops pipeline), second call returns plain prose (the prose pass).
+  const tasks = [
+    { id: 1, name: 'Pay electric bill', status: 'open', priority: 'urgent', archived: false, lastModified: 1 },
+    { id: 2, name: 'Buy milk',          status: 'open', priority: 'normal', archived: false, lastModified: 2 },
+  ];
+  const schemaSrc2 = readFileSync(join(root, 'js', 'tool-schema.js'), 'utf8');
+  const askSrc2 = readFileSync(join(root, 'js', 'ask.js'), 'utf8');
+  const win = {};
+  let call = 0;
+  const ctx = {
+    window: win,
+    console,
+    tasks,
+    lists: [],
+    isIntelReady: () => true,
+    embedText: async () => new Float32Array(8),
+    semanticSearch: async () => [],
+    isGenReady: () => true,
+    pushAskHistory: () => {},
+    getGenCfg: () => ({ timeoutSec: 30 }),
+    getUpcomingEvents: () => [],
+    getActiveCategories: () => [],
+    intelLoad: async () => {},
+    findTask: (id) => tasks.find((t) => t.id === id) || null,
+    genGenerate: async () => {
+      call += 1;
+      if (call === 1) return '[]';
+      return 'The most urgent open task is "Pay electric bill". Nothing else is overdue.';
+    },
+  };
+  new Function(...Object.keys(ctx), schemaSrc2)(...Object.values(ctx));
+  ctx.TOOL_SCHEMA = win.TOOL_SCHEMA;
+  ctx.validateOps = win.validateOps;
+  ctx.parseOpsJson = win.parseOpsJson;
+  ctx.toolSchemaPromptBlock = win.toolSchemaPromptBlock;
+  new Function(...Object.keys(ctx), askSrc2)(...Object.values(ctx));
+  const res = await win.askRun('what is overdue?', {});
+  assert.ok(res.ok, JSON.stringify(res));
+  assert.equal(res.ops.length, 0);
+  assert.equal(call, 2, 'expected ops pass + prose pass');
+  assert.ok(res.chatAnswer && /electric bill/i.test(res.chatAnswer), 'chatAnswer must contain the answer prose: ' + res.chatAnswer);
+});
+
+test('askRun: non-question with ops=[] does NOT trigger a second pass', async () => {
+  // The prose pass is gated on question-intent so simple "nevermind"-style
+  // commands don't waste a second model turn (and don't confuse the user
+  // with a chatty answer they didn't ask for).
+  const tasks = [{ id: 1, name: 'X', status: 'open', archived: false }];
+  let calls = 0;
+  const { win } = mkSandbox({
+    tasks,
+    genResponse: '[]',
+  });
+  const _orig = win.cognitaskRun;
+  // Re-bind genGenerate via a fresh sandbox so we can count calls precisely.
+  const schemaSrc2 = readFileSync(join(root, 'js', 'tool-schema.js'), 'utf8');
+  const askSrc2 = readFileSync(join(root, 'js', 'ask.js'), 'utf8');
+  const win2 = {};
+  const ctx = {
+    window: win2,
+    console,
+    tasks,
+    lists: [],
+    isIntelReady: () => true,
+    embedText: async () => new Float32Array(8),
+    semanticSearch: async () => [],
+    isGenReady: () => true,
+    pushAskHistory: () => {},
+    getGenCfg: () => ({ timeoutSec: 30 }),
+    getUpcomingEvents: () => [],
+    getActiveCategories: () => [],
+    intelLoad: async () => {},
+    findTask: (id) => tasks.find((t) => t.id === id) || null,
+    genGenerate: async () => { calls += 1; return '[]'; },
+  };
+  new Function(...Object.keys(ctx), schemaSrc2)(...Object.values(ctx));
+  ctx.TOOL_SCHEMA = win2.TOOL_SCHEMA;
+  ctx.validateOps = win2.validateOps;
+  ctx.parseOpsJson = win2.parseOpsJson;
+  ctx.toolSchemaPromptBlock = win2.toolSchemaPromptBlock;
+  new Function(...Object.keys(ctx), askSrc2)(...Object.values(ctx));
+  const res = await win2.askRun('nevermind', {});
+  assert.ok(res.ok);
+  assert.equal(res.ops.length, 0);
+  assert.equal(res.chatAnswer, undefined);
+  assert.equal(calls, 1, 'no prose pass for non-question queries');
+});
+
 test('runReadOp GET_CALENDAR_EVENTS requests enough lookahead for distant toDate', async () => {
   const schemaSrc2 = readFileSync(join(root, 'js', 'tool-schema.js'), 'utf8');
   const askSrc2 = readFileSync(join(root, 'js', 'ask.js'), 'utf8');

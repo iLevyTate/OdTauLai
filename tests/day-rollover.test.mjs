@@ -94,9 +94,28 @@ test('_handleDayRollover preserves pomosInCycle across midnight', () => {
   const src = readFileSync(join(root, 'js', 'app.js'), 'utf8');
   const start = src.indexOf('function _handleDayRollover');
   assert.ok(start > 0, '_handleDayRollover not found');
-  const body = src.slice(start, start + 2200);
+  // Slice to the next top-level function so the slice grows automatically
+  // as the rollover handler picks up guards (modal-defer, etc.) instead of
+  // breaking on a fixed-width budget.
+  const after = src.indexOf('\nfunction ', start + 1);
+  const end = after > 0 ? after : start + 4000;
+  const body = src.slice(start, end);
   assert.ok(!/pomosInCycle\s*=\s*0/.test(body), 'rollover must not reset pomosInCycle');
   assert.match(body, /pauseTimer\(\)/, 'rollover must call pauseTimer when running');
   assert.match(body, /totalPomos\s*=\s*0/, 'rollover must reset totalPomos');
   assert.match(body, /totalBreaks\s*=\s*0/, 'rollover must reset totalBreaks');
+});
+
+// Audit gap #6: rollover should defer when the task modal is open so the
+// "Crossed midnight" toast doesn't slide over the user's typing and the
+// renderAll() sweep doesn't tear down the list while a row is the modal's
+// anchor. Capped at 30 min so an indefinitely-open modal eventually proceeds.
+test('_handleDayRollover defers when task modal is open (with a cap)', () => {
+  const src = readFileSync(join(root, 'js', 'app.js'), 'utf8');
+  const start = src.indexOf('function _handleDayRollover');
+  const after = src.indexOf('\nfunction ', start + 1);
+  const body = src.slice(start, after > 0 ? after : start + 4000);
+  assert.match(body, /_isTaskModalOpen\(\)/, 'rollover must check modal-open state');
+  assert.match(body, /_ROLLOVER_MODAL_MAX_DEFER_MS/, 'rollover must use a defer cap constant');
+  assert.match(body, /_pendingRolloverSince/, 'rollover must timestamp the first deferred attempt');
 });

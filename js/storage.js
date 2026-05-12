@@ -298,6 +298,17 @@ function saveState(reason){
     if(t) t.totalSec += Math.floor((Date.now()-taskStartedAt)/1000);
   }
   stateEpoch = Date.now();
+  // Pomodoro live-state snapshot. Persisting these lets a tab-reload mid-focus
+  // pick up where it left off (wall-clock based) instead of resetting to a
+  // fresh 25:00 — losing minutes the user just earned. Mirrors the quick-timer
+  // rehydration in _applyState. taskStartedAt is folded into the active task's
+  // totalSec on save so it never compounds; on load it stays null until the
+  // user resumes the timer.
+  const _pomoLive = {
+    running, finished,
+    startedAt, pausedRemaining, remaining, totalDuration,
+    pomoSavedAt: Date.now(),
+  };
   const state = {
     v:SCHEMA_VERSION, date:todayKey(),
     cfg, goals, goalIdCtr,
@@ -305,6 +316,7 @@ function saveState(reason){
     timeLog,logIdCtr,
     totalPomos, totalBreaks, totalFocusSec, sessionHistory,
     pomosInCycle, phase,
+    pomoLive: _pomoLive,
     intervals, intIdCtr,
     quickTimers, qtIdCtr,
     activeTab,
@@ -352,11 +364,12 @@ function saveState(reason){
   }catch(e){
     // QuotaExceededError — warn user but their data IS safe in IDB.
     window._saveError = e.name || 'save-failed';
-    const now = Date.now();
-    if (now - (window._lastQuotaBannerAt || 0) >= 2000) {
-      window._lastQuotaBannerAt = now;
-      const old = document.getElementById('quotaWarning');
-      if (old) old.remove();
+    // Suppress the banner for the rest of the session once dismissed. The
+    // previous 2-second throttle only debounced creation, so the next
+    // saveState (often within seconds) re-spawned it \u2014 read as broken.
+    // _quotaBannerDismissed clears on a successful localStorage write below,
+    // so the banner can re-appear if storage frees up and re-fills later.
+    if(!window._quotaBannerDismissed && !document.getElementById('quotaWarning')){
       const w = document.createElement('div');
       w.id = 'quotaWarning';
       w.className = 'quota-warning';
@@ -365,10 +378,28 @@ function saveState(reason){
       if(warnIc){const tmp=document.createElement('span');tmp.innerHTML=warnIc;while(tmp.firstChild)msg.appendChild(tmp.firstChild)}
       const msgTxt=document.createElement('span');msgTxt.textContent='Local cache full \u2014 data is saved in IndexedDB. Consider exporting a backup.';msg.appendChild(msgTxt);
       w.appendChild(msg);
-      const dismissBtn=document.createElement('button');dismissBtn.type='button';dismissBtn.textContent='Dismiss';dismissBtn.onclick=function(){document.getElementById('quotaWarning').remove()};w.appendChild(dismissBtn);
-      const backupBtn=document.createElement('button');backupBtn.type='button';backupBtn.textContent='Backup now';backupBtn.onclick=function(){exportData();document.getElementById('quotaWarning').remove()};w.appendChild(backupBtn);
+      const dismissBtn=document.createElement('button');dismissBtn.type='button';dismissBtn.textContent='Dismiss';
+      dismissBtn.onclick=function(){
+        window._quotaBannerDismissed = true;
+        const el = document.getElementById('quotaWarning'); if(el) el.remove();
+      };
+      w.appendChild(dismissBtn);
+      const backupBtn=document.createElement('button');backupBtn.type='button';backupBtn.textContent='Backup now';
+      backupBtn.onclick=function(){
+        window._quotaBannerDismissed = true;
+        exportData();
+        const el = document.getElementById('quotaWarning'); if(el) el.remove();
+      };
+      w.appendChild(backupBtn);
       document.body.appendChild(w);
     }
+  }
+  // Clear the dismiss flag when localStorage succeeds again \u2014 lets the
+  // banner re-appear if storage frees up and then re-fills later in the
+  // session. Without this, a one-time dismissal silences quota warnings
+  // until the user reloads.
+  if(window._saveError === null && window._quotaBannerDismissed){
+    window._quotaBannerDismissed = false;
   }
   if(typeof syncBroadcast==='function') syncBroadcast();
   if(reason === 'user') showSaveIndicator();
@@ -614,6 +645,45 @@ function _applyState(s){
     if(Array.isArray(s.sessionHistory)) sessionHistory = s.sessionHistory;
     if(s.pomosInCycle !=null)        pomosInCycle  = _int(s.pomosInCycle,0);
     if(s.phase && ['work','short','long'].includes(s.phase)) phase = s.phase;
+
+    // Pomodoro live-state rehydration. Without this, app.js's post-load
+    // `setPhaseTime()` clobbers any saved progress back to a full phase.
+    // We compute remaining from wall-clock for a running timer and let
+    // app.js complete the rehydration (restart tick, fire completion if
+    // the phase would have ended while the tab was closed).
+    if(s.pomoLive && typeof s.pomoLive === 'object'){
+      const p = s.pomoLive;
+      const td = _int(p.totalDuration, 0);
+      if(td > 0){
+        totalDuration = td;
+        if(p.running && typeof p.startedAt === 'number' && p.startedAt > 0){
+          const pr = _int(p.pausedRemaining, td);
+          const elapsed = Math.max(0, Math.floor((Date.now() - p.startedAt) / 1000));
+          const rem = Math.max(0, pr - elapsed);
+          pausedRemaining = pr;
+          remaining = rem;
+          startedAt = p.startedAt;
+          running = rem > 0;
+          finished = rem <= 0;
+          // Distinguish "phase completed while tab was closed" (we owe the user
+          // pip + log + auto-advance) from "phase completed normally before
+          // save, then reload" (bookkeeping already in saved state). The flag
+          // only fires the catch-up completion when the saved state was still
+          // running at save time but would have ended since.
+          window._timerNeedsCompletion = rem <= 0;
+        } else {
+          pausedRemaining = _int(p.pausedRemaining, td);
+          remaining = _int(p.remaining, pausedRemaining);
+          if(remaining < 0) remaining = 0;
+          if(remaining > td) remaining = td;
+          running = false;
+          finished = !!p.finished && remaining <= 0;
+          startedAt = 0;
+          window._timerNeedsCompletion = false;
+        }
+        window._timerStateRehydrated = true;
+      }
+    }
 
     // Intervals + quick timers
     if(Array.isArray(s.intervals)){  intervals = s.intervals.map(iv=>({...iv, target: iv.target || 'pomo'})); intIdCtr = _int(s.intIdCtr,0); }
@@ -902,8 +972,21 @@ function exportData(){
   });
 }
 
+// Backups bigger than this aren't worth even trying — the JSON.parse runs
+// synchronously on the main thread and chokes the tab. Real backups for
+// even multi-year heavy use stay well under this; anything bigger is more
+// likely a wrong-file mis-tap or a corrupted export.
+const _IMPORT_MAX_BYTES = 20 * 1024 * 1024;
 function importData(file){
   if(!file) return;
+  if(typeof file.size === 'number' && file.size > _IMPORT_MAX_BYTES){
+    const mb = (file.size / (1024 * 1024)).toFixed(1);
+    const max = (_IMPORT_MAX_BYTES / (1024 * 1024)).toFixed(0);
+    alert('Backup file is ' + mb + ' MB — that exceeds the ' + max + ' MB cap. ' +
+          'A real OdTauLai backup is much smaller; check this is the right file, ' +
+          'or split a giant archive into chunks before importing.');
+    return;
+  }
   const reader = new FileReader();
   reader.onload = async e=>{
     try{
@@ -1418,6 +1501,12 @@ function _csvRowToTask(obj, existingTask){
 // Returns {added, updated, skipped, errors[]}
 function importTasks(file){
   if(!file){ return; }
+  if(typeof file.size === 'number' && file.size > _IMPORT_MAX_BYTES){
+    const mb = (file.size / (1024 * 1024)).toFixed(1);
+    const max = (_IMPORT_MAX_BYTES / (1024 * 1024)).toFixed(0);
+    alert('Task file is ' + mb + ' MB — that exceeds the ' + max + ' MB cap.');
+    return;
+  }
   const reader = new FileReader();
   reader.onload = e => {
     const text = e.target.result;
@@ -1668,8 +1757,19 @@ function showSaveIndicator(){
   el._saveIndT = setTimeout(()=>{ el.classList.remove('show'); }, 900);
 }
 
-// Auto-save every 10s, on tab hide, and on unload (no save pill)
-setInterval(() => queueAutoSave(), 10000);
+// Auto-save every 10s, on tab hide, and on unload (no save pill). Routed
+// through setManagedInterval so a bfcache restore (which clears the
+// interval on pagehide) reinstates a single fresh tick instead of leaving
+// the autosave loop dead.
+if(typeof setManagedInterval === 'function'){
+  const _autosaveTick = () => queueAutoSave();
+  setManagedInterval('autosave', _autosaveTick, 10000);
+  if(typeof onBfcacheRestore === 'function'){
+    onBfcacheRestore(() => setManagedInterval('autosave', _autosaveTick, 10000));
+  }
+} else {
+  setInterval(() => queueAutoSave(), 10000);
+}
 document.addEventListener('visibilitychange', ()=>{ if(document.hidden) queueAutoSave(); });
 window.addEventListener('beforeunload', () => saveState('unload'));
 if(typeof window !== 'undefined' && window.addEventListener){

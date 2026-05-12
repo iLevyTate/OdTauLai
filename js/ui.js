@@ -142,6 +142,18 @@ let _cmdkAskCtl=null;
 let _cmdkAskHistoryIdx=-1;
 let _cmdkAskBusy=false;
 let _cmdkLastReply=null;
+// Multi-turn conversation state for the Ask sheet. Each turn captures the
+// user's question and the assistant's reply so the conversation persists
+// while the palette is open, follow-up turns can reference prior context,
+// and the UI reads as a chat instead of a one-shot command. Cleared on
+// close, on switch back to Find mode, and on "New chat".
+let _cmdkAskTurns = [];
+let _cmdkAskTurnIdSeq = 0;
+// How many prior turns are threaded back into the LLM prompt as conversation
+// context. Capped so a long session doesn't blow up the prompt — the on-
+// device model has a fixed context window and the most recent turns are by
+// far the most relevant to a follow-up question.
+const _CMDK_ASK_CONTEXT_TURNS = 4;
 let _cmdkPrevFocus=null;
 function openCmdK(opts){
   const openAsk = opts && opts.ask === true;
@@ -169,6 +181,10 @@ function closeCmdK(){
   gid('cmdkOverlay').classList.remove('open');
   if(_cmdkPrevFocus&&_cmdkPrevFocus.focus)try{_cmdkPrevFocus.focus()}catch(_){}
   _cmdkPrevFocus=null;
+  // Wipe the conversation when the palette closes. Re-opening should start
+  // a fresh chat — keeping stale turns around made the next session look
+  // like it had answered a question it never received.
+  _cmdkAskTurns = [];
 }
 function _cmdkAbortAsk(){
   if(_cmdkAskCtl){try{_cmdkAskCtl.abort()}catch(_){}_cmdkAskCtl=null}
@@ -180,6 +196,9 @@ function cmdkSetAskMode(on){
   // the UI affordance. Otherwise tokens keep decoding in the background and
   // the next Ask turn sees stale state.
   if(!on && (_cmdkAskBusy || _cmdkAskCtl)) _cmdkAbortAsk();
+  // Leaving ask mode wipes the conversation so flipping back is a clean
+  // start. Keep turns when toggling into ask mode (no-op).
+  if(!on) _cmdkAskTurns = [];
   cmdkMode=on?'ask':'find';
   _applyCmdkMode();
   renderCmdK();
@@ -203,7 +222,7 @@ function _applyCmdkMode(){
   if(panel)panel.classList.toggle('cmdk-panel--ask',cmdkMode==='ask');
   if(input){
     input.placeholder=cmdkMode==='ask'
-      ?'Ask about or edit your tasks in plain English…'
+      ?'Ask about or edit your tasks — follow-ups stay in context…'
       :'Search tasks, actions, views… (? for Ask)';
   }
   if(tog){
@@ -211,8 +230,15 @@ function _applyCmdkMode(){
     tog.setAttribute('aria-pressed',cmdkMode==='ask'?'true':'false');
   }
   if(reply){
-    if(cmdkMode==='ask'){reply.hidden=false;if(!reply.childNodes.length){const h=document.createElement('div');h.className='cmdk-ask-hint';h.textContent='Press Enter to run on-device. No auto-apply — you’ll preview every proposed change.';reply.appendChild(h)}}
-    else{reply.hidden=true;reply.textContent=''}
+    if(cmdkMode==='ask'){
+      reply.hidden=false;
+      // Always render from the canonical _cmdkAskTurns state so opening Ask
+      // mid-conversation (e.g. user toggled find then back) shows the chat,
+      // not a stale fragment.
+      _renderAskConversation();
+    } else {
+      reply.hidden=true; reply.textContent='';
+    }
   }
   if(results)results.hidden = !!(cmdkMode==='ask');
   _syncCmdkFindHint();
@@ -236,111 +262,287 @@ function _cmdkFootAskText(){
     foot.textContent=mod+'/Ctrl+K · Enter = ask · Esc · '+(genReady?'Model ready':'Model not loaded');
   }
 }
-// Append a collapsible "Rejected ops" panel to the existing Ask reply DOM.
-// validateOps returns each rejection with a reason; surfacing them lets the
-// user see exactly why a proposed change didn't apply (e.g. unknown id,
-// invalid status, mismatched arg shape) instead of just a "(N rejected)"
-// count. textContent only — the LLM op shape is not trusted as HTML.
-function _renderAskRejected(rejected){
-  const reply = gid('cmdkAskReply');
-  if(!reply) return;
-  const det = document.createElement('details');
-  det.className = 'cmdk-ask-rejected';
-  const summ = document.createElement('summary');
-  summ.textContent = rejected.length + ' rejected — show reasons';
-  det.appendChild(summ);
-  const list = document.createElement('ul');
-  list.className = 'cmdk-ask-rejected-list';
-  rejected.slice(0, 25).forEach(r => {
-    const li = document.createElement('li');
-    const op = (r && r.op) || (r && r.name) || 'op';
-    const why = (r && (r.reason || r.error || r.message)) || 'invalid';
-    li.textContent = String(op) + ' — ' + String(why);
-    list.appendChild(li);
-  });
-  if(rejected.length > 25){
-    const more = document.createElement('li');
-    more.className = 'cmdk-ask-rejected-more';
-    more.textContent = '+ ' + (rejected.length - 25) + ' more';
-    list.appendChild(more);
-  }
-  det.appendChild(list);
-  reply.appendChild(det);
+// ---- Multi-turn Ask conversation rendering ----------------------------------
+// Each turn in `_cmdkAskTurns` produces a Q bubble + an A bubble. The render
+// is a full rebuild from state because state transitions (streaming → done,
+// error, etc.) come from async callbacks and re-rebuilding is simpler and
+// faster than threading partial-update logic through five status branches.
+// Everything below uses textContent / createElement — the model output is
+// never trusted as HTML.
+
+function _cmdkAskNewTurn(q){
+  const turn = {
+    id: ++_cmdkAskTurnIdSeq,
+    q: String(q || ''),
+    status: 'streaming', // streaming | answer | ops | empty | error | need-model
+    text: '',
+    stream: '',
+    ops: null,
+    rejected: null,
+    destructiveLevel: 'none',
+    readRounds: 0,
+    // need-model carries structured info instead of HTML so the bubble can
+    // build the action button safely.
+    needModel: null,
+  };
+  _cmdkAskTurns.push(turn);
+  return turn;
 }
-// Render a free-form prose answer from the on-device model. Kept separate
-// from _renderAskStatus so it can host longer multi-line replies (chat-style)
-// without being mistaken for an error or "done" toast. textContent only —
-// the LLM output is not trusted as HTML.
-function _renderAskAnswer(text){
+function _cmdkAskCurrent(){
+  return _cmdkAskTurns.length ? _cmdkAskTurns[_cmdkAskTurns.length-1] : null;
+}
+function _cmdkAskUpdate(turn, patch){
+  if(!turn) return;
+  Object.assign(turn, patch);
+  _renderAskConversation();
+}
+
+// Serialise a finished turn into "assistant content" for prompt context.
+// Skipped turns (streaming, error, need-model) return null so the LLM never
+// sees half-formed state.
+function _cmdkAskSerialiseAssistant(turn){
+  if(!turn) return null;
+  if(turn.status === 'answer') return String(turn.text || '').slice(0, 600);
+  if(turn.status === 'ops'){
+    const n = Array.isArray(turn.ops) ? turn.ops.length : 0;
+    return n > 0 ? '[' + n + ' change' + (n!==1?'s':'') + ' proposed]' : '[no changes]';
+  }
+  if(turn.status === 'empty') return '[no answer]';
+  return null;
+}
+
+// Build the prior-turn context (capped) to ship into askRun.
+function _cmdkAskPriorTurnsFor(currentTurn){
+  const out = [];
+  for(const t of _cmdkAskTurns){
+    if(t === currentTurn) break;
+    if(t.status === 'streaming') break;
+    const a = _cmdkAskSerialiseAssistant(t);
+    if(!a) continue;
+    out.push({ user: String(t.q || ''), assistant: a });
+  }
+  if(out.length > _CMDK_ASK_CONTEXT_TURNS) return out.slice(-_CMDK_ASK_CONTEXT_TURNS);
+  return out;
+}
+
+// Compute the "need-model" structured payload once so render code stays dumb.
+function _cmdkAskNeedModelInfo(){
+  const cfg = typeof getGenCfg === 'function' ? getGenCfg() : null;
+  const cached = !!(cfg && typeof isGenDownloaded === 'function' && isGenDownloaded(cfg.modelId));
+  const loading = typeof isGenLoading === 'function' && isGenLoading();
+  let sizeMb = 230;
+  try{
+    if(cfg && typeof getGenPresets === 'function'){
+      const presets = getGenPresets() || [];
+      const p = presets.find(x => x && x.id === cfg.modelId);
+      if(p && typeof p.sizeMb === 'number') sizeMb = p.sizeMb;
+    }
+  }catch(_){}
+  return { cached, loading, sizeMb };
+}
+
+function _renderAskConversation(){
   const reply = gid('cmdkAskReply');
   if(!reply) return;
   reply.replaceChildren();
-  const wrap = document.createElement('div');
-  wrap.className = 'cmdk-ask-answer';
-  const body = document.createElement('div');
-  body.className = 'cmdk-ask-answer-body';
-  body.textContent = String(text || '').trim();
-  wrap.appendChild(body);
-  const foot = document.createElement('div');
-  foot.className = 'cmdk-ask-answer-foot';
-  foot.textContent = 'Answered on-device. No changes were applied.';
-  wrap.appendChild(foot);
-  reply.appendChild(wrap);
+  if(!_cmdkAskTurns.length){
+    const h = document.createElement('div');
+    h.className = 'cmdk-ask-hint';
+    h.textContent = 'Press Enter to run on-device. No auto-apply — you’ll preview every proposed change.';
+    reply.appendChild(h);
+    return;
+  }
+  // Conversation toolbar: "New chat" lets the user wipe context without
+  // closing the palette so a fresh question doesn't get coloured by the
+  // previous topic in the LLM prompt.
+  const bar = document.createElement('div');
+  bar.className = 'cmdk-ask-bar';
+  const newBtn = document.createElement('button');
+  newBtn.type = 'button';
+  newBtn.className = 'cmdk-ask-bar-btn';
+  newBtn.textContent = '+ New chat';
+  newBtn.title = 'Clear this conversation';
+  newBtn.onclick = () => {
+    _cmdkAbortAsk();
+    _cmdkAskTurns = [];
+    _renderAskConversation();
+    const inp = gid('cmdkInput');
+    if(inp){ inp.value = ''; try{ inp.focus(); }catch(_){} }
+  };
+  bar.appendChild(newBtn);
+  const count = document.createElement('span');
+  count.className = 'cmdk-ask-bar-count';
+  count.textContent = _cmdkAskTurns.length + ' turn' + (_cmdkAskTurns.length!==1?'s':'');
+  bar.appendChild(count);
+  reply.appendChild(bar);
+
+  for(const t of _cmdkAskTurns){
+    // User bubble
+    const qWrap = document.createElement('div');
+    qWrap.className = 'cmdk-ask-turn cmdk-ask-turn--q';
+    const qBubble = document.createElement('div');
+    qBubble.className = 'cmdk-ask-bubble cmdk-ask-bubble--q';
+    qBubble.textContent = t.q;
+    qWrap.appendChild(qBubble);
+    reply.appendChild(qWrap);
+
+    // Assistant bubble
+    const aWrap = document.createElement('div');
+    aWrap.className = 'cmdk-ask-turn cmdk-ask-turn--a';
+    const aBubble = document.createElement('div');
+    aBubble.className = 'cmdk-ask-bubble cmdk-ask-bubble--a';
+
+    if(t.status === 'streaming'){
+      const row = document.createElement('div');
+      row.className = 'cmdk-ask-row';
+      const sp = document.createElement('span');
+      sp.className = 'cmdk-ask-spinner';
+      sp.setAttribute('aria-hidden', 'true');
+      const lbl = document.createElement('span');
+      lbl.className = 'cmdk-ask-label';
+      lbl.textContent = t.text || 'Thinking on-device…';
+      const stop = document.createElement('button');
+      stop.type = 'button';
+      stop.className = 'cmdk-ask-stop';
+      stop.textContent = 'Stop';
+      stop.dataset.action = 'cmdkAskStop';
+      row.appendChild(sp); row.appendChild(lbl); row.appendChild(stop);
+      aBubble.appendChild(row);
+      if(t.stream){
+        const det = document.createElement('details');
+        det.className = 'cmdk-ask-details';
+        const sum = document.createElement('summary');
+        sum.textContent = 'Show raw output';
+        det.appendChild(sum);
+        const pre = document.createElement('pre');
+        pre.className = 'cmdk-ask-stream';
+        pre.textContent = t.stream;
+        det.appendChild(pre);
+        aBubble.appendChild(det);
+      }
+    } else if(t.status === 'answer'){
+      const body = document.createElement('div');
+      body.className = 'cmdk-ask-answer-body';
+      body.textContent = String(t.text || '').trim();
+      aBubble.appendChild(body);
+      const foot = document.createElement('div');
+      foot.className = 'cmdk-ask-answer-foot';
+      foot.textContent = 'Answered on-device. No changes were applied.';
+      aBubble.appendChild(foot);
+    } else if(t.status === 'ops'){
+      const dn = document.createElement('div');
+      dn.className = 'cmdk-ask-done';
+      dn.textContent = t.text || 'Proposed.';
+      aBubble.appendChild(dn);
+      if(t.rejected && t.rejected.length){
+        const det = document.createElement('details');
+        det.className = 'cmdk-ask-rejected';
+        const sum = document.createElement('summary');
+        sum.textContent = t.rejected.length + ' rejected — show reasons';
+        det.appendChild(sum);
+        const list = document.createElement('ul');
+        list.className = 'cmdk-ask-rejected-list';
+        t.rejected.slice(0, 25).forEach(r => {
+          const li = document.createElement('li');
+          const op = (r && r.op) || (r && r.name) || 'op';
+          const why = (r && (r.reason || r.error || r.message)) || 'invalid';
+          li.textContent = String(op) + ' — ' + String(why);
+          list.appendChild(li);
+        });
+        if(t.rejected.length > 25){
+          const more = document.createElement('li');
+          more.className = 'cmdk-ask-rejected-more';
+          more.textContent = '+ ' + (t.rejected.length - 25) + ' more';
+          list.appendChild(more);
+        }
+        det.appendChild(list);
+        aBubble.appendChild(det);
+      }
+    } else if(t.status === 'empty'){
+      const em = document.createElement('div');
+      em.className = 'cmdk-ask-empty';
+      em.textContent = t.text || 'No changes proposed.';
+      aBubble.appendChild(em);
+    } else if(t.status === 'error'){
+      const ed = document.createElement('div');
+      ed.className = 'cmdk-ask-error';
+      ed.textContent = t.text || 'Error';
+      aBubble.appendChild(ed);
+    } else if(t.status === 'need-model'){
+      const info = t.needModel || _cmdkAskNeedModelInfo();
+      const ed = document.createElement('div');
+      ed.className = 'cmdk-ask-error';
+      if(info.loading){
+        ed.textContent = 'Local AI is still loading — give it a moment and try again.';
+      } else {
+        const lead = document.createElement('span');
+        lead.textContent = info.cached
+          ? 'Local AI is ready but not loaded into memory yet. '
+          : 'This app runs the chat model fully on-device. Nothing leaves your browser. First time needs a one-off ~' + info.sizeMb + ' MB download. ';
+        ed.appendChild(lead);
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn-ghost btn-sm cmdk-ask-enable';
+        btn.dataset.action = 'genDownloadClick';
+        btn.textContent = info.cached ? 'Load now' : 'Download local AI (~' + info.sizeMb + ' MB)';
+        ed.appendChild(btn);
+      }
+      aBubble.appendChild(ed);
+    }
+    aWrap.appendChild(aBubble);
+    reply.appendChild(aWrap);
+  }
+  // Auto-scroll the conversation so the newest turn is visible without the
+  // user having to scroll. requestAnimationFrame so layout is settled before
+  // we measure scrollHeight.
+  requestAnimationFrame(() => { try{ reply.scrollTop = reply.scrollHeight; }catch(_){} });
+}
+
+// Back-compat shims: a few older call sites and tests reference these names.
+// They now route through the turn-based renderer instead of clobbering the
+// whole reply DOM. Safe to remove once we're confident nothing external uses
+// them — kept here for the next release cycle.
+function _renderAskAnswer(text){
+  const t = _cmdkAskCurrent();
+  if(t) _cmdkAskUpdate(t, { status: 'answer', text: String(text || '') });
+}
+function _renderAskRejected(rejected){
+  const t = _cmdkAskCurrent();
+  if(t) _cmdkAskUpdate(t, { rejected });
 }
 function _renderAskStatus(state,msg){
-  const reply=gid('cmdkAskReply');if(!reply)return;
-  if(state==='streaming'){
-    reply.innerHTML=`
-      <div class="cmdk-ask-streaming">
-        <div class="cmdk-ask-row">
-          <span class="cmdk-ask-spinner" aria-hidden="true"></span>
-          <span class="cmdk-ask-label" id="cmdkAskLabel">Thinking on-device…</span>
-          <button type="button" class="cmdk-ask-stop" data-action="cmdkAskStop">Stop</button>
-        </div>
-        <details class="cmdk-ask-details">
-          <summary>Show raw output</summary>
-          <pre class="cmdk-ask-stream" id="cmdkAskStream"></pre>
-        </details>
-      </div>`;
-  }else if(state==='error'){
-    reply.textContent='';const ed=document.createElement('div');ed.className='cmdk-ask-error';ed.textContent=msg||'Error';reply.appendChild(ed);
-  }else if(state==='empty'){
-    reply.textContent='';const em=document.createElement('div');em.className='cmdk-ask-empty';em.textContent=msg||'No changes proposed.';reply.appendChild(em);
-  }else if(state==='done'){
-    reply.textContent='';const dn=document.createElement('div');dn.className='cmdk-ask-done';dn.textContent=msg||'Proposed.';reply.appendChild(dn);
-  }else if(state==='need-model'){
-    // Message reflects whether the model just needs loading vs a full download.
-    const cfg = typeof getGenCfg === 'function' ? getGenCfg() : null;
-    const cached = !!(cfg && typeof isGenDownloaded === 'function' && isGenDownloaded(cfg.modelId));
-    const loading = typeof isGenLoading === 'function' && isGenLoading();
-    // Look up the chosen preset's headline size so the user knows what
-    // they're agreeing to before tapping Download. Falls back to a
-    // conservative "~230 MB" if the preset list isn't reachable for any
-    // reason (it always is in practice — gen.js loads first).
-    let sizeHint = '~230 MB';
-    try{
-      if(cfg && typeof getGenPresets === 'function'){
-        const presets = getGenPresets() || [];
-        const p = presets.find(x => x && x.id === cfg.modelId);
-        if(p && typeof p.sizeMb === 'number') sizeHint = '~' + p.sizeMb + ' MB';
-      }
-    }catch(_){}
-    let inner;
-    if(loading){
-      inner = 'Local AI is still loading — give it a moment and try again.';
-    }else{
-      // One-tap download: genDownloadClick flips cfg.enabled itself if it's
-      // off, so a single button covers both "never enabled" and "enabled
-      // but not yet downloaded." Stays on-device — no cloud, no API key.
-      const head = cached
-        ? 'Local AI is ready but not loaded into memory yet.'
-        : 'This app runs the chat model fully on-device. Nothing leaves your browser. First time needs a one-off ' + sizeHint + ' download.';
-      const btnLabel = cached ? 'Load now' : 'Download local AI (' + sizeHint + ')';
-      inner = head
-        + ' <button type="button" class="btn-ghost btn-sm cmdk-ask-enable" data-action="genDownloadClick">'
-        + btnLabel + '</button>';
+  // Map the legacy state vocabulary onto the active turn (or — for need-model
+  // pre-submit cases — push a synthetic turn that hosts the CTA).
+  const cur = _cmdkAskCurrent();
+  if(state === 'streaming'){
+    if(cur) _cmdkAskUpdate(cur, { status: 'streaming', text: msg || 'Thinking on-device…' });
+    return;
+  }
+  if(state === 'error'){
+    if(cur) _cmdkAskUpdate(cur, { status: 'error', text: msg || 'Error' });
+    return;
+  }
+  if(state === 'empty'){
+    if(cur) _cmdkAskUpdate(cur, { status: 'empty', text: msg || 'No changes proposed.' });
+    return;
+  }
+  if(state === 'done'){
+    if(cur) _cmdkAskUpdate(cur, { status: 'ops', text: msg || 'Proposed.' });
+    return;
+  }
+  if(state === 'need-model'){
+    // Surface the download/load CTA as a turn so the user sees it inline in
+    // the conversation (instead of a global banner that hides their query).
+    // If there's no current turn yet (caller hit need-model before pushing
+    // a question), push a synthetic one with the question they tried to ask.
+    const info = _cmdkAskNeedModelInfo();
+    let target = cur;
+    if(!target){
+      const inp = gid('cmdkInput');
+      const q = inp && inp.value ? inp.value.trim() : '(load required)';
+      target = _cmdkAskNewTurn(q);
     }
-    reply.innerHTML = '<div class="cmdk-ask-error">' + inner + '</div>';
+    _cmdkAskUpdate(target, { status: 'need-model', needModel: info });
   }
 }
 function _updateAskLabel(totalChars){
@@ -359,44 +561,69 @@ async function cmdkAskSubmit(){
   const input=gid('cmdkInput');if(!input)return;
   const q=input.value.trim();
   if(!q)return;
-  if(typeof isGenReady!=='function'||!isGenReady()){_renderAskStatus('need-model');return}
-  if(typeof askRun!=='function'){_renderAskStatus('error','Ask pipeline unavailable');return}
+  if(typeof askRun!=='function'){
+    const t = _cmdkAskNewTurn(q);
+    _cmdkAskUpdate(t, { status: 'error', text: 'Ask pipeline unavailable' });
+    input.value=''; return;
+  }
+  if(typeof isGenReady!=='function'||!isGenReady()){
+    const t = _cmdkAskNewTurn(q);
+    _cmdkAskUpdate(t, { status: 'need-model', needModel: _cmdkAskNeedModelInfo() });
+    input.value=''; return;
+  }
+  // Push the new turn FIRST so the user's question appears in the chat
+  // immediately. Then clear the input so they can type the follow-up while
+  // the assistant is still streaming the previous answer.
+  const turn = _cmdkAskNewTurn(q);
+  _renderAskConversation();
+  input.value='';
+  _cmdkAskHistoryIdx=-1;
+  // Snapshot prior turns before the streaming turn moves to a non-final
+  // status — the LLM prompt should see only the *prior* finished context.
+  const priorTurns = _cmdkAskPriorTurnsFor(turn);
   _cmdkAskBusy=true;
   _cmdkAskCtl=new AbortController();
-  _renderAskStatus('streaming');
-  const streamEl=gid('cmdkAskStream');
   try{
     const res=await askRun(q,{
       signal:_cmdkAskCtl.signal,
+      priorTurns,
       onReadRound:()=>{
-        const lbl=gid('cmdkAskLabel');
-        if(lbl)lbl.textContent='Running read-only tools on-device…';
+        _cmdkAskUpdate(turn, { text: 'Running read-only tools on-device…' });
       },
       onToken:(t)=>{
-        const el=gid('cmdkAskStream');
-        if(el){el.textContent+=t;el.scrollTop=el.scrollHeight}
-        _updateAskLabel();
+        turn.stream += t;
+        // Update inline label with op-count progress so the user sees the
+        // model is making progress, not just spinning.
+        const matches = turn.stream.match(/\{\s*"name"/g);
+        const n = matches ? matches.length : 0;
+        const lbl = n > 0
+          ? 'Planning ' + n + ' change' + (n!==1?'s':'') + '…'
+          : (turn.text && turn.text !== 'Thinking on-device…' ? turn.text : 'Thinking on-device…');
+        _cmdkAskUpdate(turn, { text: lbl });
       },
     });
     _cmdkLastReply=res;
     if(!res.ok){
       const reason=res.reason||'Unknown error';
-      if(reason==='ABORTED'||reason==='TIMEOUT'){_renderAskStatus('error',reason==='TIMEOUT'?'Timed out — try a shorter request or a smaller model.':'Stopped.');}
-      else if(reason==='GEN_NOT_READY'){_renderAskStatus('need-model');}
-      else if(reason.startsWith('PARSE_FAILED')){_renderAskStatus('error','Couldn’t parse a valid plan. Try rephrasing.');}
-      else{_renderAskStatus('error',reason);}
+      if(reason==='ABORTED'){
+        _cmdkAskUpdate(turn, { status: 'error', text: 'Stopped.' });
+      } else if(reason==='TIMEOUT'){
+        _cmdkAskUpdate(turn, { status: 'error', text: 'Timed out — try a shorter request or a smaller model.' });
+      } else if(reason==='GEN_NOT_READY'){
+        _cmdkAskUpdate(turn, { status: 'need-model', needModel: _cmdkAskNeedModelInfo() });
+      } else if(typeof reason === 'string' && reason.startsWith('PARSE_FAILED')){
+        _cmdkAskUpdate(turn, { status: 'error', text: 'Couldn’t parse a valid plan. Try rephrasing.' });
+      } else {
+        _cmdkAskUpdate(turn, { status: 'error', text: reason });
+      }
       return;
     }
     if(!res.ops.length){
-      // Free-form chat answer (e.g. "what's overdue?") — surface the prose
-      // the model produced instead of treating "no ops to apply" as an
-      // empty result. Without this branch, a plain question never gets an
-      // answer back in the UI.
       if(res.chatAnswer){
-        _renderAskAnswer(res.chatAnswer);
+        _cmdkAskUpdate(turn, { status: 'answer', text: res.chatAnswer });
         return;
       }
-      _renderAskStatus('empty','No actionable changes — nothing will be applied.');
+      _cmdkAskUpdate(turn, { status: 'empty', text: 'No changes to apply, and no answer came back. Try rephrasing — e.g. "what is overdue?" or "make task 3 urgent".' });
       return;
     }
     if(typeof acceptProposedOps==='function'){
@@ -405,19 +632,26 @@ async function cmdkAskSubmit(){
     const n=res.ops.length;
     const extra=res.rejected&&res.rejected.length?` (${res.rejected.length} rejected)`:'';
     const rrd=res.readRounds>0?` ${res.readRounds} read step${res.readRounds!==1?'s':''} ·`:'';
-    _renderAskStatus('done',`Proposed ${n} change${n!==1?'s':''}${extra}.${rrd} Opened Tools — review before applying.`);
-    // Show why each rejected op was dropped so the user can adjust their
-    // request. validateOps already returns the reasons; previously they
-    // were summarized as a count and the detail vanished.
-    if(res.rejected && res.rejected.length){
-      _renderAskRejected(res.rejected);
-    }
-    setTimeout(closeCmdK,res.rejected && res.rejected.length ? 2400 : 650);
+    _cmdkAskUpdate(turn, {
+      status: 'ops',
+      text: `Proposed ${n} change${n!==1?'s':''}${extra}.${rrd} Opened Tools — review before applying.`,
+      ops: res.ops,
+      rejected: res.rejected || null,
+      destructiveLevel: res.destructiveLevel,
+      readRounds: res.readRounds || 0,
+    });
+    // Don't auto-close the palette anymore. The chat is the value — leaving
+    // it open lets the user follow up with "now archive those" or "wait,
+    // undo that" without the conversation vanishing. Tools opens in the
+    // background where they can preview/apply at their own pace.
   }catch(e){
-    _renderAskStatus('error',(e&&e.message)||'Error');
+    _cmdkAskUpdate(turn, { status: 'error', text: (e&&e.message)||'Error' });
   }finally{
     _cmdkAskBusy=false;
     _cmdkAskCtl=null;
+    // Re-focus the input so a follow-up question is one keystroke away.
+    const inp = gid('cmdkInput');
+    if(inp){ try{ inp.focus(); }catch(_){} }
   }
 }
 function cmdkAskStop(){
@@ -536,11 +770,129 @@ function renderCmdK(){
   }
   const matchedNav=q?navActions.filter(a=>a.label.toLowerCase().includes(q)):navActions;
   if(matchedNav.length){items.push({section:'Actions'});matchedNav.forEach(a=>items.push(a))}
-  // Match tasks
-  const matchedTasks=tasks.filter(t=>!t.archived&&(t.name.toLowerCase().includes(q)||(t.description||'').toLowerCase().includes(q))).slice(0,12);
-  if(q&&matchedTasks.length){
+  // Match tasks. Search includes name, description, AND tags so a quick-add
+  // like `#errands` finds anything tagged. The same operator syntax used in
+  // the task search bar (tag: / list: / is: / priority: / due: / status:)
+  // works here too, so a power-user can type "is:overdue priority:high" in
+  // Cmd+K and see exactly that slice.
+  const parsedQ = (typeof parseTaskSearchQuery === 'function') ? parseTaskSearchQuery(rawVal) : { text: q, ops: null };
+  const freeText = parsedQ.text || '';
+  const qOps = parsedQ.ops;
+  const _matchOps = (t) => {
+    if(!qOps) return true;
+    if(qOps.tag && qOps.tag.length){
+      const tt = (t.tags || []).map(x => String(x).toLowerCase());
+      if(!qOps.tag.every(w => tt.includes(w))) return false;
+    }
+    if(qOps.priority && qOps.priority.length && !qOps.priority.includes(String(t.priority || 'none').toLowerCase())) return false;
+    if(qOps.status   && qOps.status.length   && !qOps.status.includes(String(t.status   || 'open').toLowerCase())) return false;
+    if(qOps.list && qOps.list.length){
+      const l = (typeof lists !== 'undefined' && Array.isArray(lists)) ? lists.find(x => x.id === t.listId) : null;
+      const name = l ? String(l.name || '').toLowerCase() : '';
+      if(!qOps.list.some(w => name === w || name.includes(w))) return false;
+    }
+    if(qOps.is && qOps.is.length){
+      const today = (typeof todayISO==='function') ? todayISO() : '';
+      const matchOne = (w) => {
+        if(w==='overdue')  return !!t.dueDate && t.dueDate < today && t.status !== 'done';
+        if(w==='today')    return t.dueDate === today;
+        if(w==='done')     return t.status === 'done';
+        if(w==='open')     return t.status !== 'done';
+        if(w==='archived') return !!t.archived;
+        if(w==='starred')  return !!t.starred;
+        if(w==='recurring' || w==='habit') return !!t.recur;
+        return false;
+      };
+      if(!qOps.is.every(matchOne)) return false;
+    }
+    return true;
+  };
+  const matchTask = (t) => {
+    if(!_matchOps(t)) return false;
+    if(!freeText) return true;
+    if(t.name.toLowerCase().includes(freeText)) return true;
+    if((t.description||'').toLowerCase().includes(freeText)) return true;
+    if(Array.isArray(t.tags) && t.tags.some(tg => String(tg).toLowerCase().includes(freeText))) return true;
+    return false;
+  };
+  // Show task hits when the user typed free text OR any operator. Operators
+  // alone (e.g. `is:overdue`) should produce results — the legacy `if(q)`
+  // gate suppressed those.
+  const hasOps = !!(qOps && (qOps.tag.length||qOps.list.length||qOps.is.length||qOps.priority.length||qOps.due.length||qOps.status.length));
+  const shouldShowTasks = !!freeText || hasOps;
+  const activeMatches = tasks.filter(t => !t.archived && t.status !== 'done' && matchTask(t)).slice(0, 12);
+  if(shouldShowTasks && activeMatches.length){
     items.push({section:'Tasks'});
-    matchedTasks.forEach(t=>items.push({type:'task',label:t.name,icon:t.status==='done'?'✓':'○',desc:(t.dueDate?fmtDue(t.dueDate):'')||getTaskPath(t.id).slice(0,-1).join(' › '),run:()=>{showTab('tasks');openTaskDetail(t.id)}}));
+    activeMatches.forEach(t=>items.push({type:'task',label:t.name,icon:t.status==='done'?'✓':'○',desc:(t.dueDate?fmtDue(t.dueDate):'')||getTaskPath(t.id).slice(0,-1).join(' › '),run:()=>{showTab('tasks');openTaskDetail(t.id)}}));
+  }
+  const doneMatches = tasks.filter(t => (t.archived || t.status === 'done') && matchTask(t)).slice(0, 6);
+  if(shouldShowTasks && doneMatches.length){
+    items.push({section:'Completed & archived'});
+    doneMatches.forEach(t=>items.push({type:'task',label:t.name,icon:t.archived?'🗂':'✓',desc:t.archived?'archived':'done',run:()=>{
+      // Switching to the matching smart view so the user can see the task in
+      // context instead of just opening it in isolation. rAF instead of an
+      // arbitrary 60ms timer so slow phones don't race the modal open
+      // ahead of the list paint, and re-resolve the task by id so a
+      // cross-tab sync between click and open doesn't open a stale row.
+      const taskId = t.id;
+      showTab('tasks');
+      const wasArchived = !!t.archived;
+      if(wasArchived){ if(typeof setSmartView==='function') setSmartView('archived'); }
+      else { if(typeof setSmartView==='function') setSmartView('completed'); }
+      requestAnimationFrame(() => {
+        const fresh = (typeof findTask === 'function') ? findTask(taskId) : null;
+        if(!fresh) return;
+        if(typeof openTaskDetail==='function') openTaskDetail(taskId);
+      });
+    }}));
+  }
+  // Match lists by name.
+  if(q && typeof lists !== 'undefined' && Array.isArray(lists)){
+    const listMatches = lists.filter(l => l && (l.name||'').toLowerCase().includes(q)).slice(0, 6);
+    if(listMatches.length){
+      items.push({section:'Lists'});
+      listMatches.forEach(l => items.push({
+        type:'action', label:'Open list: '+l.name, icon: ic('folder'),
+        run: () => { showTab('tasks'); if(typeof switchList==='function') switchList(l.id); }
+      }));
+    }
+  }
+  // Settings index — when the user types a setting-y keyword, surface a jump
+  // straight to the Settings tab. Cheap and dramatically improves
+  // findability vs. scrolling the long flat settings panel.
+  if(q){
+    // Each entry: [keywords, label, target-section-id]. The id lets the
+    // command palette jump straight into the matching Settings section
+    // instead of just landing the user on the (long, flat) Settings tab.
+    const settingsIndex = [
+      ['theme dark light',                  'Theme (dark / light)',          'set-general'],
+      ['sound chime audio',                 'Sound & chimes',                'set-general'],
+      ['notification permission',           'Notifications',                 'set-general'],
+      ['ai model llm embedding download',   'AI / on-device model',          'set-integrations'],
+      ['sync peer p2p webrtc',              'Sync (peer-to-peer)',           'set-integrations'],
+      ['export import backup csv json ical','Data export / import',          'set-about'],
+      ['encrypt password',                  'Encrypted backup',              'set-about'],
+      ['calendar feed ics ical',            'Calendar feeds',                'set-integrations'],
+      ['category classification',           'Categories',                    'set-classifications'],
+      ['list project',                      'Lists / projects',              'set-lists'],
+      ['phase preset pomodoro work break',  'Pomodoro presets',              'set-general'],
+      ['install pwa app',                   'Install as App',                'set-about'],
+      ['storage quota system info',         'System info / storage',         'set-about'],
+    ];
+    const settingsHits = settingsIndex.filter(([keys]) => keys.split(' ').some(k => k.startsWith(q)) || keys.includes(q)).slice(0, 6);
+    if(settingsHits.length){
+      items.push({section:'Settings'});
+      settingsHits.forEach(([, label, target]) => items.push({
+        type:'action', label:'Go to: '+label, icon: ic('gear'),
+        run: () => {
+          showTab('settings');
+          // requestAnimationFrame so the tab swap lands before we measure.
+          requestAnimationFrame(() => {
+            if(typeof jumpToSettingsSection === 'function') jumpToSettingsSection(target);
+          });
+        }
+      }));
+    }
   }
   cmdkFilteredItems=items.filter(i=>!i.section);
   if(cmdkActiveIdx>=cmdkFilteredItems.length)cmdkActiveIdx=Math.max(0,cmdkFilteredItems.length-1);
@@ -612,7 +964,34 @@ document.addEventListener('keydown',e=>{
   }
 });
 
-// Keyboard shortcut: Ctrl+Z / Cmd+Z — undo the last action via the action toast button
+// ── Extended undo stack ─────────────────────────────────────────────────────
+// The action-toast button only lives ~4s. Anything beyond that — and any
+// action that finished without a toast — was previously irrecoverable. We
+// also push every undoable action into a small ring buffer (depth 10, ~30s
+// per entry) that Cmd+Z drains in LIFO order. The toast button still runs
+// the same undo function, but it's no longer the only path.
+const _UNDO_RING_MAX = 10;
+const _UNDO_TTL_MS = 60_000;
+const _undoRing = [];
+function _pruneUndoRing(){
+  const cutoff = Date.now() - _UNDO_TTL_MS;
+  while(_undoRing.length && _undoRing[0].ts < cutoff) _undoRing.shift();
+  while(_undoRing.length > _UNDO_RING_MAX) _undoRing.shift();
+}
+function pushUndo(label, undoFn){
+  if(typeof undoFn !== 'function') return;
+  _undoRing.push({ ts: Date.now(), label: String(label || 'Last action'), fn: undoFn });
+  _pruneUndoRing();
+}
+function popUndo(){
+  _pruneUndoRing();
+  return _undoRing.pop() || null;
+}
+window.pushUndo = pushUndo;
+window.popUndo = popUndo;
+
+// Keyboard shortcut: Ctrl+Z / Cmd+Z — undo the last action. Falls back to the
+// extended ring buffer when there's no live action-toast to click.
 document.addEventListener('keydown',(e)=>{
   if((e.ctrlKey||e.metaKey)&&e.key==='z'&&!e.shiftKey){
     const active=document.activeElement;
@@ -624,10 +1003,230 @@ document.addEventListener('keydown',(e)=>{
       if(btn&&toast?.classList?.contains('show')){
         e.preventDefault();
         btn.click();
+        return;
+      }
+      // Toast already vanished — fall back to the ring buffer.
+      const entry = popUndo();
+      if(entry){
+        e.preventDefault();
+        try{ entry.fn(); }catch(err){ console.warn('[undo] failed', err); }
+        if(typeof showExportToast === 'function') showExportToast('Undone: ' + entry.label);
       }
     }
   }
 },true);
+
+// Global shortcut: Cmd/Ctrl+N (or plain "n" when not focused in a field) →
+// jump to Tasks and focus the new-task input. Matches the muscle memory from
+// Todoist/Things/Notion — quick-capture from any tab without scrolling.
+document.addEventListener('keydown',(e)=>{
+  if(_blockingOverlaysForCmdK && _blockingOverlaysForCmdK()) return;
+  const active = document.activeElement;
+  const tag = active ? active.tagName.toLowerCase() : '';
+  const inField = (tag==='input' || tag==='textarea' || tag==='select' || (active && active.isContentEditable));
+  const isMeta = (e.ctrlKey || e.metaKey);
+  const isShortcut = (isMeta && (e.key==='n' || e.key==='N')) || (!inField && !isMeta && (e.key==='n' || e.key==='N') && !e.altKey && !e.shiftKey);
+  if(!isShortcut) return;
+  // Skip native "new window" only when the meta-N combo would conflict — but
+  // Cmd+N is browser-level "new window" so we must require the focus to NOT
+  // be in a field AND the user to be in the app's primary surface.
+  if(isMeta && tag === 'input') return;
+  e.preventDefault();
+  if(typeof showTab === 'function') showTab('tasks');
+  const inp = document.getElementById('taskInput');
+  if(inp){
+    try{ inp.focus(); inp.select && inp.select(); }catch(_){}
+    inp.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+});
+
+// Global shortcut: "?" (Shift+/) when not in a field → show the keyboard
+// shortcuts cheatsheet. Discoverability: today shortcuts are scattered
+// across the codebase and there's no one place to learn them.
+document.addEventListener('keydown',(e)=>{
+  if(e.key !== '?') return;
+  if(e.ctrlKey || e.metaKey || e.altKey) return;
+  if(_blockingOverlaysForCmdK && _blockingOverlaysForCmdK()) return;
+  const active = document.activeElement;
+  const tag = active ? active.tagName.toLowerCase() : '';
+  if(tag==='input' || tag==='textarea' || tag==='select' || (active && active.isContentEditable)) return;
+  e.preventDefault();
+  if(typeof showShortcutsHelp === 'function') showShortcutsHelp();
+});
+
+function showShortcutsHelp(){
+  const groups = [
+    { title: 'Navigation', items: [
+      ['Ctrl/⌘ + K', 'Open command palette (find tasks, run actions)'],
+      ['Ctrl/⌘ + N or N', 'Focus the new-task input (jumps to Tasks)'],
+      ['1 – 5', 'Switch top-level tab (Tasks / Timer / Tools / Data / Settings)'],
+      ['Shift + D', 'Daily brief card'],
+      ['Esc', 'Close any open modal / palette / sheet'],
+    ]},
+    { title: 'Ask (AI)', items: [
+      ['?', 'Open this shortcuts help (when no field is focused)'],
+      ['? <query>', 'Type at the task input to send to Ask mode'],
+      ['Ctrl/⌘ + K, then toggle Ask', 'Open the chat sheet'],
+      ['Enter', 'Send the current message'],
+      ['↑ / ↓', 'Cycle previous Ask queries in the input'],
+      ['+ New chat', 'Clear conversation context without closing the sheet'],
+    ]},
+    { title: 'Tasks', items: [
+      ['Click a row', 'Open task detail'],
+      ['Click + on a task', 'Add subtask'],
+      ['Long-press a task (touch)', 'Enter bulk-edit mode'],
+      ['Click the status pill', 'Cycle Open → In Progress → Review → Blocked → Done'],
+      ['Type "?" at the start of the input', 'Send the rest to Ask'],
+      ['Paste multiple lines', 'Bulk-import preview'],
+    ]},
+    { title: 'Undo & feedback', items: [
+      ['Ctrl/⌘ + Z', 'Undo last action (extended — works up to 60s)'],
+      ['Click an action toast', 'Undo just that action'],
+    ]},
+    { title: 'Quick-add syntax (in task input)', items: [
+      ['tomorrow / today / next mon', 'Set due date'],
+      ['@urgent @high @normal @low', 'Priority'],
+      ['#tag1 #tag2', 'Tags'],
+      ['!star', 'Mark starred'],
+      ['~daily / ~weekdays / ~weekly / ~monthly', 'Recurrence'],
+    ]},
+  ];
+  // Build modal DOM. Reuses .modal-overlay/.modal classes so it inherits the
+  // existing keyboard-inset and mobile-sheet behaviour.
+  let ov = document.getElementById('shortcutsHelpOverlay');
+  if(ov){ ov.classList.add('open'); return; }
+  ov = document.createElement('div');
+  ov.id = 'shortcutsHelpOverlay';
+  ov.className = 'modal-overlay';
+  const close = () => { ov.classList.remove('open'); setTimeout(() => ov.remove(), 200); };
+  ov.addEventListener('click', (e) => { if(e.target === ov) close(); });
+  const m = document.createElement('div');
+  m.className = 'modal';
+  m.style.maxWidth = '640px';
+  const head = document.createElement('div');
+  head.className = 'modal-head';
+  const h = document.createElement('strong');
+  h.textContent = 'Keyboard shortcuts';
+  head.appendChild(h);
+  const x = document.createElement('button');
+  x.className = 'modal-close';
+  x.textContent = '×';
+  x.title = 'Close';
+  x.setAttribute('aria-label', 'Close shortcuts help');
+  x.onclick = close;
+  head.appendChild(x);
+  const body = document.createElement('div');
+  body.className = 'modal-body';
+  body.style.display = 'grid';
+  body.style.gap = '18px';
+  for(const g of groups){
+    const sec = document.createElement('div');
+    const st = document.createElement('div');
+    st.style.cssText = 'font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:var(--text-3);margin-bottom:8px;font-weight:600';
+    st.textContent = g.title;
+    sec.appendChild(st);
+    const tbl = document.createElement('div');
+    tbl.style.display = 'grid';
+    tbl.style.gridTemplateColumns = 'minmax(140px, max-content) 1fr';
+    tbl.style.gap = '6px 14px';
+    tbl.style.fontSize = '13px';
+    tbl.style.lineHeight = '1.55';
+    for(const [k, v] of g.items){
+      const kEl = document.createElement('kbd');
+      kEl.style.cssText = 'font-family:var(--font-mono,monospace);background:var(--bg-2);border:1px solid var(--border-subtle);padding:2px 8px;border-radius:6px;color:var(--text-1);font-size:12px;white-space:nowrap';
+      kEl.textContent = k;
+      const vEl = document.createElement('span');
+      vEl.style.color = 'var(--text-2)';
+      vEl.textContent = v;
+      tbl.appendChild(kEl);
+      tbl.appendChild(vEl);
+    }
+    sec.appendChild(tbl);
+    body.appendChild(sec);
+  }
+  m.appendChild(head); m.appendChild(body);
+  ov.appendChild(m);
+  document.body.appendChild(ov);
+  requestAnimationFrame(() => ov.classList.add('open'));
+  // Esc closes.
+  const onKey = (e) => { if(e.key === 'Escape'){ close(); document.removeEventListener('keydown', onKey); } };
+  document.addEventListener('keydown', onKey);
+}
+window.showShortcutsHelp = showShortcutsHelp;
+
+// Quick-add syntax cheatsheet — anchored from the "?" button next to the
+// task input. Smaller surface than showShortcutsHelp (single subject, no
+// app-wide cross-section), so we render as a popover positioned beneath
+// the input rather than a modal. Click-outside / Esc dismisses.
+function showQuickAddSyntaxHint(){
+  const existing = document.getElementById('taskSyntaxPopover');
+  if(existing){ existing.remove(); return; }
+  const anchor = document.getElementById('taskSyntaxHintBtn');
+  const input = document.getElementById('taskInput');
+  if(!anchor && !input) return;
+  const pop = document.createElement('div');
+  pop.id = 'taskSyntaxPopover';
+  pop.className = 'task-syntax-popover';
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-label', 'Quick-add syntax cheatsheet');
+  const items = [
+    ['tomorrow / today / next mon', 'Set due date'],
+    ['fri / sat / sun (next occurrence)', 'Day-of-week shortcuts'],
+    ['in 3 days', 'Relative date'],
+    ['@urgent / @high / @normal / @low', 'Priority'],
+    ['#tag1 #tag2', 'Tags (multiple allowed)'],
+    ['!star', 'Mark starred'],
+    ['~daily / ~weekdays / ~weekly / ~monthly', 'Recurrence'],
+    ['? <question>', 'Send the rest to Ask'],
+  ];
+  const head = document.createElement('div'); head.className = 'task-syntax-popover-head';
+  const h = document.createElement('strong'); h.textContent = 'Quick-add syntax';
+  head.appendChild(h);
+  const ex = document.createElement('button');
+  ex.type = 'button'; ex.className = 'task-syntax-popover-close'; ex.textContent = '×';
+  ex.setAttribute('aria-label', 'Close cheatsheet');
+  ex.onclick = () => pop.remove();
+  head.appendChild(ex);
+  pop.appendChild(head);
+  const tbl = document.createElement('div'); tbl.className = 'task-syntax-popover-tbl';
+  for(const [k, v] of items){
+    const kEl = document.createElement('code'); kEl.textContent = k;
+    const vEl = document.createElement('span'); vEl.textContent = v;
+    tbl.appendChild(kEl); tbl.appendChild(vEl);
+  }
+  pop.appendChild(tbl);
+  const ex2 = document.createElement('div');
+  ex2.className = 'task-syntax-popover-example';
+  ex2.innerHTML = 'Example: <code>Buy milk tomorrow @urgent #shopping</code>';
+  pop.appendChild(ex2);
+  document.body.appendChild(pop);
+  // Anchor positioning — beneath the input, right-aligned to its trailing edge
+  // so the "?" button reads as the source. requestAnimationFrame so the
+  // popover dimensions are known before we measure.
+  requestAnimationFrame(() => {
+    const r = (input || anchor).getBoundingClientRect();
+    const pw = pop.offsetWidth;
+    const vw = window.innerWidth;
+    let left = Math.min(r.right - pw, vw - pw - 8);
+    if(left < 8) left = 8;
+    pop.style.left = left + 'px';
+    pop.style.top = (r.bottom + window.scrollY + 6) + 'px';
+  });
+  // Outside-click + Esc close.
+  const off = (e) => {
+    if(!pop.contains(e.target) && e.target !== anchor){
+      pop.remove();
+      document.removeEventListener('mousedown', off, true);
+      document.removeEventListener('keydown', onKey, true);
+    }
+  };
+  const onKey = (e) => { if(e.key === 'Escape'){ pop.remove(); document.removeEventListener('keydown', onKey, true); document.removeEventListener('mousedown', off, true); } };
+  setTimeout(() => {
+    document.addEventListener('mousedown', off, true);
+    document.addEventListener('keydown', onKey, true);
+  }, 50);
+}
+window.showQuickAddSyntaxHint = showQuickAddSyntaxHint;
 
 // ========== THEME TOGGLE ==========
 // Manual toggle wins over OS preference: once the user picks a theme it sticks
@@ -637,6 +1236,124 @@ const _THEME_MANUAL_KEY = 'stupind_theme_manual';
 function _isThemeManual(){
   try{ return localStorage.getItem(_THEME_MANUAL_KEY) === '1'; }catch(_){ return false; }
 }
+// ── Settings navigation: jump-links + inline filter ────────────────────────
+// Click a jump-link → expand the section, scroll into view (accounting for
+// the sticky nav bar's height), and mark the link active. Settings filter
+// hides rows whose label text doesn't match the query so a user can type
+// "notif" and only see notification-related controls across all sections.
+
+function _setNavBarHeight(){
+  const bar = document.querySelector('.set-nav');
+  return bar ? bar.getBoundingClientRect().height : 0;
+}
+function _setActiveJumpLink(id){
+  document.querySelectorAll('.set-nav-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.arg === id);
+  });
+}
+function jumpToSettingsSection(id){
+  const sec = document.getElementById(id);
+  if(!sec) return;
+  // Open the details so the body is in the layout flow before we measure
+  // scroll target. Settings sections are <details>; setting `open` is the
+  // canonical disclosure operation and triggers our ontoggle handlers.
+  try{ sec.open = true; }catch(_){}
+  _setActiveJumpLink(id);
+  // requestAnimationFrame lets the open-state layout settle so getBoundingClientRect
+  // returns the post-expansion position instead of the closed-collapsed one.
+  requestAnimationFrame(() => {
+    const rect = sec.getBoundingClientRect();
+    const offset = _setNavBarHeight() + 8;
+    const top = window.scrollY + rect.top - offset;
+    window.scrollTo({ top, behavior: 'smooth' });
+  });
+}
+window.jumpToSettingsSection = jumpToSettingsSection;
+
+// Filter every .srow by its label text (and a few sibling fragments). Hides
+// the row when nothing matches; hides the whole section when none of its
+// rows match. Empty query restores everything. Survives across re-renders
+// of the dynamic sub-panels (classifications, lists, sync, AI) by being
+// called once after each render via the document.querySelectorAll sweep.
+let _settingsFilterRaf = null;
+function filterSettingsRows(){
+  if(_settingsFilterRaf) cancelAnimationFrame(_settingsFilterRaf);
+  _settingsFilterRaf = requestAnimationFrame(_filterSettingsRowsImmediate);
+}
+function _filterSettingsRowsImmediate(){
+  _settingsFilterRaf = null;
+  const inp = document.getElementById('settingsFilter');
+  const clr = document.getElementById('settingsFilterClear');
+  const q = inp ? inp.value.trim().toLowerCase() : '';
+  if(clr) clr.hidden = !q;
+  const sections = document.querySelectorAll('#settingsBody .set-section');
+  sections.forEach(sec => {
+    if(!q){
+      sec.classList.remove('set-section--hidden');
+      sec.querySelectorAll('.srow').forEach(r => {
+        r.classList.remove('srow--filter-hidden');
+        r.classList.remove('srow--filter-match');
+      });
+      return;
+    }
+    // Auto-open the section so matches are visible without manual expansion.
+    try{ sec.open = true; }catch(_){}
+    let anyMatch = false;
+    sec.querySelectorAll('.srow').forEach(row => {
+      const txt = row.textContent.toLowerCase();
+      const hit = txt.includes(q);
+      row.classList.toggle('srow--filter-hidden', !hit);
+      row.classList.toggle('srow--filter-match', hit);
+      if(hit) anyMatch = true;
+    });
+    // Some sections embed dynamic non-.srow content (classification manager,
+    // lists manager, sync panel, AI settings). Treat the section-body's
+    // textContent as a fallback so a hit on "category labels" or "peer code"
+    // still surfaces the relevant section even without .srow markup.
+    if(!anyMatch){
+      const body = sec.querySelector('.set-section-body');
+      if(body && body.textContent.toLowerCase().includes(q)) anyMatch = true;
+    }
+    sec.classList.toggle('set-section--hidden', !anyMatch);
+  });
+}
+function clearSettingsFilter(){
+  const inp = document.getElementById('settingsFilter');
+  if(inp){ inp.value = ''; }
+  filterSettingsRows();
+  if(inp) inp.focus();
+}
+window.filterSettingsRows = filterSettingsRows;
+window.clearSettingsFilter = clearSettingsFilter;
+
+// When a settings section is opened/closed manually (without a jump-link
+// click) — and when the user scrolls Settings — keep the active jump-link
+// in sync with the section currently in view. Helps the user track where
+// they are in a long Settings page without re-scanning the buttons.
+(function setupSettingsScrollSpy(){
+  if(typeof window === 'undefined' || !('IntersectionObserver' in window)) return;
+  // Wait for DOMContentLoaded so #settingsBody exists.
+  const wire = () => {
+    const sections = document.querySelectorAll('#settingsBody .set-section');
+    if(!sections.length) return;
+    const observer = new IntersectionObserver((entries) => {
+      // Only one section is "active" at a time — the topmost intersecting one.
+      const visible = entries
+        .filter(e => e.isIntersecting)
+        .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+      if(visible.length){
+        _setActiveJumpLink(visible[0].target.id);
+      }
+    }, { rootMargin: '-80px 0px -60% 0px', threshold: 0 });
+    sections.forEach(s => observer.observe(s));
+  };
+  if(document.readyState === 'loading'){
+    document.addEventListener('DOMContentLoaded', wire);
+  } else {
+    wire();
+  }
+})();
+
 function toggleTheme(){
   theme=theme==='dark'?'light':'dark';
   try{ localStorage.setItem(_THEME_MANUAL_KEY, '1'); }catch(_){}
@@ -747,21 +1464,62 @@ function renderTaskItem(t,depth){
     }
     openTaskDetail(t.id)
   };
+  // Keyboard a11y: the row is the primary way to open the task-detail modal.
+  // Without role+tabindex+key handlers, keyboard-only users could only reach
+  // the row's inner buttons (star/play/sub/×) but never the detail view.
+  d.setAttribute('role', 'button');
+  d.setAttribute('tabindex', '0');
+  d.setAttribute('aria-label', (t.name || 'Task') + ' — Enter to open details');
+  d.addEventListener('keydown', function(e){
+    if(e.key !== 'Enter' && e.key !== ' ') return;
+    // Don't intercept when focus is on an inner control — those have their
+    // own key handlers (e.g. Space toggles a button) and we shouldn't
+    // double-fire openTaskDetail underneath them.
+    if(e.target !== d) return;
+    e.preventDefault();
+    if(typeof isBulkMode === 'function' && isBulkMode()){
+      bulkToggleSelect(t.id);
+      d.classList.toggle('task-bulk-selected', _bulkSelectedIds.has(t.id));
+      return;
+    }
+    openTaskDetail(t.id);
+  });
   // Reflect prior bulk selection on re-render
   if(typeof isBulkMode === 'function' && isBulkMode() && typeof _bulkSelectedIds !== 'undefined' && _bulkSelectedIds.has(t.id)){
     d.classList.add('task-bulk-selected');
   }
-  // Swipe-to-complete for touch
+  // Swipe-to-complete + long-press-to-bulk-select for touch. Long-press is
+  // the standard mobile gesture for "select multiple" (Files, Mail, Photos);
+  // hooking it here makes bulk mode discoverable without a desktop palette.
   let touchStartX=0,touchStartY=0,touchCurrentX=0,swiping=false;
+  let _longPressId=null,_longPressFired=false;
   d.addEventListener('touchstart',function(e){
     if(e.target.closest('button')||e.target.closest('input'))return;
     touchStartX=e.touches[0].clientX;touchStartY=e.touches[0].clientY;swiping=false;
+    _longPressFired=false;
+    if(_longPressId){clearTimeout(_longPressId);_longPressId=null}
+    _longPressId=setTimeout(() => {
+      // Long-press only triggers when the finger hasn't moved enough to count
+      // as a swipe. Enters bulk mode and selects this task as the first item.
+      if(swiping) return;
+      _longPressFired=true;
+      haptic(20);
+      if(typeof isBulkMode === 'function' && !isBulkMode() && typeof toggleBulkMode === 'function'){
+        toggleBulkMode();
+      }
+      if(typeof bulkToggleSelect === 'function') bulkToggleSelect(t.id);
+      d.classList.toggle('task-bulk-selected', _bulkSelectedIds && _bulkSelectedIds.has(t.id));
+    }, 500);
   },{passive:true});
   d.addEventListener('touchmove',function(e){
     if(!touchStartX)return;
     touchCurrentX=e.touches[0].clientX;
     const dx=touchCurrentX-touchStartX,dy=e.touches[0].clientY-touchStartY;
     if(!swiping&&Math.abs(dx)>12&&Math.abs(dx)>Math.abs(dy)*1.5)swiping=true;
+    // Movement cancels the long-press timer.
+    if((Math.abs(dx) > 8 || Math.abs(dy) > 8) && _longPressId){
+      clearTimeout(_longPressId); _longPressId = null;
+    }
     if(swiping){
       if(e.cancelable)e.preventDefault();
       d.style.transform='translateX('+dx+'px)';
@@ -770,15 +1528,22 @@ function renderTaskItem(t,depth){
     }
   },{passive:false});
   d.addEventListener('touchend',function(e){
+    if(_longPressId){ clearTimeout(_longPressId); _longPressId = null; }
     const dx=touchCurrentX-touchStartX;
     d.style.transition='transform .2s,background .2s';d.style.transform='';d.style.background='';
+    if(_longPressFired){
+      // Suppress the synthetic click that would otherwise open the detail.
+      e.preventDefault && e.preventDefault();
+      touchStartX=0;touchCurrentX=0;swiping=false;_longPressFired=false;
+      return;
+    }
     if(swiping&&Math.abs(dx)>80){
       haptic(20);
       if(dx>0){toggleTaskDoneQuick(t.id)}
       else{removeTask(t.id)}
     }
     touchStartX=0;touchCurrentX=0;swiping=false;
-  },{passive:true});
+  },{passive:false});
 
   // At rest: due chip (overdue / today / soon only) + subtask progress. Habits view: ↻ + streak. Rest on hover.
   const chevron=kids
@@ -1376,6 +2141,12 @@ async function closeTaskDetail(opts){
   if(_taskModalPrevFocus&&_taskModalPrevFocus.focus)try{_taskModalPrevFocus.focus()}catch(e){}
   _taskModalPrevFocus=null;
   if(typeof _updateActiveTaskTickSchedule==='function')_updateActiveTaskTickSchedule();
+  // If midnight rolled over while the modal was open, the day-rollover
+  // handler deferred (see app.js _isTaskModalOpen). Retry now that the
+  // modal is closed so bookkeeping doesn't wait for the next 60s tick.
+  if(typeof _handleDayRollover === 'function'){
+    try{ _handleDayRollover(); }catch(e){ console.warn('[ui] post-close rollover', e); }
+  }
 }
 
 // ── Bottom-sheet swipe-to-dismiss ──────────────────────────────────────────
@@ -1448,7 +2219,9 @@ function saveTaskDetail(){
     gid('mdCheckbox').classList.remove('checked');gid('mdCheckbox').textContent='';
   }
   t.name=gid('mdName').value.trim()||t.name;
-  t.dueDate=gid('mdDue').value||null;
+  const _newDue = gid('mdDue').value || null;
+  const _dueChanged = _newDue && _newDue !== t.dueDate;
+  t.dueDate = _newDue;
   if(gid('mdSnoozeUntil')) t.hiddenUntil=gid('mdSnoozeUntil').value||null;
   t.startDate=gid('mdStartDate').value||null;
   t.estimateMin=parseInt(gid('mdEstimate').value)||0;
@@ -1456,7 +2229,12 @@ function saveTaskDetail(){
   t.url=gid('mdUrl').value.trim()||null;
   t.completionNote=gid('mdCompletionNote').value.trim()||null;
   const ra=gid('mdRemindAt')?gid('mdRemindAt').value:'';
+  const _remindChanged = ra && ra !== t.remindAt;
   if(ra!==t.remindAt){t.remindAt=ra||null;t.reminderFired=false}
+  // If they set a due date or reminder but the browser's notification
+  // permission is still 'default', a one-shot toast offers to enable it.
+  // Without this, reminders silently never fire and the feature feels broken.
+  if((_dueChanged || _remindChanged) && typeof _maybeNudgeNotifPerm === 'function') _maybeNudgeNotifPerm();
   t.listId=parseInt(gid('mdList').value)||t.listId;
   if(t.status==='done'&&!t.completedAt)t.completedAt=stampCompletion();
   if(t.status!=='done')t.completedAt=null;
@@ -1708,7 +2486,15 @@ document.addEventListener('keydown',e=>{
 function addLog(name,durSec,type){timeLog.unshift({id:++logIdCtr,name,durSec,type,time:timeNow()});renderLog();saveState('user')}
 function removeLog(id){timeLog=timeLog.filter(l=>l.id!==id);renderLog();saveState('user')}
 function renderLog(){const list=gid('logList');list.querySelectorAll('.log-item').forEach(e=>e.remove());if(!timeLog.length){gid('logEmpty').hidden = false;return}gid('logEmpty').hidden = true;timeLog.slice(0,40).forEach(l=>{const d=document.createElement('div');d.className='log-item';const col=l.type==='work'?'var(--work)':l.type==='short'?'var(--short)':l.type==='quick'?'#48b5e0':'var(--long)';const lid=l.id||0;const dot=document.createElement('div');dot.className='log-dot';dot.style.background=col;d.appendChild(dot);const nm=document.createElement('span');nm.className='log-name';nm.textContent=l.name;d.appendChild(nm);const dur=document.createElement('span');dur.className='log-dur';dur.textContent=fmtShort(l.durSec);d.appendChild(dur);const tm=document.createElement('span');tm.className='log-time';tm.textContent=l.time;d.appendChild(tm);if(lid){const del=document.createElement('button');del.className='log-del';del.title='Remove';del.textContent='�';del.onclick=function(){removeLog(lid)};d.appendChild(del)}list.appendChild(d)})}
-function clearLog(){timeLog=[];renderLog();saveState('user')}
+async function clearLog(){
+  if(!timeLog.length) return;
+  const msg = 'Clear ' + timeLog.length + ' time-log entr' + (timeLog.length===1?'y':'ies') + '? This cannot be undone.';
+  if(typeof showAppConfirm === 'function'){
+    if(!(await showAppConfirm(msg))) return;
+  } else if(!confirm(msg)) return;
+  timeLog=[];renderLog();saveState('user');
+}
+window.clearLog = clearLog;
 
 // ========== TAB NAVIGATION ==========
 function showTab(tab){
@@ -1820,6 +2606,25 @@ function miniTimerToggle(){
   else startTimer();
   updateMiniTimer()
 }
+
+// Floating quick-add FAB handler. Jumps to Tasks, scrolls the new-task input
+// into view, focuses it. Same flow as Cmd+N — the FAB is the touch-friendly
+// surface for users who don't have a keyboard handy.
+function quickAddFabClick(){
+  const fab = document.getElementById('quickAddFab');
+  if(fab){ fab.classList.add('flash'); setTimeout(() => fab.classList.remove('flash'), 350); }
+  if(typeof showTab === 'function') showTab('tasks');
+  const inp = document.getElementById('taskInput');
+  if(!inp) return;
+  // Defer a tick so showTab's hidden-attribute toggles have landed before we
+  // try to focus + scroll into view (focus on an inert section is a no-op).
+  requestAnimationFrame(() => {
+    try{ inp.focus(); inp.select && inp.select(); }catch(_){}
+    inp.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+  if(typeof haptic === 'function') haptic(10);
+}
+window.quickAddFabClick = quickAddFabClick;
 
 // ========== STATS ==========
 function renderStats(){

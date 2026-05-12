@@ -77,6 +77,112 @@ function announce(msg){
 }
 function announceTaskAdd(name){announce('Task added: '+(name||'(unnamed)'))}
 window.announce=announce;
+
+// ── Managed setInterval lifecycle ──────────────────────────────────────────
+// Module-init setIntervals can leak when:
+//   (a) a hot script reload (dev) re-runs the module and the second call to
+//       `setInterval(fn, ms)` clobbers the variable reference without
+//       clearing the first handle, or
+//   (b) the browser restores the page from bfcache and certain setIntervals
+//       don't survive the round-trip — re-init then doubles them up.
+// setManagedInterval gives each timer a stable string key; setting a key
+// that already exists clears the previous handle before scheduling the
+// new one, so re-init is idempotent. clearAllManagedIntervals runs on
+// pagehide so a bfcache-restored page starts from a clean slate. Call
+// sites then re-establish their intervals on pageshow if e.persisted.
+(function(){
+  if(typeof window === 'undefined') return;
+  if(!window._managedIntervals) window._managedIntervals = new Map();
+  window.setManagedInterval = function(key, fn, ms){
+    if(typeof key !== 'string' || typeof fn !== 'function') return null;
+    const prev = window._managedIntervals.get(key);
+    if(prev != null){ try{ clearInterval(prev); }catch(_){} }
+    const id = setInterval(fn, ms);
+    window._managedIntervals.set(key, id);
+    return id;
+  };
+  window.clearManagedInterval = function(key){
+    const id = window._managedIntervals.get(key);
+    if(id != null){ try{ clearInterval(id); }catch(_){} window._managedIntervals.delete(key); }
+  };
+  window.clearAllManagedIntervals = function(){
+    for(const [key, id] of window._managedIntervals){
+      try{ clearInterval(id); }catch(_){}
+    }
+    window._managedIntervals.clear();
+  };
+  // pagehide fires both on real navigation away AND on bfcache freeze. We
+  // clear unconditionally — the cost of restarting from scratch on pageshow
+  // is negligible relative to the cost of double-firing every interval for
+  // the remaining session.
+  window.addEventListener('pagehide', () => { try{ window.clearAllManagedIntervals(); }catch(_){} });
+  // bfcache restore: each caller registers a resumer via _onBfcacheRestore.
+  // The handler invokes them so timers reinstate themselves with fresh
+  // setManagedInterval calls (clobber-safe).
+  window._bfcacheResumers = window._bfcacheResumers || [];
+  window.onBfcacheRestore = function(fn){
+    if(typeof fn === 'function') window._bfcacheResumers.push(fn);
+  };
+  window.addEventListener('pageshow', (e) => {
+    if(!e.persisted) return;
+    for(const fn of (window._bfcacheResumers || [])){
+      try{ fn(); }catch(err){ console.warn('[bfcache] resumer failed', err); }
+    }
+  });
+})();
+
+// ── On-screen keyboard inset tracker ────────────────────────────────────────
+// Mobile browsers don't shrink `100vh` / `100dvh` when the soft keyboard
+// appears, so bottom-anchored overlays (cmdK chat, task modal, settings
+// sheets) end up hidden under the keyboard. The VisualViewport API does
+// report the real visible-area shrink — we surface that as CSS variables:
+//   --kb-inset  : pixel height of the keyboard (0 when closed)
+//   --vv-height : pixel height of the visible viewport
+// Plus a body class `kb-open` so individual rules can flip layout when needed
+// (e.g. a sheet that re-pins to the top instead of the bottom).
+//
+// Touching style + class lists on the root only when values actually change
+// keeps the resize handler cheap — it can fire many times per second during
+// keyboard animation.
+(function setupKeyboardInsetTracker(){
+  if(typeof window === 'undefined' || !window.visualViewport) return;
+  const vv = window.visualViewport;
+  const root = document.documentElement;
+  let lastInset = -1, lastVvH = -1, lastClass = false;
+  const update = () => {
+    // offsetTop is non-zero when the page scrolls inside the visual viewport
+    // (e.g. iOS pinch-zoom). Including it ensures kb-inset reflects ONLY the
+    // keyboard region, not the address-bar / zoomed-pan area.
+    const inset = Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop));
+    const vvH = Math.round(vv.height);
+    const open = inset > 80; // ≥80px reliably distinguishes a keyboard from
+                             // address-bar collapse on every mobile we tested
+    if(inset !== lastInset){ root.style.setProperty('--kb-inset', inset + 'px'); lastInset = inset; }
+    if(vvH !== lastVvH){     root.style.setProperty('--vv-height', vvH + 'px'); lastVvH = vvH; }
+    if(open !== lastClass){  root.classList.toggle('kb-open', open); lastClass = open; }
+  };
+  vv.addEventListener('resize', update);
+  vv.addEventListener('scroll', update);
+  // Initial values so CSS doesn't see an undefined custom property and fall
+  // back to the keyword default (which often isn't what the rule expects).
+  update();
+
+  // When an input gains focus inside an overlay, the browser sometimes
+  // doesn't scroll it into view above the keyboard (Safari especially when
+  // the overlay is `position: fixed`). Wait for the visualViewport resize to
+  // settle (one rAF post-event), then nudge the element into view.
+  document.addEventListener('focusin', (e) => {
+    const el = e.target;
+    if(!el || !el.matches) return;
+    if(!el.matches('input, textarea, [contenteditable="true"]')) return;
+    // Skip when the keyboard isn't actually open — avoids unnecessary jumps
+    // on desktop where focusin fires for normal tab navigation.
+    setTimeout(() => {
+      if(!root.classList.contains('kb-open')) return;
+      try{ el.scrollIntoView({ block: 'center', behavior: 'smooth' }); }catch(_){}
+    }, 160);
+  });
+})();
 window.announceTaskAdd=announceTaskAdd;
 
 /**
@@ -89,6 +195,12 @@ window.announceTaskAdd=announceTaskAdd;
  */
 function showActionToast(label, actionLabel, actionFn, ms){
   const ttl = (typeof ms === 'number' && ms > 0) ? ms : 8000;
+  // Mirror the action's undo into the global undo ring so Cmd+Z keeps
+  // working after the toast fades. Only when actionLabel reads as "Undo"
+  // (a "Dismiss" or "Confirm" toast isn't an undoable action).
+  if(actionLabel && typeof actionFn === 'function' && /^\s*undo\b/i.test(String(actionLabel)) && typeof pushUndo === 'function'){
+    try{ pushUndo(label, actionFn); }catch(_){}
+  }
   let host = document.getElementById('actionToast');
   if(!host){
     host = document.createElement('div');

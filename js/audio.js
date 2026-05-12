@@ -5,6 +5,33 @@ const TARG_LBL={pomo:"Pomodoro",quick:"Quick",sw:"Stopwatch"};
 let _audioCtx=null;
 function getAudioCtx(){if(!_audioCtx||_audioCtx.state==='closed')_audioCtx=new(window.AudioContext||window.webkitAudioContext)();if(_audioCtx.state==='suspended')_audioCtx.resume();return _audioCtx}
 
+// Prime the AudioContext on the first user gesture (any pointer/keyboard/touch
+// hit on the document). Chrome/Safari leave the context in a 'suspended' state
+// until a gesture explicitly unlocks it — without this, auto-started focus or
+// break phases (autoWork/autoBreak) silently fail to chime because the resume
+// inside getAudioCtx() runs outside a gesture. Single-shot: removed after first
+// successful prime.
+(function(){
+  if(typeof document === 'undefined') return;
+  let primed = false;
+  const prime = () => {
+    if(primed) return;
+    try{
+      const x = getAudioCtx();
+      if(x && x.state === 'suspended' && typeof x.resume === 'function'){
+        x.resume().catch(()=>{});
+      }
+      primed = true;
+      document.removeEventListener('pointerdown', prime, true);
+      document.removeEventListener('keydown',     prime, true);
+      document.removeEventListener('touchstart',  prime, true);
+    }catch(_){}
+  };
+  document.addEventListener('pointerdown', prime, true);
+  document.addEventListener('keydown',     prime, true);
+  document.addEventListener('touchstart',  prime, true);
+})();
+
 // ========== KEEPALIVE: prevents browser from suspending audio when tab is in background ==========
 // Technique: play a silent audio tone continuously. Browsers keep the tab "active" as long as
 // audio is playing, which means timers, scheduled audio, and notifications continue firing

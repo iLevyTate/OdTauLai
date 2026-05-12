@@ -87,7 +87,15 @@ if ('serviceWorker' in navigator && !window.location.protocol.startsWith('file')
   navigator.serviceWorker.ready.then(reg => {
     // Check for updates every 30 min while app is open
     const _swUpdateMs = (window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.SW_UPDATE_CHECK_MS) || 30 * 60 * 1000;
-    setInterval(() => { try{ reg.update(); }catch(e){} }, _swUpdateMs);
+    const _swUpdateTick = () => { try{ reg.update(); }catch(e){} };
+    if(typeof setManagedInterval === 'function'){
+      setManagedInterval('sw-update', _swUpdateTick, _swUpdateMs);
+      if(typeof onBfcacheRestore === 'function'){
+        onBfcacheRestore(() => setManagedInterval('sw-update', _swUpdateTick, _swUpdateMs));
+      }
+    } else {
+      setInterval(_swUpdateTick, _swUpdateMs);
+    }
 
     // Listen for a new service worker waiting to take over
     const showUpdateBanner = () => {
@@ -507,7 +515,11 @@ setTimeout(() => {
     });
   }catch(_){}
 })();
-setPhaseTime();
+// Only initialise a fresh phase when storage didn't restore one.
+// _timerStateRehydrated is set by _applyState when valid pomoLive is found —
+// otherwise setPhaseTime resets remaining/totalDuration to a full phase and
+// wipes any in-progress focus session the user just reloaded into.
+if(!window._timerStateRehydrated) setPhaseTime();
 if(typeof restoreTaskToolbarPrefs==='function') restoreTaskToolbarPrefs();
 if(typeof refreshClassificationUi==='function') refreshClassificationUi();
 renderAll();
@@ -525,6 +537,36 @@ setTaskView(taskView);
 setSmartView(smartView);
 if(typeof hydrateIcons==='function') hydrateIcons();
 updateMiniTimer();
+
+// Pomodoro post-rehydrate reconciliation. If the timer was running at save
+// time, either resume the tick interval (and re-schedule phase-end audio) or,
+// if the phase would have completed while the tab was closed, fire the
+// completion flow now so the user sees the correct end state rather than a
+// frozen mid-phase display.
+if(window._timerStateRehydrated){
+  try{
+    if(running && remaining > 0){
+      clearInterval(tickId);
+      tickId = setInterval(tick, 250);
+      if(typeof schedulePhaseAudio === 'function' && cfg.sound) schedulePhaseAudio();
+      if(typeof startKeepalive === 'function') startKeepalive();
+      if(typeof _syncRingState === 'function') _syncRingState();
+      if(typeof renderCtrls === 'function') renderCtrls();
+    } else if(window._timerNeedsCompletion && typeof onPhaseComplete === 'function'){
+      // Phase ended while away — run the completion flow once. running was
+      // already cleared in _applyState; onPhaseComplete handles the rest
+      // (pip update, log entry, optional auto-advance).
+      running = false;
+      remaining = 0;
+      try{ onPhaseComplete(); }catch(e){ console.warn('[app] onPhaseComplete on rehydrate', e); }
+      window._timerNeedsCompletion = false;
+    } else {
+      // Paused mid-phase — just refresh the display so the ring and digits
+      // show the correct remaining time instead of a stale full phase.
+      if(typeof renderTimerChrome === 'function') renderTimerChrome();
+    }
+  }catch(e){ console.warn('[app] timer rehydrate reconcile', e); }
+}
 // Apply saved active tab without scroll
 document.querySelectorAll('[data-tab]').forEach(el=>{el.hidden = !(el.dataset.tab===activeTab)});
 document.querySelectorAll('.nav-tab').forEach(el=>{const on=el.dataset.navtab===activeTab;el.classList.toggle('active',on);el.setAttribute('aria-selected',on?'true':'false')});
@@ -544,7 +586,14 @@ if(activeTab==='settings'){
   const okIc = (window.icon && window.icon('checkCircle', {size:13})) || '';
   const warnIc = (window.icon && window.icon('alertTriangle', {size:13})) || '';
   if(isStandalone){status.innerHTML=okIc+' Running as app';return}
-  if(location.protocol==='file:'){status.innerHTML=warnIc+' Served via file:// — host over HTTP to install';return}
+  if(location.protocol==='file:'){
+    // Clarify the implication: file:// works as a portable snapshot but the
+    // browser refuses to register a service worker over that scheme, so
+    // there's no offline cache regardless of browser support. Don't blame
+    // the browser — point at the protocol.
+    status.innerHTML = warnIc + ' Served via file:// — Install + offline cache require HTTP(S).';
+    return;
+  }
   if(!('serviceWorker' in navigator)){status.textContent='Browser does not support PWA';return}
   setTimeout(()=>{
     if(window._swRegistered===false){ status.textContent='Offline cache unavailable in this browser'; return; }
@@ -557,10 +606,44 @@ if(activeTab==='settings'){
 // the 10s auto-save overwrites s.date to today before this check runs, which
 // swallowed the rollover for continuously-open tabs.)
 let _lastKnownDate = (typeof todayKey === 'function') ? todayKey() : null;
+// When rollover wants to fire but the user is mid-edit in the task modal,
+// we defer up to MAX_DEFER_MS so:
+//   (a) the "Crossed midnight" toast doesn't slide over their typing,
+//   (b) the renderAll sweep doesn't tear down the list while a row in it
+//       is the modal's anchor, and
+//   (c) any timer-bound side effects (pauseTimer, day-counter reset) wait
+//       until the user closes the modal.
+// Past the cap we proceed anyway — bookkeeping has to happen at some
+// point. _pendingRolloverSince timestamps the first deferred attempt so
+// the cap is measured from the actual midnight boundary, not from "now".
+const _ROLLOVER_MODAL_MAX_DEFER_MS = 30 * 60 * 1000; // 30 minutes
+let _pendingRolloverSince = 0;
+function _isTaskModalOpen(){
+  const m = (typeof document !== 'undefined') ? document.getElementById('taskModal') : null;
+  return !!(m && m.classList && m.classList.contains('open'));
+}
 function _handleDayRollover(){
   try{
     const today = (typeof todayKey === 'function') ? todayKey() : null;
-    if(!today || !_lastKnownDate || today === _lastKnownDate) return;
+    if(!today || !_lastKnownDate || today === _lastKnownDate){
+      // Clear any defer marker — we're in sync.
+      _pendingRolloverSince = 0;
+      return;
+    }
+    // Modal-mid-edit guard. Skip this tick if the user is editing AND
+    // we haven't exceeded the max defer window. The next 60s tick (or
+    // the modal-close hook) will retry. Force-proceed past the cap so
+    // an indefinitely-open modal doesn't permanently block bookkeeping.
+    if(_isTaskModalOpen()){
+      if(!_pendingRolloverSince) _pendingRolloverSince = Date.now();
+      const deferredFor = Date.now() - _pendingRolloverSince;
+      if(deferredFor < _ROLLOVER_MODAL_MAX_DEFER_MS){
+        return;
+      }
+      // Past the cap — fall through. Log so the proceed isn't invisible.
+      console.warn('[app] day rollover proceeding despite open modal after', Math.round(deferredFor / 1000), 's');
+    }
+    _pendingRolloverSince = 0;
     // If a Pomodoro is mid-flight when the calendar flips over, the existing
     // tick() will land its phase completion on today and split the session
     // across two archive entries. Pause first so pauseTimer's accounting
@@ -596,7 +679,14 @@ function _handleDayRollover(){
   }catch(e){ console.warn('[app] day rollover', e); }
 }
 // Check every minute while the tab is alive…
-setInterval(_handleDayRollover, 60 * 1000);
+if(typeof setManagedInterval === 'function'){
+  setManagedInterval('day-rollover', _handleDayRollover, 60 * 1000);
+  if(typeof onBfcacheRestore === 'function'){
+    onBfcacheRestore(() => setManagedInterval('day-rollover', _handleDayRollover, 60 * 1000));
+  }
+} else {
+  setInterval(_handleDayRollover, 60 * 1000);
+}
 // …and again whenever the tab regains focus (backgrounded phones/laptops
 // often suspend setInterval for hours, so this covers the common case).
 document.addEventListener('visibilitychange', () => {
