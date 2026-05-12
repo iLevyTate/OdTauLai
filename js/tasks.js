@@ -1693,57 +1693,205 @@ function _opsActive(ops){
   return false;
 }
 
-// Visualise the parsed search operators as removable chips below the search
-// input. Without this the user types `tag:work` and has to remember they did
-// so — and has no way to remove just that operator without retyping the
-// whole query. Click an X on a pill to drop that single operator.
-function renderSearchOpPills(){
-  const host = gid('taskSearchPills');
+// Build a single removable chip — used by renderActiveFilters for every
+// filter source so the bar reads as one consistent row of pills.
+function _afChip(cls, labelText, ariaText, onRemove){
+  const pill = document.createElement('span');
+  pill.className = 'qpc ' + (cls || 'qpc--filter');
+  const lbl = document.createElement('span');
+  lbl.textContent = labelText;
+  pill.appendChild(lbl);
+  if(typeof onRemove === 'function'){
+    const rm = document.createElement('button');
+    rm.type = 'button';
+    rm.className = 'qpc-rm';
+    rm.title = 'Remove ' + (ariaText || labelText);
+    rm.setAttribute('aria-label', 'Remove ' + (ariaText || labelText));
+    rm.textContent = '×';
+    rm.onclick = onRemove;
+    pill.appendChild(rm);
+  }
+  return pill;
+}
+
+// Strip a search-operator token (and its shorthand variant) from the live
+// taskSearch input value, then re-run filtering. Shared by the operator
+// chips so each one knows how to remove just itself.
+function _afStripOperatorFromInput(key, value){
+  const inp = gid('taskSearch');
+  if(!inp) return;
+  const escVal = String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const patterns = [ new RegExp('\\b' + key + ':"?' + escVal + '"?\\s*', 'gi') ];
+  if(key === 'tag')      patterns.push(new RegExp('#' + escVal + '\\b\\s*', 'gi'));
+  if(key === 'priority') patterns.push(new RegExp('@' + escVal + '\\b\\s*', 'gi'));
+  let next = inp.value;
+  for(const p of patterns) next = next.replace(p, '');
+  inp.value = next.replace(/\s+/g, ' ').trim();
+  updateTaskFilters();
+  renderTaskList();
+}
+
+// Unified "active filters" bar. Renders ONE chip per active filter from
+// every source (smart view, active list, free-text search, search
+// operators, filter-panel status/priority/category). Each chip's × clears
+// just that filter; a "Clear all" button appears when ≥2 filters are
+// active. Self-hides when nothing is active.
+function renderActiveFilters(){
+  const host = gid('activeFiltersBar');
   if(!host) return;
-  const ops = taskFilters.ops || {};
-  const active = _opsActive(ops);
-  if(!active){ host.hidden = true; host.replaceChildren(); return; }
   host.replaceChildren();
-  host.hidden = false;
-  const order = ['is', 'tag', 'list', 'priority', 'due', 'status'];
-  const labels = { is: 'is', tag: 'tag', list: 'list', priority: 'priority', due: 'due', status: 'status' };
-  for(const key of order){
+  const chips = [];
+
+  // Smart view (anything other than 'all' is an active narrowing).
+  if(typeof smartView !== 'undefined' && smartView && smartView !== 'all'){
+    const labelMap = {
+      inbox:'Inbox', today:'Today', week:'This week', overdue:'Overdue',
+      unscheduled:'Unscheduled', starred:'Starred', impact:'Impact',
+      waiting:'Waiting', stuck:'Stuck', snoozed:'Snoozed',
+      habits:'Habits', completed:'Done', archived:'Archive',
+    };
+    const label = labelMap[smartView] || smartView;
+    chips.push(_afChip('qpc--view', 'View: ' + label, 'view ' + label,
+      () => { if(typeof setSmartView === 'function') setSmartView('all'); }));
+  }
+
+  // Free-text search residue (after operator stripping).
+  if(taskFilters.search){
+    const txt = taskFilters.search.length > 32 ? taskFilters.search.slice(0, 30) + '…' : taskFilters.search;
+    chips.push(_afChip('qpc--search', '“' + txt + '”', 'search ' + txt,
+      () => {
+        const inp = gid('taskSearch');
+        if(!inp) return;
+        // Strip everything that ISN'T an operator token — leave operators
+        // (tag:foo, #x, @y, key:val) in place so the user doesn't lose
+        // them when clearing just the free-text portion.
+        const opRe = /(\w+:("[^"]+"|'[^']+'|\S+))|#\S+|@\S+/g;
+        const kept = (inp.value.match(opRe) || []).join(' ');
+        inp.value = kept;
+        updateTaskFilters();
+        renderTaskList();
+      }));
+  }
+
+  // Search operators (tag/list/is/priority/due/status). Skip ops.priority
+  // when the filter-panel priority dropdown is non-'all' to avoid showing
+  // two chips for the same effective filter.
+  const ops = taskFilters.ops || {};
+  const opOrder = ['is', 'tag', 'list', 'priority', 'due', 'status'];
+  const opLabels = { is:'is', tag:'tag', list:'list', priority:'priority', due:'due', status:'status' };
+  for(const key of opOrder){
     const vals = ops[key];
     if(!vals || !vals.length) continue;
     for(const v of vals){
-      const pill = document.createElement('span');
-      pill.className = 'qpc qpc--filter';
-      const label = document.createElement('span');
-      label.textContent = labels[key] + ':' + v;
-      pill.appendChild(label);
-      const rm = document.createElement('button');
-      rm.type = 'button';
-      rm.className = 'qpc-rm';
-      rm.title = 'Remove ' + labels[key] + ':' + v;
-      rm.setAttribute('aria-label', 'Remove ' + labels[key] + ':' + v);
-      rm.textContent = '×';
-      rm.onclick = () => {
-        // Strip the matching token (and the shorthand variant) from the
-        // input, then re-trigger filter update so everything stays in sync.
-        const inp = gid('taskSearch');
-        if(!inp) return;
-        const escVal = v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const patterns = [
-          new RegExp('\\b' + labels[key] + ':"?' + escVal + '"?\\s*', 'gi'),
-        ];
-        if(key === 'tag')      patterns.push(new RegExp('#' + escVal + '\\b\\s*', 'gi'));
-        if(key === 'priority') patterns.push(new RegExp('@' + escVal + '\\b\\s*', 'gi'));
-        let next = inp.value;
-        for(const p of patterns) next = next.replace(p, '');
-        inp.value = next.replace(/\s+/g, ' ').trim();
-        updateTaskFilters();
-        renderTaskList();
-      };
-      pill.appendChild(rm);
-      host.appendChild(pill);
+      chips.push(_afChip('qpc--filter', opLabels[key] + ':' + v, opLabels[key] + ' ' + v,
+        () => _afStripOperatorFromInput(key, v)));
     }
   }
+
+  // Filter-panel status (anything other than 'all').
+  if(taskFilters.status && taskFilters.status !== 'all'){
+    const sLabel = taskFilters.status === 'active' ? 'Active' :
+      (typeof STATUSES === 'object' && STATUSES && STATUSES[taskFilters.status] && STATUSES[taskFilters.status].label) || taskFilters.status;
+    chips.push(_afChip('qpc--accent', 'status: ' + sLabel, 'status filter',
+      () => {
+        const sel = gid('filterStatus'); if(sel) sel.value = 'all';
+        if(typeof updateTaskFilters === 'function') updateTaskFilters();
+        renderTaskList();
+      }));
+  }
+  // Filter-panel priority.
+  if(taskFilters.priority && taskFilters.priority !== 'all'){
+    chips.push(_afChip('qpc--accent', 'priority: ' + taskFilters.priority, 'priority filter',
+      () => {
+        const sel = gid('filterPriority'); if(sel) sel.value = 'all';
+        if(typeof updateTaskFilters === 'function') updateTaskFilters();
+        renderTaskList();
+      }));
+  }
+  // Filter-panel category.
+  if(taskFilters.category && taskFilters.category !== 'all'){
+    let catLabel = taskFilters.category;
+    if(typeof getCategoryDef === 'function'){
+      const d = getCategoryDef(taskFilters.category);
+      if(d && d.label) catLabel = d.label;
+    }
+    chips.push(_afChip('qpc--tag', 'category: ' + catLabel, 'category filter',
+      () => {
+        if(typeof setFilterCategory === 'function') setFilterCategory('all');
+        else {
+          const sel = gid('filterCategory'); if(sel) sel.value = 'all';
+          if(typeof updateTaskFilters === 'function') updateTaskFilters();
+        }
+        renderTaskList();
+      }));
+  }
+  // Active list (non-default + on a list-sensitive smart view).
+  if(typeof activeListId !== 'undefined' && activeListId && Array.isArray(lists) && lists.length > 1){
+    const listSensitiveViews = ['all','inbox','waiting','stuck'];
+    const isListSensitive = listSensitiveViews.includes(smartView) ||
+      (typeof cfg === 'object' && cfg && cfg.focusListMode);
+    if(isListSensitive){
+      const l = lists.find(x => x.id === activeListId);
+      if(l){
+        // Only chip if the user has explicitly chosen something — show the
+        // chip whenever multiple lists exist so they can switch without
+        // hunting through the lists strip.
+        chips.push(_afChip('qpc--list', 'list: ' + (l.name || ''), 'list ' + (l.name || ''),
+          () => {
+            // Removing the list chip toggles focus-list mode off AND clears
+            // the active filter by switching to the first available list
+            // is not really "clearing" — but the user expectation is the
+            // list narrowing goes away. Easiest: turn off focusListMode so
+            // every list shows; the active list pointer stays but the
+            // filter doesn't apply in list-sensitive views.
+            if(typeof cfg === 'object' && cfg) cfg.focusListMode = false;
+            try{ document.body.classList.remove('app-focus-list'); }catch(_){}
+            if(typeof renderTaskList === 'function') renderTaskList();
+            if(typeof saveState === 'function') saveState('user');
+          }));
+      }
+    }
+  }
+
+  if(!chips.length){ host.hidden = true; return; }
+  host.hidden = false;
+
+  const lbl = document.createElement('span');
+  lbl.className = 'af-label';
+  lbl.textContent = 'Filters';
+  host.appendChild(lbl);
+  for(const c of chips) host.appendChild(c);
+
+  if(chips.length >= 2){
+    const clearAll = document.createElement('button');
+    clearAll.type = 'button';
+    clearAll.className = 'af-clear-all';
+    clearAll.textContent = 'Clear all';
+    clearAll.title = 'Reset every active filter';
+    clearAll.onclick = () => {
+      // Reset every filter source in turn. Smart view returns to 'all'
+      // which itself triggers renderTaskList; we still clobber the search
+      // input and the filter-panel selects explicitly so the user sees
+      // them empty too.
+      const inp = gid('taskSearch'); if(inp) inp.value = '';
+      const fS = gid('filterStatus');    if(fS) fS.value = 'all';
+      const fP = gid('filterPriority');  if(fP) fP.value = 'all';
+      const fC = gid('filterCategory');  if(fC) fC.value = 'all';
+      if(typeof cfg === 'object' && cfg) cfg.focusListMode = false;
+      try{ document.body.classList.remove('app-focus-list'); }catch(_){}
+      if(typeof setSmartView === 'function') setSmartView('all');
+      if(typeof updateTaskFilters === 'function') updateTaskFilters();
+      renderTaskList();
+    };
+    host.appendChild(clearAll);
+  }
 }
+if(typeof window !== 'undefined') window.renderActiveFilters = renderActiveFilters;
+
+// Back-compat shim — older call sites still invoke renderSearchOpPills.
+// Route them through the unified renderActiveFilters so we keep one render
+// path and one source of truth.
+function renderSearchOpPills(){ if(typeof renderActiveFilters === 'function') renderActiveFilters(); }
 if(typeof window !== 'undefined') window.renderSearchOpPills = renderSearchOpPills;
 
 function updateTaskFilters(){
@@ -2274,6 +2422,9 @@ function renderTaskList(){
   if(!list)return;
   // Refresh the momentum tile every render — cheap and always correct.
   if(typeof renderDailyMomentum === 'function') renderDailyMomentum();
+  // Same for the unified active-filters bar so a smart-view change /
+  // list switch / status filter etc. always updates the chips.
+  if(typeof renderActiveFilters === 'function') renderActiveFilters();
   // Apply density class — exactly one of the three modifiers is active.
   if(list){
     const _d = (typeof getCardDensity==='function' ? getCardDensity() : 'cozy');

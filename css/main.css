@@ -1027,6 +1027,36 @@
   .qpc-rm:hover{opacity:1;background:rgba(255,255,255,.12)}
   .task-search-pills{display:flex;flex-wrap:wrap;gap:6px;padding:6px 0 2px}
 
+  /* Unified active-filter bar — one row, one source of truth for every
+     filter currently narrowing the visible task list. Sits between the
+     search row and the view-toggle / Filters button. */
+  .active-filters-bar{
+    display:flex;flex-wrap:wrap;gap:6px;align-items:center;
+    padding:8px 10px;margin:6px 0 0;
+    background:var(--bg-1);border:1px solid var(--border-subtle);border-radius:8px;
+    font-size:12px;
+  }
+  .active-filters-bar[hidden]{display:none}
+  .active-filters-bar .qpc{cursor:default}
+  .active-filters-bar .qpc-rm{cursor:pointer}
+  .active-filters-bar .af-label{
+    color:var(--text-3);font-size:11px;letter-spacing:.4px;text-transform:uppercase;
+    font-weight:600;margin-right:2px;
+  }
+  .active-filters-bar .af-clear-all{
+    appearance:none;background:transparent;border:1px solid var(--border-subtle);
+    color:var(--text-2);font:inherit;font-size:11px;font-weight:500;
+    padding:3px 10px;border-radius:999px;cursor:pointer;margin-left:auto;
+    transition:color .15s,border-color .15s,background .15s;
+  }
+  .active-filters-bar .af-clear-all:hover{color:var(--text-1);border-color:var(--text-3);background:rgba(255,255,255,.04)}
+  /* Chip variants per filter source, all using the same dot-pill shape
+     so the bar reads consistently regardless of which surface added the
+     filter. Hue distinguishes the source at a glance. */
+  .qpc--view  {background:var(--accent-bg); border-color:var(--accent-border); color:var(--accent)}
+  .qpc--list  {background:var(--success-bg,rgba(46,204,113,.12));border-color:var(--success-border,rgba(46,204,113,.3));color:var(--success,#2ecc71)}
+  .qpc--search{background:var(--bg-2);     border-color:var(--border);        color:var(--text-2)}
+
   /* Daily momentum tile — top of the Tasks panel. Three slots: progress
      ring (done / total due today), streak (consecutive days with ≥1 done
      task), and a 7-day sparkline of completions. Compact horizontal row on

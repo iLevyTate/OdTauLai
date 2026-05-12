@@ -275,8 +275,16 @@
               <input type="checkbox" id="taskSearchSemantic" data-onchange="toggleTaskSearchSemantic"> Semantic
             </label>
           </div>
-          <div class="task-search-pills" id="taskSearchPills" hidden aria-live="polite"></div>
         </div>
+
+        <!-- Unified active-filter bar. Single source of truth for every
+             filter currently narrowing the list: smart view, active list,
+             search text, search operators (tag/list/is/...), and the
+             filter-panel status/priority/category selections. Each chip
+             has an inline × to clear just that filter; the bar self-hides
+             when nothing is active. Replaces the previous separate
+             "operator pills" row — one row to scan, one place to clear. -->
+        <div class="active-filters-bar" id="activeFiltersBar" hidden aria-live="polite"></div>
 
         <!-- Compact control bar: view toggle + filters button -->
         <div class="task-controlbar">
