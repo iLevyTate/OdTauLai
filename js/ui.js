@@ -2389,6 +2389,25 @@ function miniTimerToggle(){
   updateMiniTimer()
 }
 
+// Floating quick-add FAB handler. Jumps to Tasks, scrolls the new-task input
+// into view, focuses it. Same flow as Cmd+N — the FAB is the touch-friendly
+// surface for users who don't have a keyboard handy.
+function quickAddFabClick(){
+  const fab = document.getElementById('quickAddFab');
+  if(fab){ fab.classList.add('flash'); setTimeout(() => fab.classList.remove('flash'), 350); }
+  if(typeof showTab === 'function') showTab('tasks');
+  const inp = document.getElementById('taskInput');
+  if(!inp) return;
+  // Defer a tick so showTab's hidden-attribute toggles have landed before we
+  // try to focus + scroll into view (focus on an inert section is a no-op).
+  requestAnimationFrame(() => {
+    try{ inp.focus(); inp.select && inp.select(); }catch(_){}
+    inp.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+  if(typeof haptic === 'function') haptic(10);
+}
+window.quickAddFabClick = quickAddFabClick;
+
 // ========== STATS ==========
 function renderStats(){
   gid('statPomos').textContent=totalPomos;

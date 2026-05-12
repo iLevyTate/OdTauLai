@@ -168,6 +168,12 @@
       <span class="scnt" id="taskCountBadge">0 active</span>
     </div>
 
+    <!-- Daily progress + streak summary. Renders momentum signals at the top
+         of the Tasks panel so the user sees their daily completion rate and
+         their consecutive-day streak without hunting through Cmd+K. JS owns
+         the content; hidden until renderDailyMomentum populates it. -->
+    <div class="daily-momentum" id="dailyMomentum" hidden aria-live="polite"></div>
+
     <!-- Add task form: TOP — primary action -->
     <div class="task-form">
       <label class="sr-only" for="taskInput">New task</label>
@@ -689,6 +695,13 @@
   <button class="mt-btn mt-play" id="mtToggle" aria-label="Play or pause focus timer" data-action="miniTimerToggle">▶</button>
   <div class="mt-open" id="mtTaskHint" hidden>⇢ open</div>
 </div>
+
+<!-- Floating Quick-Add button (mobile / touch). Always-on quick capture so a
+     user on Timer / Tools / Settings can drop a task without scrolling or
+     tab-hunting. Hidden on desktop — Cmd/Ctrl+N covers that case. -->
+<button type="button" id="quickAddFab" class="quick-add-fab" aria-label="Add task" title="Add task (N)" data-action="quickAddFabClick">
+  <span class="quick-add-fab-icon" aria-hidden="true">+</span>
+</button>
 
 <!-- What next? overlay -->
 <div id="whatNextOverlay" class="what-next-overlay" hidden data-action="closeWhatNextOnBackdrop">

@@ -2141,9 +2141,139 @@ function renderSmartViewCounts(){
 }
 
 // Main render (list view)
+// ── Daily momentum (progress ring + streak + 7-day sparkline) ──────────────
+// Cheap to compute and called from renderTaskList so it always reflects the
+// current task state without a separate change feed. All work is O(N over
+// non-archived tasks) — fine for the bounded list sizes the app supports.
+function _ymd(d){
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function _dailyMomentumStats(){
+  const today = (typeof todayISO === 'function') ? todayISO() : _ymd(new Date());
+  // Today: open tasks due today (or earlier) + tasks completed today.
+  let dueToday = 0, doneToday = 0;
+  // 7-day completion histogram (oldest → newest including today).
+  const days = [];
+  const dayKeys = [];
+  for(let i = 6; i >= 0; i--){
+    const d = new Date(); d.setDate(d.getDate() - i);
+    dayKeys.push(_ymd(d));
+    days.push(0);
+  }
+  // Per-day completed-count set for streak math.
+  const completedDays = new Set();
+  for(const t of tasks){
+    if(!t || t.archived) continue;
+    if(t.status === 'done'){
+      const k = (typeof completionDateKey === 'function') ? completionDateKey(t.completedAt) : null;
+      if(k){
+        completedDays.add(k);
+        const idx = dayKeys.indexOf(k);
+        if(idx >= 0) days[idx] += 1;
+        if(k === today) doneToday += 1;
+      }
+    } else {
+      // Counts toward today's "due" denominator only if it's due today (or overdue but still open).
+      if(t.dueDate && t.dueDate <= today) dueToday += 1;
+    }
+  }
+  // Streak: walk backwards from today while each day has ≥1 completion.
+  // Today not yet completed doesn't break a streak that ran through
+  // yesterday — we treat today as "in progress" so the user isn't punished
+  // for opening the app at 9am before finishing anything.
+  let streak = 0;
+  const d = new Date();
+  if(!completedDays.has(today)) d.setDate(d.getDate() - 1);
+  while(completedDays.has(_ymd(d))){
+    streak += 1;
+    d.setDate(d.getDate() - 1);
+  }
+  const total = dueToday + doneToday;
+  const pct = total > 0 ? Math.round((doneToday / total) * 100) : 0;
+  return { dueToday, doneToday, total, pct, streak, days, dayKeys, today };
+}
+function renderDailyMomentum(){
+  const host = gid('dailyMomentum');
+  if(!host) return;
+  // Hide on Archive smart view — momentum doesn't make sense there. Also
+  // hide while the welcome card is up (no tasks yet — no momentum to show).
+  if(!Array.isArray(tasks) || !tasks.length){ host.hidden = true; host.replaceChildren(); return; }
+  if(smartView === 'archived'){ host.hidden = true; return; }
+  const s = _dailyMomentumStats();
+  host.hidden = false;
+  host.replaceChildren();
+  const mkCell = (cls, label, valueText, valueClass, onClick, ariaLabel) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'dm-cell';
+    if(onClick) b.onclick = onClick;
+    if(ariaLabel) b.setAttribute('aria-label', ariaLabel);
+    const inner = document.createElement('div');
+    inner.style.display = 'flex'; inner.style.flexDirection = 'column'; inner.style.gap = '2px'; inner.style.alignItems = 'flex-start';
+    const lbl = document.createElement('span'); lbl.className = 'dm-cell-label'; lbl.textContent = label;
+    const val = document.createElement('span'); val.className = 'dm-cell-value' + (valueClass ? ' ' + valueClass : ''); val.textContent = valueText;
+    inner.appendChild(lbl); inner.appendChild(val);
+    b.appendChild(inner);
+    return b;
+  };
+  // Progress ring (today). Tappable → switch to Today smart view.
+  const ringWrap = document.createElement('button');
+  ringWrap.type = 'button';
+  ringWrap.className = 'dm-cell';
+  ringWrap.setAttribute('aria-label', s.doneToday + ' of ' + s.total + ' tasks done today');
+  ringWrap.onclick = () => { if(typeof setSmartView === 'function') setSmartView('today'); };
+  const ring = document.createElement('div'); ring.className = 'dm-ring';
+  const r = 14, c = 2 * Math.PI * r;
+  ring.innerHTML = '<svg viewBox="0 0 36 36"><circle class="dm-ring-bg" cx="18" cy="18" r="' + r + '"/><circle class="dm-ring-fg" cx="18" cy="18" r="' + r + '" stroke-dasharray="' + c.toFixed(2) + '" stroke-dashoffset="' + (c - (c * s.pct / 100)).toFixed(2) + '"/></svg>';
+  const txt = document.createElement('div'); txt.className = 'dm-ring-text'; txt.textContent = s.pct + '%';
+  ring.appendChild(txt);
+  ringWrap.appendChild(ring);
+  const ringMeta = document.createElement('div');
+  ringMeta.style.display = 'flex'; ringMeta.style.flexDirection = 'column'; ringMeta.style.alignItems = 'flex-start';
+  const ringLbl = document.createElement('span'); ringLbl.className = 'dm-cell-label'; ringLbl.textContent = 'Today';
+  const ringVal = document.createElement('span'); ringVal.className = 'dm-cell-value';
+  ringVal.textContent = s.doneToday + ' / ' + s.total;
+  ringMeta.appendChild(ringLbl); ringMeta.appendChild(ringVal);
+  ringWrap.appendChild(ringMeta);
+  host.appendChild(ringWrap);
+
+  // Streak (consecutive days with ≥1 completion).
+  const streakCls = s.streak >= 7 ? 'dm-cell-value--success' : (s.streak >= 1 ? 'dm-cell-value--accent' : '');
+  const streakLabel = s.streak === 0 ? '—' : (s.streak + ' day' + (s.streak !== 1 ? 's' : ''));
+  host.appendChild(mkCell('streak', 'Streak', streakLabel, streakCls,
+    () => { if(typeof setSmartView === 'function') setSmartView('completed'); },
+    'Current completion streak: ' + s.streak + ' day' + (s.streak !== 1 ? 's' : '')));
+
+  // 7-day sparkline of completions.
+  const sparkCell = document.createElement('button');
+  sparkCell.type = 'button';
+  sparkCell.className = 'dm-cell';
+  sparkCell.setAttribute('aria-label', '7-day completion sparkline');
+  sparkCell.onclick = () => { if(typeof setSmartView === 'function') setSmartView('completed'); };
+  const sparkMeta = document.createElement('div');
+  sparkMeta.style.display = 'flex'; sparkMeta.style.flexDirection = 'column'; sparkMeta.style.alignItems = 'flex-start'; sparkMeta.style.gap = '2px';
+  const sparkLbl = document.createElement('span'); sparkLbl.className = 'dm-cell-label'; sparkLbl.textContent = 'Last 7 days';
+  const spark = document.createElement('div'); spark.className = 'dm-spark';
+  const max = Math.max(1, ...s.days);
+  s.days.forEach((n, i) => {
+    const bar = document.createElement('div');
+    bar.className = 'dm-spark-bar' + (n === 0 ? ' dm-spark-bar--zero' : '');
+    bar.style.height = (4 + Math.round((n / max) * 24)) + 'px';
+    bar.title = s.dayKeys[i] + ' — ' + n + ' done';
+    spark.appendChild(bar);
+  });
+  sparkMeta.appendChild(sparkLbl);
+  sparkMeta.appendChild(spark);
+  sparkCell.appendChild(sparkMeta);
+  host.appendChild(sparkCell);
+}
+if(typeof window !== 'undefined') window.renderDailyMomentum = renderDailyMomentum;
+
 function renderTaskList(){
   const list=gid('taskList');
   if(!list)return;
+  // Refresh the momentum tile every render — cheap and always correct.
+  if(typeof renderDailyMomentum === 'function') renderDailyMomentum();
   // Apply density class — exactly one of the three modifiers is active.
   if(list){
     const _d = (typeof getCardDensity==='function' ? getCardDensity() : 'cozy');
