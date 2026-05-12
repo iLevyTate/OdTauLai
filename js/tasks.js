@@ -1207,10 +1207,16 @@ function _maybeNudgeNotifPerm(){
   }catch(_){}
 }
 window._maybeNudgeNotifPerm = _maybeNudgeNotifPerm;
-// Check reminders every 30s (guarded against double-init)
-let _reminderIntervalId = null;
-if (_reminderIntervalId) clearInterval(_reminderIntervalId);
-_reminderIntervalId = setInterval(checkReminders, 30000);
+// Check reminders every 30s. Managed so a bfcache restore reinstates the
+// loop cleanly and a hot-reload doesn't pile up duplicate tickers.
+if(typeof setManagedInterval === 'function'){
+  setManagedInterval('reminders', checkReminders, 30000);
+  if(typeof onBfcacheRestore === 'function'){
+    onBfcacheRestore(() => setManagedInterval('reminders', checkReminders, 30000));
+  }
+} else {
+  setInterval(checkReminders, 30000);
+}
 // And once on load
 setTimeout(checkReminders, 1000);
 

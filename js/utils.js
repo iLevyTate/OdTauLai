@@ -78,6 +78,59 @@ function announce(msg){
 function announceTaskAdd(name){announce('Task added: '+(name||'(unnamed)'))}
 window.announce=announce;
 
+// ── Managed setInterval lifecycle ──────────────────────────────────────────
+// Module-init setIntervals can leak when:
+//   (a) a hot script reload (dev) re-runs the module and the second call to
+//       `setInterval(fn, ms)` clobbers the variable reference without
+//       clearing the first handle, or
+//   (b) the browser restores the page from bfcache and certain setIntervals
+//       don't survive the round-trip — re-init then doubles them up.
+// setManagedInterval gives each timer a stable string key; setting a key
+// that already exists clears the previous handle before scheduling the
+// new one, so re-init is idempotent. clearAllManagedIntervals runs on
+// pagehide so a bfcache-restored page starts from a clean slate. Call
+// sites then re-establish their intervals on pageshow if e.persisted.
+(function(){
+  if(typeof window === 'undefined') return;
+  if(!window._managedIntervals) window._managedIntervals = new Map();
+  window.setManagedInterval = function(key, fn, ms){
+    if(typeof key !== 'string' || typeof fn !== 'function') return null;
+    const prev = window._managedIntervals.get(key);
+    if(prev != null){ try{ clearInterval(prev); }catch(_){} }
+    const id = setInterval(fn, ms);
+    window._managedIntervals.set(key, id);
+    return id;
+  };
+  window.clearManagedInterval = function(key){
+    const id = window._managedIntervals.get(key);
+    if(id != null){ try{ clearInterval(id); }catch(_){} window._managedIntervals.delete(key); }
+  };
+  window.clearAllManagedIntervals = function(){
+    for(const [key, id] of window._managedIntervals){
+      try{ clearInterval(id); }catch(_){}
+    }
+    window._managedIntervals.clear();
+  };
+  // pagehide fires both on real navigation away AND on bfcache freeze. We
+  // clear unconditionally — the cost of restarting from scratch on pageshow
+  // is negligible relative to the cost of double-firing every interval for
+  // the remaining session.
+  window.addEventListener('pagehide', () => { try{ window.clearAllManagedIntervals(); }catch(_){} });
+  // bfcache restore: each caller registers a resumer via _onBfcacheRestore.
+  // The handler invokes them so timers reinstate themselves with fresh
+  // setManagedInterval calls (clobber-safe).
+  window._bfcacheResumers = window._bfcacheResumers || [];
+  window.onBfcacheRestore = function(fn){
+    if(typeof fn === 'function') window._bfcacheResumers.push(fn);
+  };
+  window.addEventListener('pageshow', (e) => {
+    if(!e.persisted) return;
+    for(const fn of (window._bfcacheResumers || [])){
+      try{ fn(); }catch(err){ console.warn('[bfcache] resumer failed', err); }
+    }
+  });
+})();
+
 // ── On-screen keyboard inset tracker ────────────────────────────────────────
 // Mobile browsers don't shrink `100vh` / `100dvh` when the soft keyboard
 // appears, so bottom-anchored overlays (cmdK chat, task modal, settings

@@ -87,7 +87,15 @@ if ('serviceWorker' in navigator && !window.location.protocol.startsWith('file')
   navigator.serviceWorker.ready.then(reg => {
     // Check for updates every 30 min while app is open
     const _swUpdateMs = (window.ODTAULAI_CONFIG && window.ODTAULAI_CONFIG.SW_UPDATE_CHECK_MS) || 30 * 60 * 1000;
-    setInterval(() => { try{ reg.update(); }catch(e){} }, _swUpdateMs);
+    const _swUpdateTick = () => { try{ reg.update(); }catch(e){} };
+    if(typeof setManagedInterval === 'function'){
+      setManagedInterval('sw-update', _swUpdateTick, _swUpdateMs);
+      if(typeof onBfcacheRestore === 'function'){
+        onBfcacheRestore(() => setManagedInterval('sw-update', _swUpdateTick, _swUpdateMs));
+      }
+    } else {
+      setInterval(_swUpdateTick, _swUpdateMs);
+    }
 
     // Listen for a new service worker waiting to take over
     const showUpdateBanner = () => {
@@ -598,10 +606,44 @@ if(activeTab==='settings'){
 // the 10s auto-save overwrites s.date to today before this check runs, which
 // swallowed the rollover for continuously-open tabs.)
 let _lastKnownDate = (typeof todayKey === 'function') ? todayKey() : null;
+// When rollover wants to fire but the user is mid-edit in the task modal,
+// we defer up to MAX_DEFER_MS so:
+//   (a) the "Crossed midnight" toast doesn't slide over their typing,
+//   (b) the renderAll sweep doesn't tear down the list while a row in it
+//       is the modal's anchor, and
+//   (c) any timer-bound side effects (pauseTimer, day-counter reset) wait
+//       until the user closes the modal.
+// Past the cap we proceed anyway — bookkeeping has to happen at some
+// point. _pendingRolloverSince timestamps the first deferred attempt so
+// the cap is measured from the actual midnight boundary, not from "now".
+const _ROLLOVER_MODAL_MAX_DEFER_MS = 30 * 60 * 1000; // 30 minutes
+let _pendingRolloverSince = 0;
+function _isTaskModalOpen(){
+  const m = (typeof document !== 'undefined') ? document.getElementById('taskModal') : null;
+  return !!(m && m.classList && m.classList.contains('open'));
+}
 function _handleDayRollover(){
   try{
     const today = (typeof todayKey === 'function') ? todayKey() : null;
-    if(!today || !_lastKnownDate || today === _lastKnownDate) return;
+    if(!today || !_lastKnownDate || today === _lastKnownDate){
+      // Clear any defer marker — we're in sync.
+      _pendingRolloverSince = 0;
+      return;
+    }
+    // Modal-mid-edit guard. Skip this tick if the user is editing AND
+    // we haven't exceeded the max defer window. The next 60s tick (or
+    // the modal-close hook) will retry. Force-proceed past the cap so
+    // an indefinitely-open modal doesn't permanently block bookkeeping.
+    if(_isTaskModalOpen()){
+      if(!_pendingRolloverSince) _pendingRolloverSince = Date.now();
+      const deferredFor = Date.now() - _pendingRolloverSince;
+      if(deferredFor < _ROLLOVER_MODAL_MAX_DEFER_MS){
+        return;
+      }
+      // Past the cap — fall through. Log so the proceed isn't invisible.
+      console.warn('[app] day rollover proceeding despite open modal after', Math.round(deferredFor / 1000), 's');
+    }
+    _pendingRolloverSince = 0;
     // If a Pomodoro is mid-flight when the calendar flips over, the existing
     // tick() will land its phase completion on today and split the session
     // across two archive entries. Pause first so pauseTimer's accounting
@@ -637,7 +679,14 @@ function _handleDayRollover(){
   }catch(e){ console.warn('[app] day rollover', e); }
 }
 // Check every minute while the tab is alive…
-setInterval(_handleDayRollover, 60 * 1000);
+if(typeof setManagedInterval === 'function'){
+  setManagedInterval('day-rollover', _handleDayRollover, 60 * 1000);
+  if(typeof onBfcacheRestore === 'function'){
+    onBfcacheRestore(() => setManagedInterval('day-rollover', _handleDayRollover, 60 * 1000));
+  }
+} else {
+  setInterval(_handleDayRollover, 60 * 1000);
+}
 // …and again whenever the tab regains focus (backgrounded phones/laptops
 // often suspend setInterval for hours, so this covers the common case).
 document.addEventListener('visibilitychange', () => {

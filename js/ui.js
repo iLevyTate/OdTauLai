@@ -2141,6 +2141,12 @@ async function closeTaskDetail(opts){
   if(_taskModalPrevFocus&&_taskModalPrevFocus.focus)try{_taskModalPrevFocus.focus()}catch(e){}
   _taskModalPrevFocus=null;
   if(typeof _updateActiveTaskTickSchedule==='function')_updateActiveTaskTickSchedule();
+  // If midnight rolled over while the modal was open, the day-rollover
+  // handler deferred (see app.js _isTaskModalOpen). Retry now that the
+  // modal is closed so bookkeeping doesn't wait for the next 60s tick.
+  if(typeof _handleDayRollover === 'function'){
+    try{ _handleDayRollover(); }catch(e){ console.warn('[ui] post-close rollover', e); }
+  }
 }
 
 // ── Bottom-sheet swipe-to-dismiss ──────────────────────────────────────────

@@ -1757,8 +1757,19 @@ function showSaveIndicator(){
   el._saveIndT = setTimeout(()=>{ el.classList.remove('show'); }, 900);
 }
 
-// Auto-save every 10s, on tab hide, and on unload (no save pill)
-setInterval(() => queueAutoSave(), 10000);
+// Auto-save every 10s, on tab hide, and on unload (no save pill). Routed
+// through setManagedInterval so a bfcache restore (which clears the
+// interval on pagehide) reinstates a single fresh tick instead of leaving
+// the autosave loop dead.
+if(typeof setManagedInterval === 'function'){
+  const _autosaveTick = () => queueAutoSave();
+  setManagedInterval('autosave', _autosaveTick, 10000);
+  if(typeof onBfcacheRestore === 'function'){
+    onBfcacheRestore(() => setManagedInterval('autosave', _autosaveTick, 10000));
+  }
+} else {
+  setInterval(() => queueAutoSave(), 10000);
+}
 document.addEventListener('visibilitychange', ()=>{ if(document.hidden) queueAutoSave(); });
 window.addEventListener('beforeunload', () => saveState('unload'));
 if(typeof window !== 'undefined' && window.addEventListener){
