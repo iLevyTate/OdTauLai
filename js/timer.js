@@ -169,10 +169,35 @@ function onPhaseComplete(){
   if(phase==='work'&&typeof window.showPomodoroSummary==='function')window.showPomodoroSummary();
   gid('display').className='ring-time done';gid('display').textContent='00:00';gid('phaseLabel').textContent=getPL(phase)+' Complete';
   renderStats();renderCtrls();_syncRingState();renderTaskList();updateTitle();saveState('auto');
-  if(phase==='work'&&cfg.autoBreak)setTimeout(()=>{if(finished)advancePhase()},1500);
-  else if(phase!=='work'&&cfg.autoWork)setTimeout(()=>{if(finished)advancePhase()},1500)
+  _scheduleAutoAdvance();
 }
-function advancePhase(){if(phase==='work')phase=pomosInCycle>=cfg.cycle?'long':'short';else{if(phase==='long')pomosInCycle=0;phase='work'}finished=false;fireCounts={};setPhaseTime();renderAll();if((phase!=='work'&&cfg.autoBreak)||(phase==='work'&&cfg.autoWork))setTimeout(startTimer,300)}
+// Single-pending-timer guard. Without this, rapid Skip → Skip queues two
+// 1500ms autoAdvances; both fire startTimer 300ms later and the
+// audioScheduled flag can double-fire the chime.
+let _pendingAdvanceTimer = null;
+let _pendingStartTimer = null;
+function _scheduleAutoAdvance(){
+  if(_pendingAdvanceTimer) clearTimeout(_pendingAdvanceTimer);
+  if((phase==='work' && cfg.autoBreak) || (phase!=='work' && cfg.autoWork)){
+    _pendingAdvanceTimer = setTimeout(() => {
+      _pendingAdvanceTimer = null;
+      if(finished) advancePhase();
+    }, 1500);
+  }
+}
+function _scheduleAutoStart(){
+  if(_pendingStartTimer) clearTimeout(_pendingStartTimer);
+  if((phase!=='work' && cfg.autoBreak) || (phase==='work' && cfg.autoWork)){
+    _pendingStartTimer = setTimeout(() => { _pendingStartTimer = null; startTimer(); }, 300);
+  }
+}
+function advancePhase(){
+  if(phase==='work') phase = pomosInCycle>=cfg.cycle ? 'long' : 'short';
+  else { if(phase==='long') pomosInCycle=0; phase='work'; }
+  finished=false; fireCounts={};
+  setPhaseTime(); renderAll();
+  _scheduleAutoStart();
+}
 function skipPhase(){
   const wasRunning=running;running=false;clearInterval(tickId);cancelScheduledAudio();
   const el=wasRunning?Math.floor((Date.now()-startedAt)/1000):0;
@@ -207,10 +232,23 @@ function skipPhase(){
   if(_skippedTaskId && typeof refreshOpenTaskModalIfMatches === 'function'){
     refreshOpenTaskModalIfMatches(_skippedTaskId);
   }
-  if(phase==='work'&&cfg.autoBreak)setTimeout(()=>{if(finished)advancePhase()},1500);
-  else if(phase!=='work'&&cfg.autoWork)setTimeout(()=>{if(finished)advancePhase()},1500);
+  _scheduleAutoAdvance();
 }
-function resetAll(){running=false;finished=false;clearInterval(tickId);cancelScheduledAudio();phase='work';pomosInCycle=0;fireCounts={};if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000);taskStartedAt=null}}setPhaseTime();renderAll();saveState('user')}
+async function resetAll(){
+  // Mid-cycle "↻ Cycle" mis-taps used to silently wipe pomosInCycle with no
+  // recovery — the red styling implied a destructive confirm. Skip the
+  // prompt only when there's nothing meaningful to lose (cycle already at 0
+  // AND not running AND not finished). Time already worked on the linked
+  // task is preserved either way.
+  const hasProgress = pomosInCycle > 0 || running || finished;
+  if(hasProgress && typeof showAppConfirm === 'function'){
+    const ok = await showAppConfirm('Reset cycle? Pip progress (' + pomosInCycle + '/' + cfg.cycle + ') will clear. Time already worked on the linked task is preserved.');
+    if(!ok) return;
+  }
+  running=false;finished=false;clearInterval(tickId);cancelScheduledAudio();phase='work';pomosInCycle=0;fireCounts={};
+  if(activeTaskId&&taskStartedAt){const t=findTask(activeTaskId);if(t){t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000);taskStartedAt=null}}
+  setPhaseTime();renderAll();saveState('user');
+}
 // Reset only the current phase (work, short, long) back to its full duration
 // without disturbing the cycle position, the running phase, or other phases'
 // progress. Time already worked this phase is folded back into the linked

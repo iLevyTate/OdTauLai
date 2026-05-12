@@ -364,11 +364,12 @@ function saveState(reason){
   }catch(e){
     // QuotaExceededError — warn user but their data IS safe in IDB.
     window._saveError = e.name || 'save-failed';
-    const now = Date.now();
-    if (now - (window._lastQuotaBannerAt || 0) >= 2000) {
-      window._lastQuotaBannerAt = now;
-      const old = document.getElementById('quotaWarning');
-      if (old) old.remove();
+    // Suppress the banner for the rest of the session once dismissed. The
+    // previous 2-second throttle only debounced creation, so the next
+    // saveState (often within seconds) re-spawned it \u2014 read as broken.
+    // _quotaBannerDismissed clears on a successful localStorage write below,
+    // so the banner can re-appear if storage frees up and re-fills later.
+    if(!window._quotaBannerDismissed && !document.getElementById('quotaWarning')){
       const w = document.createElement('div');
       w.id = 'quotaWarning';
       w.className = 'quota-warning';
@@ -377,10 +378,28 @@ function saveState(reason){
       if(warnIc){const tmp=document.createElement('span');tmp.innerHTML=warnIc;while(tmp.firstChild)msg.appendChild(tmp.firstChild)}
       const msgTxt=document.createElement('span');msgTxt.textContent='Local cache full \u2014 data is saved in IndexedDB. Consider exporting a backup.';msg.appendChild(msgTxt);
       w.appendChild(msg);
-      const dismissBtn=document.createElement('button');dismissBtn.type='button';dismissBtn.textContent='Dismiss';dismissBtn.onclick=function(){document.getElementById('quotaWarning').remove()};w.appendChild(dismissBtn);
-      const backupBtn=document.createElement('button');backupBtn.type='button';backupBtn.textContent='Backup now';backupBtn.onclick=function(){exportData();document.getElementById('quotaWarning').remove()};w.appendChild(backupBtn);
+      const dismissBtn=document.createElement('button');dismissBtn.type='button';dismissBtn.textContent='Dismiss';
+      dismissBtn.onclick=function(){
+        window._quotaBannerDismissed = true;
+        const el = document.getElementById('quotaWarning'); if(el) el.remove();
+      };
+      w.appendChild(dismissBtn);
+      const backupBtn=document.createElement('button');backupBtn.type='button';backupBtn.textContent='Backup now';
+      backupBtn.onclick=function(){
+        window._quotaBannerDismissed = true;
+        exportData();
+        const el = document.getElementById('quotaWarning'); if(el) el.remove();
+      };
+      w.appendChild(backupBtn);
       document.body.appendChild(w);
     }
+  }
+  // Clear the dismiss flag when localStorage succeeds again \u2014 lets the
+  // banner re-appear if storage frees up and then re-fills later in the
+  // session. Without this, a one-time dismissal silences quota warnings
+  // until the user reloads.
+  if(window._saveError === null && window._quotaBannerDismissed){
+    window._quotaBannerDismissed = false;
   }
   if(typeof syncBroadcast==='function') syncBroadcast();
   if(reason === 'user') showSaveIndicator();
@@ -953,8 +972,21 @@ function exportData(){
   });
 }
 
+// Backups bigger than this aren't worth even trying — the JSON.parse runs
+// synchronously on the main thread and chokes the tab. Real backups for
+// even multi-year heavy use stay well under this; anything bigger is more
+// likely a wrong-file mis-tap or a corrupted export.
+const _IMPORT_MAX_BYTES = 20 * 1024 * 1024;
 function importData(file){
   if(!file) return;
+  if(typeof file.size === 'number' && file.size > _IMPORT_MAX_BYTES){
+    const mb = (file.size / (1024 * 1024)).toFixed(1);
+    const max = (_IMPORT_MAX_BYTES / (1024 * 1024)).toFixed(0);
+    alert('Backup file is ' + mb + ' MB — that exceeds the ' + max + ' MB cap. ' +
+          'A real OdTauLai backup is much smaller; check this is the right file, ' +
+          'or split a giant archive into chunks before importing.');
+    return;
+  }
   const reader = new FileReader();
   reader.onload = async e=>{
     try{
@@ -1469,6 +1501,12 @@ function _csvRowToTask(obj, existingTask){
 // Returns {added, updated, skipped, errors[]}
 function importTasks(file){
   if(!file){ return; }
+  if(typeof file.size === 'number' && file.size > _IMPORT_MAX_BYTES){
+    const mb = (file.size / (1024 * 1024)).toFixed(1);
+    const max = (_IMPORT_MAX_BYTES / (1024 * 1024)).toFixed(0);
+    alert('Task file is ' + mb + ' MB — that exceeds the ' + max + ' MB cap.');
+    return;
+  }
   const reader = new FileReader();
   reader.onload = e => {
     const text = e.target.result;

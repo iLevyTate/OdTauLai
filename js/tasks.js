@@ -1825,31 +1825,26 @@ function renderActiveFilters(){
         renderTaskList();
       }));
   }
-  // Active list (non-default + on a list-sensitive smart view).
-  if(typeof activeListId !== 'undefined' && activeListId && Array.isArray(lists) && lists.length > 1){
-    const listSensitiveViews = ['all','inbox','waiting','stuck'];
-    const isListSensitive = listSensitiveViews.includes(smartView) ||
-      (typeof cfg === 'object' && cfg && cfg.focusListMode);
-    if(isListSensitive){
-      const l = lists.find(x => x.id === activeListId);
-      if(l){
-        // Only chip if the user has explicitly chosen something — show the
-        // chip whenever multiple lists exist so they can switch without
-        // hunting through the lists strip.
-        chips.push(_afChip('qpc--list', 'list: ' + (l.name || ''), 'list ' + (l.name || ''),
-          () => {
-            // Removing the list chip toggles focus-list mode off AND clears
-            // the active filter by switching to the first available list
-            // is not really "clearing" — but the user expectation is the
-            // list narrowing goes away. Easiest: turn off focusListMode so
-            // every list shows; the active list pointer stays but the
-            // filter doesn't apply in list-sensitive views.
-            if(typeof cfg === 'object' && cfg) cfg.focusListMode = false;
-            try{ document.body.classList.remove('app-focus-list'); }catch(_){}
-            if(typeof renderTaskList === 'function') renderTaskList();
-            if(typeof saveState === 'function') saveState('user');
-          }));
-      }
+  // Active list. Only chip when focusListMode is ON — that's the only state
+  // the user can explicitly clear ("remove the list narrowing"). The default
+  // implicit "All view scopes to active list" narrowing isn't user-removable
+  // (the only way out is to switch lists or change smart view), so showing a
+  // removable chip for it produces a phantom that re-renders on every tick.
+  if(typeof activeListId !== 'undefined' && activeListId
+     && typeof cfg === 'object' && cfg && cfg.focusListMode
+     && Array.isArray(lists) && lists.length > 1){
+    const l = lists.find(x => x.id === activeListId);
+    if(l){
+      chips.push(_afChip('qpc--list', 'list: ' + (l.name || '') + ' (focus)', 'list focus on ' + (l.name || ''),
+        () => {
+          // Turn off the focus-list opt-in so other lists return to view.
+          // activeListId stays as a pointer; the user can re-enter focus via
+          // the lists strip toggle.
+          if(typeof cfg === 'object' && cfg) cfg.focusListMode = false;
+          try{ document.body.classList.remove('app-focus-list'); }catch(_){}
+          if(typeof renderTaskList === 'function') renderTaskList();
+          if(typeof saveState === 'function') saveState('user');
+        }));
     }
   }
 
@@ -2473,7 +2468,26 @@ function renderTaskList(){
       b.textContent = text;
       empty.appendChild(b);
     };
-    if(tasks.length){
+    // Smart-view-specific empty states first so a user landing on Stuck /
+    // Snoozed / Waiting learns what the view means rather than getting the
+    // generic "no tasks match your filters" hint that doesn't apply.
+    if(tasks.length && smartView === 'stuck'){
+      empty.appendChild(buildIcon('alertCircle'));
+      addBlock('task-empty-title', 'Nothing stuck — nice');
+      addBlock('task-empty-help',  'Tasks land here when they\'ve been open for 14+ days without an edit. The fact this list is empty means nothing\'s been hibernating in your backlog.');
+    } else if(tasks.length && smartView === 'snoozed'){
+      empty.appendChild(buildIcon('moon'));
+      addBlock('task-empty-title', 'No snoozed tasks');
+      addBlock('task-empty-help',  'Snooze hides a task until a chosen date — useful when something can\'t move until next week. Set a snooze from the task detail modal.');
+    } else if(tasks.length && smartView === 'waiting'){
+      empty.appendChild(buildIcon('hourglass'));
+      addBlock('task-empty-title', 'Nothing waiting on others');
+      addBlock('task-empty-help',  'Mark a task type = "waiting" in its detail modal when you\'re blocked on someone else. They show up here so you can chase them at the right moment.');
+    } else if(tasks.length && smartView === 'unscheduled'){
+      empty.appendChild(buildIcon('circleDashed'));
+      addBlock('task-empty-title', 'Every open task has a date');
+      addBlock('task-empty-help',  'Tasks without a due date show up here so they don\'t fall through the cracks. Empty = healthy queue.');
+    } else if(tasks.length){
       // Has tasks, but filter/view excludes all.
       empty.appendChild(buildIcon('filter'));
       addBlock('task-empty-title', 'No tasks match your filters');

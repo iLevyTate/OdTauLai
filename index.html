@@ -180,7 +180,10 @@
          of the Tasks panel so the user sees their daily completion rate and
          their consecutive-day streak without hunting through Cmd+K. JS owns
          the content; hidden until renderDailyMomentum populates it. -->
-    <div class="daily-momentum" id="dailyMomentum" hidden aria-live="polite"></div>
+    <!-- Non-live: the momentum tile is static numbers a sighted user *looks
+         at*; announcing it on every renderTaskList stacks 3-line speech on
+         every filter tap. The labels stay readable via normal navigation. -->
+    <div class="daily-momentum" id="dailyMomentum" hidden></div>
 
     <!-- Add task form: TOP — primary action -->
     <div class="task-form">
@@ -302,7 +305,11 @@
             <button id="viewBoard" data-action="setTaskView" data-arg="board">Board</button>
             <button id="viewCal" data-action="setTaskView" data-arg="calendar">Cal</button>
           </div>
-          <span class="filters-summary" id="filtersSummary" aria-live="polite"></span>
+          <!-- Non-live: the active-filters bar above is the canonical
+               announce surface for filter changes. The summary span is the
+               sort/group descriptor, not an event, so let it be read on
+               demand rather than fired on every rerender. -->
+          <span class="filters-summary" id="filtersSummary"></span>
           <button type="button" class="filters-toggle" id="filtersToggle" data-action="toggleFiltersPanel" title="Filters & sort" aria-expanded="false" aria-controls="filtersPanel">
             <span class="ft-icon">⚙</span>
             <span class="ft-label">Filters</span>

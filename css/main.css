@@ -4041,3 +4041,59 @@ button.hist-day{display:block;width:100%;font:inherit;cursor:pointer;background:
 
 /* Starred indicator: gold left-stripe on the board card */
 .board-card.starred-card{border-left-color:#e0a020!important}
+
+/* ── Print stylesheet ──────────────────────────────────────────────────────
+   Goal: a user prints their task list (or daily report) and gets readable
+   black-on-white output with no chrome, ribbons, modals, or overlays. The
+   app's normal palette is dark; print explicitly resets the foreground so
+   it doesn't waste ink on dark backgrounds. */
+@media print {
+  :root, body, body.dark-theme, body.light-theme {
+    background:#fff !important;
+    color:#000 !important;
+  }
+  /* Hide everything that's chrome / interactive / overlay. The task list
+     itself and the daily-momentum tile survive so printed output is the
+     same content the user was looking at. */
+  .header, .tabs-bar, .nav-tab, .skip-link,
+  .mini-timer, .quick-add-fab, .save-indicator, .gen-load-ribbon,
+  .modal-overlay, .cmdk-overlay, .what-next-overlay,
+  .update-banner, .sw-precache-banner, .share-in-banner, .sync-incoming-bar,
+  .action-toast, .export-toast, .quota-warning,
+  .filters-toggle, .task-controlbar .view-toggle,
+  .task-syntax-popover, #shortcutsHelpOverlay,
+  .task-form, .task-search-row, .task-search-pills, .active-filters-bar,
+  .smart-views, .smart-views-bar, .lists-bar,
+  .task-toolbar, .filters-summary,
+  .set-nav, .set-section-sum::after,
+  button {
+    display:none !important;
+  }
+  /* Force a sane viewport for paper. */
+  body {
+    padding:0 !important;
+    font-family:Georgia, serif;
+    font-size:11pt;
+    line-height:1.4;
+  }
+  .panel, .task-item, .pending-task-card {
+    background:#fff !important;
+    border-color:#999 !important;
+    box-shadow:none !important;
+    page-break-inside:avoid;
+  }
+  .task-item {
+    border:1px solid #ccc !important;
+    margin-bottom:6px !important;
+    padding:8px 10px !important;
+  }
+  .task-name, .task-meta { color:#000 !important; }
+  /* Hide the floating header logo art if it's still in the DOM. */
+  .header-logo, .sdot { display:none !important; }
+  /* Ensure links remain identifiable in print — show the href after the
+     anchor text so a print-out is still useful when scanned later. */
+  a[href]::after {
+    content:" (" attr(href) ")";
+    font-size:9pt; color:#555;
+  }
+}

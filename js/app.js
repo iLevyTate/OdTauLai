@@ -578,7 +578,14 @@ if(activeTab==='settings'){
   const okIc = (window.icon && window.icon('checkCircle', {size:13})) || '';
   const warnIc = (window.icon && window.icon('alertTriangle', {size:13})) || '';
   if(isStandalone){status.innerHTML=okIc+' Running as app';return}
-  if(location.protocol==='file:'){status.innerHTML=warnIc+' Served via file:// — host over HTTP to install';return}
+  if(location.protocol==='file:'){
+    // Clarify the implication: file:// works as a portable snapshot but the
+    // browser refuses to register a service worker over that scheme, so
+    // there's no offline cache regardless of browser support. Don't blame
+    // the browser — point at the protocol.
+    status.innerHTML = warnIc + ' Served via file:// — Install + offline cache require HTTP(S).';
+    return;
+  }
   if(!('serviceWorker' in navigator)){status.textContent='Browser does not support PWA';return}
   setTimeout(()=>{
     if(window._swRegistered===false){ status.textContent='Offline cache unavailable in this browser'; return; }

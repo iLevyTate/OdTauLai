@@ -659,14 +659,22 @@ async function cognitaskRun(query, opts){
               };
             }
           }
-          if(noop && noop.args && typeof noop.args.reason === 'string'){
-            const reason = String(noop.args.reason).slice(0, 300);
+          if(noop){
+            // Reason is the canonical field but some models drop it. Fall
+            // back to a generic chat answer rather than letting the path
+            // return ops:[] with no answer, which the UI renders as a
+            // bare "No actionable changes" and confuses the user.
+            const reason = (noop.args && typeof noop.args.reason === 'string' && noop.args.reason.trim())
+              ? String(noop.args.reason).slice(0, 300)
+              : '';
+            const msg = reason
+              ? ('I couldn\'t create that yet — ' + reason + ' Try rephrasing with the missing detail.')
+              : 'I couldn\'t figure out enough detail to create that — try adding a name or due date (e.g. "remind me to call mom tomorrow at 9am").';
             if(typeof pushAskHistory === 'function') pushAskHistory(q);
             return {
               ok: true, ops: [], rejected: [], destructiveLevel: 'none',
               rawText: allRaw + '\n--- write-retry ---\n' + retryRaw,
-              truncated: false, readRounds,
-              chatAnswer: 'I couldn\'t create that yet — ' + reason + ' Try rephrasing with the missing detail.',
+              truncated: false, readRounds, chatAnswer: msg,
             };
           }
         }

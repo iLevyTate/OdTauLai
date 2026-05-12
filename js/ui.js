@@ -830,11 +830,20 @@ function renderCmdK(){
     items.push({section:'Completed & archived'});
     doneMatches.forEach(t=>items.push({type:'task',label:t.name,icon:t.archived?'🗂':'✓',desc:t.archived?'archived':'done',run:()=>{
       // Switching to the matching smart view so the user can see the task in
-      // context instead of just opening it in isolation.
+      // context instead of just opening it in isolation. rAF instead of an
+      // arbitrary 60ms timer so slow phones don't race the modal open
+      // ahead of the list paint, and re-resolve the task by id so a
+      // cross-tab sync between click and open doesn't open a stale row.
+      const taskId = t.id;
       showTab('tasks');
-      if(t.archived){ if(typeof setSmartView==='function') setSmartView('archived'); }
+      const wasArchived = !!t.archived;
+      if(wasArchived){ if(typeof setSmartView==='function') setSmartView('archived'); }
       else { if(typeof setSmartView==='function') setSmartView('completed'); }
-      setTimeout(() => { if(typeof openTaskDetail==='function') openTaskDetail(t.id); }, 60);
+      requestAnimationFrame(() => {
+        const fresh = (typeof findTask === 'function') ? findTask(taskId) : null;
+        if(!fresh) return;
+        if(typeof openTaskDetail==='function') openTaskDetail(taskId);
+      });
     }}));
   }
   // Match lists by name.

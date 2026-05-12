@@ -346,6 +346,17 @@ async function fetchICSContent(feed){
   if(!res.ok) throw new Error(`HTTP ${res.status}`);
   const text = await res.text();
   if(text.length > CAL_FETCH_MAX_BYTES) throw new Error('Calendar response too large');
+  // Detect proxies that returned 200 OK with a non-ICS body (e.g. an auth /
+  // login HTML page). Without this, parseICS happily produces 0 events and
+  // the user sees "Last synced · 0 events" with no error, looking like an
+  // empty calendar instead of a misconfigured proxy.
+  const sample = text.slice(0, 2048).toUpperCase();
+  if(!sample.includes('BEGIN:VCALENDAR')){
+    if(/^\s*</.test(text) || sample.includes('<HTML') || sample.includes('<!DOCTYPE')){
+      throw new Error('Proxy returned HTML, not an iCalendar feed — check the proxy or feed URL');
+    }
+    throw new Error('Response is not an iCalendar feed (missing BEGIN:VCALENDAR)');
+  }
   return text;
 }
 
