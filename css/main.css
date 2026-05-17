@@ -2899,11 +2899,44 @@ body:has(.offline-indicator:not([style*="display:none"])){ padding-top:30px; }
 .quota-warning button:hover{background:rgba(255,255,255,.3)}
 .quota-warning--proactive{background:rgba(230,126,34,.95);box-shadow:0 10px 40px rgba(230,126,34,.35);flex-wrap:wrap}
 
+/* Stack persistent banners so they don't sit directly on top of each other.
+   .update-banner and .quota-warning are both anchored bottom-center and
+   previously collided pixel-for-pixel when both surfaced (e.g. storage full
+   + new SW available). Now the quota warning floats above the update banner. */
+body:has(.update-banner) .quota-warning{
+  bottom:calc(72px + env(safe-area-inset-bottom,0px));
+}
+/* Long-running model download — gen-load-ribbon at bottom-center is the user's
+   only signal that weights are streaming in. Don't let transient banners cover
+   it; lift the banners instead so the progress bar stays readable. */
+body:has(.gen-load-ribbon:not([hidden])) .update-banner,
+body:has(.gen-load-ribbon:not([hidden])) .quota-warning{
+  bottom:calc(80px + env(safe-area-inset-bottom,0px));
+}
+body:has(.gen-load-ribbon:not([hidden])):has(.update-banner) .quota-warning{
+  bottom:calc(136px + env(safe-area-inset-bottom,0px));
+}
+
 /* Mobile tweaks */
 @media (max-width:640px){
   .update-banner,.quota-warning{
     bottom:auto;top:110px;left:8px;right:8px;transform:none;
     flex-wrap:wrap;max-width:none;
+  }
+  /* Mobile: same stacking rule, but the banners flip to top-anchored, so the
+     quota warning floats below the update banner (visually above content). */
+  body:has(.update-banner) .quota-warning{
+    top:calc(110px + 56px);
+    bottom:auto;
+  }
+  /* If a sync-incoming bar is across the top (top:0, ~50px tall), shift the
+     update/quota stack below it so they don't sit underneath. */
+  body:has(.sync-incoming-bar) .update-banner,
+  body:has(.sync-incoming-bar) .quota-warning{
+    top:calc(110px + 60px);
+  }
+  body:has(.sync-incoming-bar):has(.update-banner) .quota-warning{
+    top:calc(110px + 60px + 56px);
   }
   .offline-indicator{font-size:11px}
 }
@@ -3309,6 +3342,18 @@ body:has(.mini-timer.visible) .export-toast{bottom:calc(76px + env(safe-area-ins
 }
 .action-toast.show{opacity:1;pointer-events:auto;transform:translateY(0)}
 body:has(.mini-timer.visible) .action-toast{bottom:calc(132px + env(safe-area-inset-bottom,0px))}
+/* When a modal or command palette is open, lift the bottom-anchored auto-
+   dismiss toasts above the modal's sticky footer so feedback isn't hidden
+   behind it. Modals are flex-start anchored with a sticky .modal-foot at the
+   viewport bottom; without this the toast and the foot collided. */
+body:has(.modal-overlay.open) #exportToast,
+body:has(.cmdk-overlay.open)  #exportToast{
+  bottom:calc(96px + env(safe-area-inset-bottom,0px));
+}
+body:has(.modal-overlay.open) #actionToast,
+body:has(.cmdk-overlay.open)  #actionToast{
+  bottom:calc(152px + env(safe-area-inset-bottom,0px));
+}
 @media (max-width:640px){
   .export-toast{left:50%;right:auto;transform:translateX(-50%) translateY(16px)}
   .export-toast.show{transform:translateX(-50%) translateY(0)}
