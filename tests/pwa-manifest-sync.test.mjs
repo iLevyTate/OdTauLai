@@ -46,3 +46,23 @@ test('pwa.js inline manifest "display" matches manifest.json', () => {
 test('pwa.js inline manifest "orientation" matches manifest.json', () => {
   assert.equal(pwaInlineField('orientation'), manifest.orientation);
 });
+
+function pwaInlineArray(name){
+  // Match `name: ['a', 'b', ...]` or with double quotes.
+  const re = new RegExp(`${name}\\s*:\\s*\\[([^\\]]+)\\]`);
+  const m = pwaSrc.match(re);
+  if(!m) return null;
+  return m[1].split(',').map(s => s.trim().replace(/^['"]|['"]$/g, ''));
+}
+
+test('pwa.js inline manifest "display_override" matches manifest.json', () => {
+  // Regression for AUDIT.md H-NEW-2: pwa.js was missing window-controls-overlay.
+  const pwaArr = pwaInlineArray('display_override');
+  assert.deepStrictEqual(pwaArr, manifest.display_override);
+});
+
+test('pwa.js inline manifest "categories" matches manifest.json', () => {
+  // Regression for AUDIT.md H-NEW-2: pwa.js was missing "lifestyle".
+  const pwaArr = pwaInlineArray('categories');
+  assert.deepStrictEqual(pwaArr, manifest.categories);
+});

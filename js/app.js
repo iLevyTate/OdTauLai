@@ -113,6 +113,14 @@ if ('serviceWorker' in navigator && !window.location.protocol.startsWith('file')
       document.body.appendChild(banner);
     };
     window.applyUpdate = () => {
+      // If the user is mid-edit inside the task modal, the in-progress field
+      // values live only in DOM inputs — saveState reads the committed task
+      // object. Commit those edits first so a reload doesn't drop them.
+      try {
+        if(_isTaskModalOpen() && typeof saveTaskDetail === 'function' && typeof editingTaskId !== 'undefined' && editingTaskId != null){
+          saveTaskDetail();
+        }
+      } catch(e) { console.warn('[app] applyUpdate commit-modal', e); }
       // Flush any pending state before reload so user doesn't lose recent changes
       try { if(typeof saveState === 'function') saveState('unload'); } catch(e) {}
       if(reg.waiting) reg.waiting.postMessage({type:'SKIP_WAITING'});

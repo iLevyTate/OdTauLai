@@ -36,10 +36,10 @@ function renderCalendar(visibleTasks){
     }
   }
   let html=feedAlertHtml+'<div class="calendar"><div class="cal-head">'
-    +'<button class="cal-nav" data-action="calNav" data-args="[-1]" title="Previous month">‹</button>'
+    +'<button class="cal-nav" data-action="calNav" data-args="[-1]" title="Previous month" aria-label="Previous month">‹</button>'
     +'<div class="cal-title">'+monthName+'</div>'
     +'<button class="cal-today-btn" data-action="calToday">Today</button>'
-    +'<button class="cal-nav" data-action="calNav" data-args="[1]" title="Next month">›</button>'
+    +'<button class="cal-nav" data-action="calNav" data-args="[1]" title="Next month" aria-label="Next month">›</button>'
     +'</div><div class="cal-weekdays">';
   ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(w=>{html+='<div class="cal-weekday">'+w+'</div>'});
   html+='</div><div class="cal-grid">';
@@ -1547,9 +1547,9 @@ function renderTaskItem(t,depth){
 
   // At rest: due chip (overdue / today / soon only) + subtask progress. Habits view: ↻ + streak. Rest on hover.
   const chevron=kids
-    ?'<button class="task-chevron'+(t.collapsed?' collapsed':'')+'" data-action="toggleCollapse" data-arg="+t.id+" title="'+(t.collapsed?'Expand':'Collapse')+'">▸</button>'
+    ?'<button class="task-chevron'+(t.collapsed?' collapsed':'')+'" data-action="toggleCollapse" data-arg="'+t.id+'" title="'+(t.collapsed?'Expand':'Collapse')+'" aria-label="'+(t.collapsed?'Expand subtasks':'Collapse subtasks')+'" aria-expanded="'+(t.collapsed?'false':'true')+'">▸</button>'
     :'<span class="task-chevron-spacer"></span>';
-  const checkbox='<button class="task-checkbox'+(isDone?' checked':'')+'" data-action="toggleTaskDoneQuick" data-arg="+t.id+" title="Mark done" aria-label="Mark task done">'+(isDone?'✓':'')+'</button>';
+  const checkbox='<button class="task-checkbox'+(isDone?' checked':'')+'" data-action="toggleTaskDoneQuick" data-arg="'+t.id+'" title="Mark done" aria-label="Mark task done">'+(isDone?'✓':'')+'</button>';
 
   let signalChips='';
   if(t.dueDate&&!isDone){
@@ -1559,12 +1559,12 @@ function renderTaskItem(t,depth){
     }
   }
   const prog=getSubtaskProgress(t.id);
-  if(prog) signalChips+='<span class="task-sig sig-subs" title="'+prog.done+' of '+prog.total+' subtasks done">'+prog.done+'/'+prog.total+'</span>';
+  if(prog) signalChips+='<span class="task-sig sig-subs" title="'+prog.done+' of '+prog.total+' subtasks done" aria-label="'+prog.done+' of '+prog.total+' subtasks done">'+prog.done+'/'+prog.total+'</span>';
   if(smartView==='habits'&&t.recur){
-    signalChips+='<span class="task-sig sig-recur" title="Repeats '+escAttr(String(t.recur))+'">↻</span>';
+    signalChips+='<span class="task-sig sig-recur" title="Repeats '+escAttr(String(t.recur))+'" aria-label="Repeats '+escAttr(String(t.recur))+'">↻</span>';
     if(typeof getHabitStreak==='function'){
       const st=getHabitStreak(t);
-      if(st>0) signalChips+='<span class="task-sig sig-streak" title="Consecutive days with a logged completion">'+st+'d</span>';
+      if(st>0) signalChips+='<span class="task-sig sig-streak" title="Consecutive days with a logged completion" aria-label="'+st+' day streak">'+st+'d</span>';
     }
   }
 
@@ -1575,18 +1575,18 @@ function renderTaskItem(t,depth){
   const descPrev=(t.description&&t.description.length>0)?'<span class="task-desc-inline">'+esc(t.description.slice(0,50))+(t.description.length>50?'…':'')+'</span>':'';
 
   const actions=t.archived
-    ?'<button type="button" class="ta-btn ta-restore" data-action="restoreTask" data-args="['+t.id+']" title="Restore">↺</button>'
-     +'<button type="button" class="ta-btn ta-del" data-action="removeTask" data-args="['+t.id+']" title="Delete permanently">×</button>'
-    :'<button type="button" class="ta-btn ta-star'+(t.starred?' on':'')+'" data-action="toggleStar" data-args="['+t.id+']" title="'+(t.starred?'Unpin':'Pin to top')+'">'+(t.starred?'★':'☆')+'</button>'
-     +'<button type="button" class="ta-btn ta-play '+(isActive?'on':'')+'" data-action="toggleTask" data-args="['+t.id+']" title="'+(isActive?'Stop timer':'Start timer')+'">'+(isActive?'■':'▶')+'</button>'
-     +'<button type="button" class="ta-btn ta-sub" data-action="addSubtaskPrompt" data-args="['+t.id+']" title="Add subtask">+</button>'
-     +'<button type="button" class="ta-btn ta-del" data-action="removeTask" data-args="['+t.id+']" title="Archive">×</button>';
+    ?'<button type="button" class="ta-btn ta-restore" data-action="restoreTask" data-args="['+t.id+']" title="Restore" aria-label="Restore task">↺</button>'
+     +'<button type="button" class="ta-btn ta-del" data-action="removeTask" data-args="['+t.id+']" title="Delete permanently" aria-label="Delete task permanently">×</button>'
+    :'<button type="button" class="ta-btn ta-star'+(t.starred?' on':'')+'" data-action="toggleStar" data-args="['+t.id+']" title="'+(t.starred?'Unpin':'Pin to top')+'" aria-label="'+(t.starred?'Unpin task':'Pin task to top')+'" aria-pressed="'+(t.starred?'true':'false')+'">'+(t.starred?'★':'☆')+'</button>'
+     +'<button type="button" class="ta-btn ta-play '+(isActive?'on':'')+'" data-action="toggleTask" data-args="['+t.id+']" title="'+(isActive?'Stop timer':'Start timer')+'" aria-label="'+(isActive?'Stop timer for this task':'Start timer for this task')+'" aria-pressed="'+(isActive?'true':'false')+'">'+(isActive?'■':'▶')+'</button>'
+     +'<button type="button" class="ta-btn ta-sub" data-action="addSubtaskPrompt" data-args="['+t.id+']" title="Add subtask" aria-label="Add subtask">+</button>'
+     +'<button type="button" class="ta-btn ta-del" data-action="removeTask" data-args="['+t.id+']" title="Archive" aria-label="Archive task">×</button>';
 
   // Star pin — shown prominently only if starred (otherwise hidden in hover actions)
-  const starPin=t.starred?'<span class="star-pin" title="Pinned">★</span>':'';
+  const starPin=t.starred?'<span class="star-pin" title="Pinned" aria-label="Pinned to top">★</span>':'';
 
   const dragGrip=(typeof taskSortBy==='string'&&taskSortBy==='manual')
-    ?'<span class="drag-handle" title="Drag to reorder">⠿</span>':'';
+    ?'<span class="drag-handle" title="Drag to reorder" role="img" aria-label="Drag handle">⠿</span>':'';
   d.innerHTML=
     '<div class="task-row-primary">'
       +dragGrip
@@ -1785,6 +1785,12 @@ function _commitChipChange(t){
 }
 function openTaskDetail(id){
   const t=findTask(id);if(!t)return;
+  // Re-entrance guard: a rapid double-tap on a task row can fire openTaskDetail
+  // twice before the modal animation lands. Without this, the second pass
+  // re-runs all field wiring (and re-attaches the tab-trap listener via
+  // capture-phase document.addEventListener), leaking handlers on every close.
+  const _modalEl=document.getElementById('taskModal');
+  if(_modalEl && _modalEl.classList.contains('open') && editingTaskId===id) return;
   _taskModalSnapshot=JSON.parse(JSON.stringify(t));
   editingTaskId=id;
   gid('mdName').value=t.name;

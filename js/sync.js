@@ -329,7 +329,11 @@ function _mergeState(remote) {
       : (typeof remote.sentAt === 'number' ? remote.sentAt : 0)
   );
   const le = _clampSyncTs(typeof stateEpoch !== 'undefined' ? stateEpoch : 0);
-  if (re > le) {
+  // Nonce tiebreaker for the same-ms-collision case (see storage.js stateNonce).
+  const rn = typeof remote.stateNonce === 'number' ? remote.stateNonce : 0;
+  const ln = (typeof stateNonce === 'number') ? stateNonce : 0;
+  const _remoteWinsExact = (re === le && re > 0 && rn > ln);
+  if (re > le || _remoteWinsExact) {
     if (Array.isArray(remote.timeLog)) timeLog = remote.timeLog;
     if (Array.isArray(remote.sessionHistory)) sessionHistory = remote.sessionHistory;
     if (Array.isArray(remote.intervals)) intervals = remote.intervals;
@@ -342,7 +346,7 @@ function _mergeState(remote) {
     if (remote.phase && ['work', 'short', 'long'].includes(remote.phase)) phase = remote.phase;
     if (remote.cfg && typeof remote.cfg === 'object') cfg = remote.cfg;
     if (remote.theme && ['dark', 'light'].includes(remote.theme)) theme = remote.theme;
-  } else if (re === le && re > 0) {
+  } else if (re === le && re > 0 && rn === ln) {
     if (Array.isArray(remote.timeLog)) timeLog = _syncMergeTimeLogsById(timeLog, remote.timeLog);
     if (Array.isArray(remote.sessionHistory)) sessionHistory = _syncMergeSessionHist(sessionHistory, remote.sessionHistory);
     if (Array.isArray(remote.intervals)) intervals = _syncMergeIntervalsById(intervals, remote.intervals);

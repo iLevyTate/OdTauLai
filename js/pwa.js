@@ -15,18 +15,20 @@
   if (isFileProtocol) {
     document.getElementById('pwa-apple-icon').href = iconUrl;
     document.getElementById('pwa-favicon').href = iconUrl;
+    // Fields below are kept in sync with manifest.json — see
+    // tests/pwa-manifest-sync.test.mjs which asserts the alignment.
     const manifest = {
       name: 'OdTauLai — On device task app using local ambient intelligence',
       short_name: 'OdTauLai',
-      description: 'Pomodoro + tasks with on-device semantic understanding of task meaning and context. Optional opt-in generative Ask mode runs fully on-device — no data leaves the browser.',
+      description: 'On-device Pomodoro timer + task manager. A small local embedding model (~33 MB) captures the meaning and context of your tasks — not just keywords — for semantic search, smart suggestions, duplicates, list routing, and values alignment. Optional on-device generative "Ask" mode (opt-in, no data leaves the browser). Works offline. Optional P2P sync. No account, no tracking.',
       start_url: location.pathname.split('/').slice(0,-1).join('/') + '/' + (location.pathname.split('/').pop() || ''),
       scope: location.pathname.split('/').slice(0,-1).join('/') + '/',
       display: 'standalone',
-      display_override: ['standalone', 'minimal-ui'],
+      display_override: ['window-controls-overlay', 'standalone', 'minimal-ui'],
       orientation: 'any',
       background_color: '#0a1320',
       theme_color: '#0a1320',
-      categories: ['productivity', 'utilities'],
+      categories: ['productivity', 'utilities', 'lifestyle'],
       icons: [
         {src: iconUrl, sizes: '192x192', type: 'image/svg+xml', purpose: 'any'},
         {src: iconUrl, sizes: '512x512', type: 'image/svg+xml', purpose: 'any'},

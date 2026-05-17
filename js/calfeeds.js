@@ -311,15 +311,36 @@ function _calFetchUrlOk(urlStr){
   catch(e){ return false; }
   if(u.protocol !== 'http:' && u.protocol !== 'https:') return false;
   if(location.protocol === 'https:' && u.protocol === 'http:') return false;
-  // Defense-in-depth: block loopback / private RFC1918 addresses
-  const h = u.hostname;
-  if(h === 'localhost' || h === '127.0.0.1' || h === '[::1]' ||
-     h.startsWith('192.168.') || h.startsWith('10.') ||
+  // Defense-in-depth: block loopback / private / link-local / unique-local.
+  // Covers 127/8 (loopback), 10/8, 172.16/12, 192.168/16 (RFC1918),
+  // 169.254/16 (link-local — includes AWS metadata 169.254.169.254),
+  // 0.0.0.0, IPv6 ::1, fe80::/10 (link-local), fc00::/7 (unique-local).
+  let h = u.hostname.toLowerCase();
+  // Strip IPv6 brackets if present
+  if(h.startsWith('[') && h.endsWith(']')) h = h.slice(1, -1);
+  if(h === 'localhost' || h === '0.0.0.0' || h === '::' || h === '::1') return false;
+  if(h.startsWith('127.') ||
+     h.startsWith('10.') ||
+     h.startsWith('192.168.') ||
+     h.startsWith('169.254.') ||
      /^172\.(1[6-9]|2\d|3[01])\./.test(h)) return false;
+  // IPv6 link-local fe80::/10 and unique-local fc00::/7. Also IPv4-mapped
+  // forms ::ffff:127.0.0.1 / ::ffff:7f00:1.
+  if(/^fe[89ab][0-9a-f]?:/.test(h)) return false;
+  if(/^f[cd][0-9a-f]{2}:/.test(h)) return false;
+  if(/^::ffff:(7f|0a|c0a8|a9fe|ac1[0-9a-f])/.test(h)) return false;
+  if(/^::ffff:127\./.test(h) || /^::ffff:10\./.test(h) ||
+     /^::ffff:192\.168\./.test(h) || /^::ffff:169\.254\./.test(h) ||
+     /^::ffff:172\.(1[6-9]|2\d|3[01])\./.test(h)) return false;
   return true;
 }
 
 // ── Fetch: try direct, fall back to proxy if configured ────────────────────
+// In-flight controllers keyed by feed.id so removeCalFeed can abort a sync
+// that's still pending. Otherwise the fetch outlives the feed object and
+// writes results into a stale closure (or silently completes for nothing).
+const _calFeedControllers = new Map();
+
 async function fetchICSContent(feed){
   if(feed.content){ return feed.content; }      // paste mode — already have it
   if(!feed.url) throw new Error('No URL or pasted content for feed');
@@ -336,12 +357,14 @@ async function fetchICSContent(feed){
   if(!_calFetchUrlOk(fetchUrl)) throw new Error('Calendar URL must be http(s)');
 
   const ac = new AbortController();
+  if(feed && feed.id) _calFeedControllers.set(feed.id, ac);
   const to = setTimeout(() => ac.abort(), CAL_FETCH_TIMEOUT_MS);
   let res;
   try{
     res = await fetch(fetchUrl, { cache: 'no-cache', signal: ac.signal });
   }finally{
     clearTimeout(to);
+    if(feed && feed.id && _calFeedControllers.get(feed.id) === ac) _calFeedControllers.delete(feed.id);
   }
   if(!res.ok) throw new Error(`HTTP ${res.status}`);
   const text = await res.text();
@@ -380,9 +403,14 @@ async function syncCalFeed(feedId){
     _saveCalFeeds();
     return { count: expanded.length };
   } catch(err) {
-    feed.error = String(err.message || err).slice(0, 120);
-    feed.lastSync = Date.now();
-    _saveCalFeeds();
+    // If the feed was removed mid-sync (AbortError from removeCalFeed) the
+    // feed object is now an orphan; skip writing error state to it.
+    const stillPresent = _calFeeds.feeds.some(f => f.id === feedId);
+    if(stillPresent){
+      feed.error = String(err.message || err).slice(0, 120);
+      feed.lastSync = Date.now();
+      _saveCalFeeds();
+    }
     throw err;
   }
 }
@@ -418,6 +446,13 @@ function addCalFeed({label, url, proxy, content, color}){
 
 function removeCalFeed(feedId){
   _loadCalFeeds();
+  // Abort any in-flight fetch for this feed so it can't write back to a
+  // deleted entry or hold a connection open after removal.
+  const ac = _calFeedControllers.get(feedId);
+  if(ac){
+    try { ac.abort(); } catch(_) {}
+    _calFeedControllers.delete(feedId);
+  }
   _calFeeds.feeds = _calFeeds.feeds.filter(f => f.id !== feedId);
   _saveCalFeeds();
 }
