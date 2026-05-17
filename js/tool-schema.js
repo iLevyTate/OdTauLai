@@ -42,6 +42,117 @@ const TOOL_SCHEMA = {
 /** Task id is not used by these ops (GET_TASK_DETAIL still has id — validated below) */
 const OPS_WITHOUT_TASK_ID = new Set(['QUERY_TASKS','GET_CALENDAR_EVENTS','LIST_CATEGORIES','LIST_LISTS']);
 
+// ---- Intent router (fixes "poor tool selection" on local 1-3B models) ----
+// Local models fed the flat 31-tool list routinely pick adjacent-but-wrong
+// ops: MARK_DONE vs UPDATE_TASK{status:done}, ARCHIVE_TASK vs DELETE_TASK,
+// SNOOZE_TASK vs UPDATE_TASK{hiddenUntil}, REMOVE_CHECK vs REMOVE_TAG. The
+// router classifies the query deterministically, then exposes only the
+// matching subset (plus a read-only baseline) so the LLM picks from a
+// shorter, intent-shaped menu. No model call — pure regex.
+const TOOL_INTENT_MAP = {
+  create:    ['CREATE_TASK','CREATE_FROM_EVENT'],
+  update:    ['UPDATE_TASK'],
+  complete:  ['MARK_DONE','REOPEN'],
+  delete:    ['ARCHIVE_TASK','RESTORE_TASK','DELETE_TASK'],
+  archive:   ['ARCHIVE_TASK','RESTORE_TASK'],
+  star:      ['TOGGLE_STAR'],
+  duplicate: ['DUPLICATE_TASK'],
+  move:      ['MOVE_TASK','CHANGE_LIST'],
+  note:      ['ADD_NOTE'],
+  checklist: ['ADD_CHECKLIST','TOGGLE_CHECK','REMOVE_CHECK'],
+  tag:       ['ADD_TAG','REMOVE_TAG'],
+  blocker:   ['ADD_BLOCKER','REMOVE_BLOCKER'],
+  reminder:  ['SET_REMINDER'],
+  recur:     ['SET_RECUR'],
+  schedule:  ['RESCHEDULE','UPDATE_TASK','CREATE_TASK'],
+  snooze:    ['SNOOZE_TASK'],
+  split:     ['SPLIT_TASK'],
+  classify:  ['CLASSIFY_TASK'],
+  query:     ['QUERY_TASKS','GET_TASK_DETAIL','LIST_CATEGORIES','LIST_LISTS','GET_CALENDAR_EVENTS'],
+  calendar:  ['GET_CALENDAR_EVENTS','CREATE_FROM_EVENT'],
+};
+
+// Always available so the LLM can gather context even when the routed write
+// set is narrow ("mark the dentist task done" needs QUERY_TASKS to find the id).
+const TOOL_INTENT_BASELINE = ['QUERY_TASKS','GET_TASK_DETAIL','LIST_LISTS','LIST_CATEGORIES','GET_CALENDAR_EVENTS'];
+
+// Inline pick-hints for the most-confused pairs. Local models read these and
+// stop picking the adjacent wrong tool — single biggest accuracy win.
+const TOOL_PICK_HINTS = {
+  MARK_DONE:       'complete a task (NOT UPDATE_TASK{status:done})',
+  REOPEN:          'un-complete a task / move done → open',
+  ARCHIVE_TASK:    'soft-remove (always do this before DELETE_TASK)',
+  DELETE_TASK:     'permanently destroy an ALREADY-ARCHIVED task; only on explicit "delete forever"',
+  RESTORE_TASK:    'undo an archive',
+  SNOOZE_TASK:     'hide until a date (prefer over UPDATE_TASK{hiddenUntil})',
+  RESCHEDULE:      'change due date only (prefer over UPDATE_TASK{dueDate})',
+  MOVE_TASK:       'change parent (subtask reparent); for lists use CHANGE_LIST',
+  CHANGE_LIST:     'move between lists; for parent use MOVE_TASK',
+  REMOVE_CHECK:    'remove ONE checklist item (NOT REMOVE_TAG, NOT DELETE_TASK)',
+  REMOVE_TAG:      'remove ONE tag',
+  TOGGLE_CHECK:    'tick / untick a checklist item',
+  SPLIT_TASK:      'break one task into 2+ subtasks at once',
+  CLASSIFY_TASK:   'auto-categorise an existing task by description',
+  QUERY_TASKS:     'call FIRST when you do not have an id from Context',
+  GET_TASK_DETAIL: 'fetch full body when QUERY_TASKS summary is not enough',
+  CREATE_FROM_EVENT: 'turn a calendar event into a task (requires feedId + eventUid)',
+};
+
+// Pattern → intent. Order matters only for readability; classifier accumulates
+// all matches. Patterns are conservative — false negatives fall through to the
+// full-schema default rather than silently dropping a tool the user wanted.
+const _INTENT_RX = [
+  [/\b(delete (forever|permanently)|destroy|nuke|purge|wipe)\b/i, 'delete'],
+  [/\b(archive|stash|trash|put away|get rid of)\b/i, 'archive'],
+  [/\b(restore|unarchive|bring back|recover)\b/i, 'archive'],
+  [/\b(reopen|un-?complete|undo (complete|done))\b/i, 'complete'],
+  [/\b(done|completed?|finish(ed)?|tick off|check off|cross off|wrap(ped)? up|mark .* (done|complete))\b/i, 'complete'],
+  [/\b(snooze|defer|hide until|postpone|push back)\b/i, 'snooze'],
+  [/\b(reschedule|due (date|on|by)|move .*(to|until) (tomorrow|next|this|monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i, 'schedule'],
+  [/\b(remind(er)?|alert|notify|alarm|ping me)\b/i, 'reminder'],
+  [/\b(every (day|week|month|monday|tuesday|wednesday|thursday|friday|saturday|sunday|weekday)|repeats? (daily|weekly|monthly)|recur(ring|s)?|each (day|week|month))\b/i, 'recur'],
+  [/\b(star(red)?|favou?rite|pin(ned)?|unstar|unpin)\b/i, 'star'],
+  [/\b(duplicate|clone|copy)\b/i, 'duplicate'],
+  [/\b(reparent|move .*under|nest .*under)\b/i, 'move'],
+  [/\b(move|put|drag) .*(to|into) (the |my )?[a-z][\w ]* list\b/i, 'move'],
+  [/\b(checklist|sub-?task check|tick|untick|check item)\b/i, 'checklist'],
+  [/(^|\s)#[\w-]+/, 'tag'],
+  [/\b(tag|untag|label|unlabel)\b/i, 'tag'],
+  [/\b(block(ed by|s|er)?|depend(s|ency|encies)? on)\b/i, 'blocker'],
+  [/\b(split|break (into|down)|divide into|chunk into)\b/i, 'split'],
+  [/\b(classify|categori[sz]e|auto-?(tag|categori[sz]e))\b/i, 'classify'],
+  [/\b(note|annotation|comment|add a note)\b/i, 'note'],
+  [/\b(create|add|new|make|register|log|schedule (a|the)|book|plan)\b/i, 'create'],
+  [/\b(rename|update|change|set|edit|modify|priorit[iy](z|s)e|deprioriti[zs]e|make .* (urgent|high|low|normal))\b/i, 'update'],
+  [/(\?|^(what|who|when|where|why|how|which|whose|list|show|tell|describe|summari[sz]e|count|do i|did i|am i|are there|is there))\b/i, 'query'],
+  [/\b(calendar|event|meeting|appointment)\b/i, 'calendar'],
+];
+
+function classifyAskIntent(query){
+  if(typeof query !== 'string') return [];
+  const q = query.trim();
+  if(!q) return [];
+  const out = new Set();
+  for(const [rx, label] of _INTENT_RX){
+    if(rx.test(q)) out.add(label);
+  }
+  return Array.from(out);
+}
+
+function toolNamesForIntents(intents){
+  if(!Array.isArray(intents) || !intents.length){
+    return Object.keys(TOOL_SCHEMA);
+  }
+  const set = new Set(TOOL_INTENT_BASELINE);
+  for(const label of intents){
+    const ts = TOOL_INTENT_MAP[label];
+    if(!ts) continue;
+    for(const t of ts) set.add(t);
+  }
+  const filtered = Array.from(set).filter(n => TOOL_SCHEMA[n]);
+  return filtered.length ? filtered : Object.keys(TOOL_SCHEMA);
+}
+
 const ENUM_FIELDS = {
   priority: ['urgent','high','normal','low','none'],
   status:   ['open','progress','review','blocked','done'],
@@ -328,17 +439,39 @@ function validateOps(raw, ctx){
 
 /**
  * Render a short human-readable schema block that the LLM system prompt
- * enumerates. Generated once at load time from TOOL_SCHEMA above.
+ * enumerates. Accepts an optional filter so the Ask pipeline can pass the
+ * router's narrowed tool subset (see classifyAskIntent + toolNamesForIntents).
+ *
+ * @param {undefined|string[]|{intents?:string[],names?:string[]}} opts
+ *   - undefined / null → full schema (backward-compat)
+ *   - string[] → explicit tool names
+ *   - { intents } → route via toolNamesForIntents
+ *   - { names }   → same as passing the array
  */
-function toolSchemaPromptBlock(){
+function toolSchemaPromptBlock(opts){
+  let names;
+  if(!opts){
+    names = Object.keys(TOOL_SCHEMA);
+  }else if(Array.isArray(opts)){
+    names = opts.filter(n => TOOL_SCHEMA[n]);
+  }else if(opts && Array.isArray(opts.names)){
+    names = opts.names.filter(n => TOOL_SCHEMA[n]);
+  }else if(opts && Array.isArray(opts.intents)){
+    names = toolNamesForIntents(opts.intents);
+  }else{
+    names = Object.keys(TOOL_SCHEMA);
+  }
+  if(!names || !names.length) names = Object.keys(TOOL_SCHEMA);
   const lines = [];
-  Object.keys(TOOL_SCHEMA).forEach(name => {
+  for(const name of names){
     const s = TOOL_SCHEMA[name];
+    if(!s) continue;
     const req = s.required.length ? s.required.join(',') : '';
     const opt = s.optional.length ? s.optional.map(x => x + '?').join(',') : '';
     const args = [req, opt].filter(Boolean).join(',');
-    lines.push('- ' + name + '(' + args + ')');
-  });
+    const hint = TOOL_PICK_HINTS[name] ? '  # ' + TOOL_PICK_HINTS[name] : '';
+    lines.push('- ' + name + '(' + args + ')' + hint);
+  }
   return lines.join('\n');
 }
 
@@ -384,11 +517,29 @@ function parseOpsJson(text){
 /**
  * OpenAI / Qwen2.5-style tool list for `tokenizer.apply_chat_template(..., { tools })`.
  * Parameter types are a best-effort hint; `validateOps` is still authoritative.
+ * Accepts the same router opts as toolSchemaPromptBlock so the native Qwen
+ * tool-call path benefits from the same narrowed menu.
+ *
+ * @param {undefined|string[]|{intents?:string[],names?:string[]}} opts
  */
-function buildOpenAIToolsFromToolSchema(){
+function buildOpenAIToolsFromToolSchema(opts){
+  let names;
+  if(!opts){
+    names = Object.keys(TOOL_SCHEMA);
+  }else if(Array.isArray(opts)){
+    names = opts.filter(n => TOOL_SCHEMA[n]);
+  }else if(opts && Array.isArray(opts.names)){
+    names = opts.names.filter(n => TOOL_SCHEMA[n]);
+  }else if(opts && Array.isArray(opts.intents)){
+    names = toolNamesForIntents(opts.intents);
+  }else{
+    names = Object.keys(TOOL_SCHEMA);
+  }
+  if(!names || !names.length) names = Object.keys(TOOL_SCHEMA);
   const out = [];
-  for(const name of Object.keys(TOOL_SCHEMA)){
+  for(const name of names){
     const def = TOOL_SCHEMA[name];
+    if(!def) continue;
     const required = (def && Array.isArray(def.required)) ? def.required.slice() : [];
     const optional = (def && Array.isArray(def.optional)) ? def.optional : [];
     const seen = new Set();
@@ -411,11 +562,13 @@ function buildOpenAIToolsFromToolSchema(){
         t = 'string';
       properties[k] = { type: t, description: k };
     }
+    const hint = TOOL_PICK_HINTS[name];
+    const desc = hint ? ('Task manager operation: ' + name + ' — ' + hint) : ('Task manager operation: ' + name);
     out.push({
       type: 'function',
       function: {
         name: name,
-        description: 'Task manager operation: ' + name,
+        description: desc,
         parameters: { type: 'object', properties, required: required.length ? required : [] },
       },
     });
@@ -431,4 +584,9 @@ if(typeof window !== 'undefined'){
   window.buildOpenAIToolsFromToolSchema = buildOpenAIToolsFromToolSchema;
   window.ASK_MAX_OPS = ASK_MAX_OPS;
   window.coerceToolArg = _coerceArg;
+  window.classifyAskIntent = classifyAskIntent;
+  window.toolNamesForIntents = toolNamesForIntents;
+  window.TOOL_INTENT_MAP = TOOL_INTENT_MAP;
+  window.TOOL_INTENT_BASELINE = TOOL_INTENT_BASELINE;
+  window.TOOL_PICK_HINTS = TOOL_PICK_HINTS;
 }

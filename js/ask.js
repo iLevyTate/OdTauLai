@@ -123,14 +123,16 @@ function _askListsBlock(){
     .join('\n');
 }
 
-function _askSystemPrompt(){
-  const schema = (typeof toolSchemaPromptBlock === 'function') ? toolSchemaPromptBlock() : '';
+function _askSystemPrompt(intents){
+  const schema = (typeof toolSchemaPromptBlock === 'function')
+    ? toolSchemaPromptBlock(Array.isArray(intents) && intents.length ? { intents } : undefined)
+    : '';
   return [
     'You convert a user request into a JSON array of task operations for a local task manager.',
     'Return ONLY a JSON array. No prose, no code fences, no explanation.',
     'If the request is ambiguous, unsafe, or you cannot match it to the ops below, return [].',
     '',
-    'Allowed ops (name(required,optional?)):',
+    'Allowed ops (name(required,optional?) — comments after # are picking hints):',
     schema,
     '',
     'Rules:',
@@ -179,8 +181,22 @@ function _askIsImperative(q){
 // explain what's missing" instruction so the user actually gets the task or
 // a clear blocker. Date placeholders are rendered concrete in the user
 // message body so the LLM doesn't have to do that arithmetic itself.
-function _askWriteRetrySystemPrompt(){
-  const schema = (typeof toolSchemaPromptBlock === 'function') ? toolSchemaPromptBlock() : '';
+function _askWriteRetrySystemPrompt(intents){
+  // Retry pass: drop the read-only baseline so the model can't dodge with another
+  // QUERY_TASKS turn. Use only write-side tools matched by the router (or all
+  // write tools if the router said nothing).
+  let names = null;
+  if(typeof toolNamesForIntents === 'function' && Array.isArray(intents) && intents.length){
+    const routed = toolNamesForIntents(intents);
+    names = routed.filter(n => {
+      const s = (typeof TOOL_SCHEMA !== 'undefined' && TOOL_SCHEMA) ? TOOL_SCHEMA[n] : null;
+      return s && !s.readOnly;
+    });
+    if(!names.length) names = null;
+  }
+  const schema = (typeof toolSchemaPromptBlock === 'function')
+    ? toolSchemaPromptBlock(names ? { names } : undefined)
+    : '';
   return [
     'You are a write-only task assistant. The user asked you to make a change.',
     'You MUST return a JSON array containing one or more write operations from the schema below, or, if you truly cannot, an explanation in this exact form:',
@@ -445,11 +461,19 @@ async function cognitaskRun(query, opts){
   }
 
   const contextLines = await _askBuildContext(q);
+  // Route the query to a tool subset BEFORE building the prompt / tool list.
+  // Empty intents → full schema (router stays out of the way).
+  const askIntents = (typeof classifyAskIntent === 'function') ? classifyAskIntent(q) : [];
+  const routedToolNames = (askIntents.length && typeof toolNamesForIntents === 'function')
+    ? toolNamesForIntents(askIntents)
+    : null;
   const useNativeQwenTools = typeof isGenModelNativeQwen25Tools === 'function' && isGenModelNativeQwen25Tools()
     && typeof buildOpenAIToolsFromToolSchema === 'function';
-  const cognitaskOpenAITools = useNativeQwenTools ? buildOpenAIToolsFromToolSchema() : null;
+  const cognitaskOpenAITools = useNativeQwenTools
+    ? buildOpenAIToolsFromToolSchema(routedToolNames ? { names: routedToolNames } : undefined)
+    : null;
 
-  const systemJson = _askSystemPrompt() + '\n\nIf you use read-only ops, output ONLY them first; the system will return results, then you output write ops. Do not include prose outside the JSON array.';
+  const systemJson = _askSystemPrompt(askIntents) + '\n\nIf you use read-only ops, output ONLY them first; the system will return results, then you output write ops. Do not include prose outside the JSON array.';
   const systemNativeQwen = 'You are a local task assistant. Use only the provided function tools. '
     + 'Call read tools first if you need tasks, calendar, lists, or categories. '
     + 'Use task ids that appear in the user context. Answer with tool call(s) in the required <tool_call> format; do not add other text.';
@@ -603,7 +627,7 @@ async function cognitaskRun(query, opts){
     if(_askIsImperative(q) && !_askIsQuestionLike(q)){
       try{
         const retryMsgs = [
-          { role: 'system', content: _askWriteRetrySystemPrompt() },
+          { role: 'system', content: _askWriteRetrySystemPrompt(askIntents) },
           ...priorMsgs,
           { role: 'user',   content: _askUserPrompt(q, contextLines) },
         ];
