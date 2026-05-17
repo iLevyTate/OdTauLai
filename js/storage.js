@@ -12,6 +12,13 @@ var syncListDels = {};
 var syncGoalDels = {};
 /** Bump every save; used to merge session/config fields from remote when newer */
 var stateEpoch = 0;
+/** Per-tab nonce used to break ties when two tabs write at the same ms.
+ * Stored as a sibling field on persisted state (stateNonce). Sync.js leaves
+ * stateEpoch in Date.now() range so its clamp keeps working. */
+const _STATE_TAB_NONCE = (typeof crypto !== 'undefined' && crypto.getRandomValues)
+  ? (crypto.getRandomValues(new Uint16Array(1))[0])
+  : ((Math.random() * 0xffff) | 0);
+var stateNonce = 0;
 
 // Main nav tabs — single source for persisted activeTab + ?tab= deep links (see app.js)
 const VALID_MAIN_TABS = ['tasks','focus','tools','data','settings'];
@@ -298,6 +305,7 @@ function saveState(reason){
     if(t) t.totalSec += Math.floor((Date.now()-taskStartedAt)/1000);
   }
   stateEpoch = Date.now();
+  stateNonce = _STATE_TAB_NONCE;
   // Pomodoro live-state snapshot. Persisting these lets a tab-reload mid-focus
   // pick up where it left off (wall-clock based) instead of resetting to a
   // fresh 25:00 — losing minutes the user just earned. Mirrors the quick-timer
@@ -336,6 +344,7 @@ function saveState(reason){
     syncListDels: { ...syncListDels },
     syncGoalDels: { ...syncGoalDels },
     stateEpoch,
+    stateNonce,
   };
   let serialized;
   try {
@@ -707,6 +716,7 @@ function _applyState(s){
     syncListDels = _loadDelMap(s.syncListDels);
     syncGoalDels = _loadDelMap(s.syncGoalDels);
     if(typeof s.stateEpoch === 'number' && s.stateEpoch > 0) stateEpoch = s.stateEpoch;
+    if(typeof s.stateNonce === 'number') stateNonce = s.stateNonce;
 
     return true;
   }catch(e){
@@ -817,7 +827,10 @@ function _mergeRemoteStateLww(raw){
     // the long-break cadence when pomosInCycle gets stuck above cfg.cycle.
     const _localEpoch = typeof stateEpoch === 'number' && stateEpoch > 0 ? stateEpoch : 0;
     const _remoteEpoch = typeof r.stateEpoch === 'number' && r.stateEpoch > 0 ? r.stateEpoch : 0;
-    const _takeRemote = _remoteEpoch > _localEpoch;
+    const _localNonce = typeof stateNonce === 'number' ? stateNonce : 0;
+    const _remoteNonce = typeof r.stateNonce === 'number' ? r.stateNonce : 0;
+    const _takeRemote = _remoteEpoch > _localEpoch ||
+      (_remoteEpoch === _localEpoch && _remoteEpoch > 0 && _remoteNonce > _localNonce);
     if(_takeRemote){
       totalPomos    = _int(r.totalPomos,    totalPomos);
       totalBreaks   = _int(r.totalBreaks,   totalBreaks);
@@ -849,8 +862,13 @@ function _onStorageFromOtherTab(e){
   if(!remote || typeof remote !== 'object') return;
   const re = typeof remote.stateEpoch === 'number' && remote.stateEpoch > 0 ? remote.stateEpoch : 0;
   const le = typeof stateEpoch === 'number' && stateEpoch > 0 ? stateEpoch : 0;
+  // Nonce tiebreaker — two tabs can publish the same Date.now() ms, and
+  // without this the second write was silently skipped. Treat remote as
+  // newer when epochs match AND remote nonce is higher.
+  const rn = typeof remote.stateNonce === 'number' ? remote.stateNonce : 0;
+  const ln = typeof stateNonce === 'number' ? stateNonce : 0;
   const dirty = !!window._stateDirty;
-  if(!dirty && re <= le) return;
+  if(!dirty && re <= le && !(re === le && re > 0 && rn > ln)) return;
   if(dirty && re <= 0) return;
   let ok;
   if(dirty) ok = _mergeRemoteStateLww(remote);
@@ -1264,7 +1282,7 @@ async function exportDataEncrypted(){
       sessionHistory, totalPomos, totalBreaks, totalFocusSec,
       collapsedSections, taskGroupBy, smartView, smartViewsExpanded, taskSortBy, taskView, taskFilters,
       cfg, theme, pomosInCycle, totalDuration, remaining, finished, phase,
-      activeTab, syncTaskDels, syncListDels, syncGoalDels, stateEpoch,
+      activeTab, syncTaskDels, syncListDels, syncGoalDels, stateEpoch, stateNonce,
     },
     archive: getArchives(),
   };

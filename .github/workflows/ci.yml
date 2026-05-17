@@ -15,6 +15,12 @@ jobs:
         with:
           node-version: '20'
       - name: Syntax check all JS
-        run: node --check js/ai.js js/app.js js/ask.js js/audio.js js/calfeeds.js js/embed-store.js js/gen.js js/icons.js js/intel-features.js js/intel.js js/nlparse.js js/pwa.js js/storage.js js/sync.js js/tasks.js js/timer.js js/tool-schema.js js/ui.js js/utils.js js/version.js scripts/run-tests.mjs sw.js
+        run: node --check js/ai.js js/app.js js/ask.js js/audio.js js/calfeeds.js js/embed-store.js js/event-delegation.js js/gen.js js/icons.js js/intel-features.js js/intel.js js/nlparse.js js/pwa.js js/storage.js js/sync.js js/tasks.js js/timer.js js/tool-schema.js js/ui-flip.js js/ui.js js/utils.js js/version.js scripts/run-tests.mjs sw.js
+      - name: Version sync (version.js ↔ sw.js ↔ pwa.js)
+        run: node scripts/check-version-sync.mjs
+      - name: Asset references
+        run: node scripts/check-assets.mjs
+      - name: Inline handler audit (CSP guard — no onclick=/onchange= in HTML)
+        run: node scripts/check-inline-handlers.mjs
       - name: Tests
         run: node scripts/run-tests.mjs

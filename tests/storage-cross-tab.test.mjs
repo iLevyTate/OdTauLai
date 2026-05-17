@@ -28,8 +28,15 @@ test('storage: dirty tab still merges when remote stateEpoch is not higher', () 
   );
   assert.match(
     body,
-    /if\s*\(\s*!dirty\s*&&\s*re\s*<=\s*le\s*\)\s*return/,
-    'non-dirty tabs only skip when remote epoch is not newer',
+    /if\s*\(\s*!dirty\s*&&\s*re\s*<=\s*le[\s\S]*?return/,
+    'non-dirty tabs only skip when remote epoch is not newer (nonce tiebreak optional)',
+  );
+  // Nonce tiebreaker — without this, two tabs writing on the same ms would
+  // silently drop one side's update. See _STATE_TAB_NONCE in storage.js.
+  assert.match(
+    body,
+    /stateNonce/,
+    'cross-tab handler should consider stateNonce as a same-ms tiebreaker',
   );
   assert.match(
     body,

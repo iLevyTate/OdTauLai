@@ -97,24 +97,33 @@ const embedStore = {
     }
     const db = await _openDb();
     const map = new Map();
-    await new Promise((resolve, reject) => {
-      const tx = _tx(db, [STORE_EMB], 'readonly');
-      const rq = tx.objectStore(STORE_EMB).openCursor();
-      rq.onsuccess = e => {
-        const cur = e.target.result;
-        if(!cur){
-          resolve();
-          return;
-        }
-        const r = cur.value;
-        if(r && r.vec) map.set(r.taskId, { vec: new Float32Array(r.vec), textHash: r.textHash });
-        cur.continue();
-      };
-      rq.onerror = () => reject(rq.error);
-    });
-    db.close();
-    _embedAllCache = map;
-    return new Map(_embedAllCache);
+    try {
+      await new Promise((resolve, reject) => {
+        const tx = _tx(db, [STORE_EMB], 'readonly');
+        const rq = tx.objectStore(STORE_EMB).openCursor();
+        rq.onsuccess = e => {
+          const cur = e.target.result;
+          if(!cur){
+            resolve();
+            return;
+          }
+          const r = cur.value;
+          if(r && r.vec) map.set(r.taskId, { vec: new Float32Array(r.vec), textHash: r.textHash });
+          cur.continue();
+        };
+        rq.onerror = () => reject(rq.error);
+      });
+      _embedAllCache = map;
+      return new Map(_embedAllCache);
+    } catch(err) {
+      // Cursor failed (page-hide mid-iteration, IDB error). Leave the cache
+      // null so the next call rebuilds from scratch instead of returning a
+      // partial map that masks corruption.
+      _embedAllCache = null;
+      throw err;
+    } finally {
+      try { db.close(); } catch(_) {}
+    }
   },
 
   async ensure(task){
