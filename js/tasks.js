@@ -437,6 +437,13 @@ function dismissSwipeTip(){
 }
 
 const BULK_LINE_MAX = 200;
+// AbortController for the bulk-import confirm flow. Created fresh on every
+// openBulkImportModal() and aborted by closeBulkImportModal() so a user who
+// dismisses the modal mid-process (Escape / backdrop / Cancel) does not
+// silently end up with the half-import committed. confirmBulkImport snapshots
+// this signal at the start of the flow so a later modal-open with a fresh
+// controller can't "un-abort" the in-flight call.
+let _bulkImportAbort = null;
 function parseBulkTaskPaste(raw){
   const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const bulletRe = /^\s*(?:[-*•·]|[\d]+[.)])\s+/;
@@ -469,6 +476,10 @@ function openBulkImportModal(items, skippedLong){
   const ta = gid('bulkImportTextarea');
   const hint = gid('bulkImportHint');
   if(!ov || !ta) return;
+  // Fresh controller per open. Any prior in-flight import keeps its own
+  // captured signal — we don't reach in and abort it here, because that
+  // would interrupt a confirm() the user explicitly initiated.
+  _bulkImportAbort = new AbortController();
   ta.value = items.join('\n');
   let hintHtml = 'Each line becomes one task. Quick-add tokens work per line (<code>@urgent</code>, <code>#tag</code>, <code>tomorrow</code>, etc.).';
   if(skippedLong > 0){
@@ -513,6 +524,14 @@ function closeBulkImportModal(){
   const ta = gid('bulkImportTextarea');
   if(ta) ta.oninput = null;
   if(typeof removeTabTrap === 'function') removeTabTrap();
+  // Cancel any confirmBulkImport that's still running. Dismissing the modal
+  // is the user saying "stop" — without this they'd close the modal and a
+  // few seconds later watch tasks they didn't expect appear in their list.
+  if(_bulkImportAbort){
+    try { _bulkImportAbort.abort(); } catch(_){}
+    _bulkImportAbort = null;
+  }
+  _setBulkProgress(null);
   // Restore focus to whatever launched the modal (the task input, typically).
   if(ov && ov._prevFocus){
     try { ov._prevFocus.focus(); } catch(_){}
@@ -618,10 +637,15 @@ async function confirmBulkImport(){
   // double-fire and so they SEE that work is happening.
   const btn = gid('bulkImportConfirm');
   if(btn) btn.disabled = true;
+  // Snapshot the signal at start so a later openBulkImportModal() (which
+  // installs a fresh controller) can't make us look "un-aborted" mid-loop.
+  const signal = _bulkImportAbort ? _bulkImportAbort.signal : null;
+  const aborted = () => !!(signal && signal.aborted);
   // try/finally guarantees the button is re-enabled and the progress label
   // is cleared even if a parse or enrichment step throws — without this a
   // single bad line could leave the modal in a permanently disabled state.
   let built = [];
+  let persisted = false;
   try {
     // Parse pass runs in parallel: each parseQuickAddAsync awaits a shared
     // chrono module (memoized in nlparse.js) and a small synchronous regex
@@ -634,6 +658,7 @@ async function confirmBulkImport(){
       const parsed = await Promise.all(lines.map(line =>
         parseFn(line).catch(() => ({ name: line, props: {} }))
       ));
+      if(aborted()) return;
       built = parsed.map((p, i) => {
         const name = (p && p.name) ? p.name : lines[i];
         const props = (p && p.props) ? p.props : {};
@@ -654,9 +679,11 @@ async function confirmBulkImport(){
     if(autoOn){
       const total = built.length;
       for(let i = 0; i < total; i++){
+        if(aborted()) return;
         _setBulkProgress('Auto-organizing ' + (i + 1) + ' / ' + total + '…');
         // Yield so the progress text actually paints between items.
         await new Promise(r => setTimeout(r, 0));
+        if(aborted()) return;
         try {
           const enriched = await _bulkEnrichOne(built[i].name);
           // Predicted fields go in FIRST, explicit quick-add tokens overlay on top.
@@ -665,6 +692,7 @@ async function confirmBulkImport(){
       }
       _setBulkProgress(null);
     }
+    if(aborted()) return;
     // Persist phase — single render + save at the end.
     for(const b of built){
       const _bt = Object.assign({
@@ -674,10 +702,15 @@ async function confirmBulkImport(){
       tasks.push(_bt);
       _taskIndexRegister(_bt);
     }
+    persisted = true;
   } finally {
     if(btn) btn.disabled = false;
     _setBulkProgress(null);
   }
+  // If the modal was dismissed before the persist phase ran, exit silently —
+  // no half-finished batch lands in the list and no toast suggests work
+  // happened. closeBulkImportModal already restored focus and reset state.
+  if(!persisted) return;
   closeBulkImportModal();
   const inp = gid('taskInput');
   if(inp) inp.value = '';
