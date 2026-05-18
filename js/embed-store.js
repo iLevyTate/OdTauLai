@@ -281,6 +281,11 @@ const embedStore = {
     for(let i = 0; i < list.length; i++){
       try{ await embedStore.ensure(list[i]); }catch(e){ /* one bad task */ }
       if(typeof onProgress === 'function') onProgress(i + 1, total);
+      // Yield to the event loop so the progress callback's DOM write
+      // actually paints. Without this, the banner sits on "Re-indexing
+      // tasks…" with no number until the entire loop completes — which
+      // can be tens of seconds on a large vault.
+      await new Promise(r => setTimeout(r, 0));
     }
   },
 };

@@ -1147,6 +1147,9 @@ async function autoOrganizeIntoLists(opts){
     for(const t of tasks){
       if(!t || t.archived || t.status === 'done') continue;
       try{ await embedStore.ensure(t); }catch(e){ /* skip */ }
+      // WASM embeddings block the main thread — yield so the AI panel can
+      // repaint between items instead of freezing for the whole batch.
+      await new Promise(r => setTimeout(r, 0));
     }
   }
 
@@ -1207,6 +1210,8 @@ async function proposeHarmonizeUpdates(opts){
   if(typeof embedStore !== 'undefined' && embedStore.ensure){
     for(const t of active){
       try{ await embedStore.ensure(t); }catch(e){ /* skip */ }
+      // Yield between WASM embeds so Harmonize doesn't freeze the AI panel.
+      await new Promise(r => setTimeout(r, 0));
     }
   }
   const store = await embedStore.all();
@@ -1301,6 +1306,8 @@ async function proposeReclassifyUncategorized(){
   if(typeof embedStore !== 'undefined' && embedStore.ensure){
     for(const t of targets){
       try{ await embedStore.ensure(t); }catch(e){}
+      // Yield between WASM embeds so Reclassify doesn't freeze the AI panel.
+      await new Promise(r => setTimeout(r, 0));
     }
   }
   const store = await embedStore.all();

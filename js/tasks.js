@@ -437,6 +437,13 @@ function dismissSwipeTip(){
 }
 
 const BULK_LINE_MAX = 200;
+// AbortController for the bulk-import confirm flow. Created fresh on every
+// openBulkImportModal() and aborted by closeBulkImportModal() so a user who
+// dismisses the modal mid-process (Escape / backdrop / Cancel) does not
+// silently end up with the half-import committed. confirmBulkImport snapshots
+// this signal at the start of the flow so a later modal-open with a fresh
+// controller can't "un-abort" the in-flight call.
+let _bulkImportAbort = null;
 function parseBulkTaskPaste(raw){
   const lines = raw.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
   const bulletRe = /^\s*(?:[-*•·]|[\d]+[.)])\s+/;
@@ -457,6 +464,10 @@ function taskInputPaste(e){
   const { items, skippedLong } = parseBulkTaskPaste(text);
   if(items.length < 2) return;
   e.preventDefault();
+  // Kick off the chrono CDN import in parallel with the modal opening so the
+  // first parseQuickAddAsync inside confirmBulkImport doesn't block on a
+  // cold dynamic import. Fire-and-forget — failures are non-fatal.
+  if(typeof loadChrono === 'function'){ try { loadChrono().catch(()=>{}); } catch(_){} }
   openBulkImportModal(items, skippedLong);
 }
 
@@ -465,6 +476,10 @@ function openBulkImportModal(items, skippedLong){
   const ta = gid('bulkImportTextarea');
   const hint = gid('bulkImportHint');
   if(!ov || !ta) return;
+  // Fresh controller per open. Any prior in-flight import keeps its own
+  // captured signal — we don't reach in and abort it here, because that
+  // would interrupt a confirm() the user explicitly initiated.
+  _bulkImportAbort = new AbortController();
   ta.value = items.join('\n');
   let hintHtml = 'Each line becomes one task. Quick-add tokens work per line (<code>@urgent</code>, <code>#tag</code>, <code>tomorrow</code>, etc.).';
   if(skippedLong > 0){
@@ -475,6 +490,11 @@ function openBulkImportModal(items, skippedLong){
   _syncBulkImportAutoToggle();
   ta.oninput = _updateBulkImportButtonState;
   ov.classList.add('open');
+  // Pre-warm the chrono CDN module while the user is reviewing — without this
+  // the first parseQuickAddAsync call inside confirmBulkImport blocks on the
+  // dynamic import (1-3s cold), which read as a UI freeze for users pasting
+  // a batch and immediately clicking Add.
+  if(typeof loadChrono === 'function'){ try { loadChrono().catch(()=>{}); } catch(_){} }
   setTimeout(() => ta.focus(), 30);
   // Modal focus management — trap Tab/Shift+Tab inside the dialog so users
   // can't accidentally tab back to the page behind it.
@@ -504,6 +524,14 @@ function closeBulkImportModal(){
   const ta = gid('bulkImportTextarea');
   if(ta) ta.oninput = null;
   if(typeof removeTabTrap === 'function') removeTabTrap();
+  // Cancel any confirmBulkImport that's still running. Dismissing the modal
+  // is the user saying "stop" — without this they'd close the modal and a
+  // few seconds later watch tasks they didn't expect appear in their list.
+  if(_bulkImportAbort){
+    try { _bulkImportAbort.abort(); } catch(_){}
+    _bulkImportAbort = null;
+  }
+  _setBulkProgress(null);
   // Restore focus to whatever launched the modal (the task input, typically).
   if(ov && ov._prevFocus){
     try { ov._prevFocus.focus(); } catch(_){}
@@ -609,47 +637,80 @@ async function confirmBulkImport(){
   // double-fire and so they SEE that work is happening.
   const btn = gid('bulkImportConfirm');
   if(btn) btn.disabled = true;
-  // Build all tasks first (parse pass), then optionally enrich (slow pass),
-  // then close the modal — this way the progress UI stays visible during
-  // the slow path instead of blocking on a closed modal.
-  const built = [];
-  for(let i = 0; i < lines.length; i++){
-    const line = lines[i];
-    let name, props;
-    if(typeof parseQuickAddAsync === 'function'){
-      const parsed = await parseQuickAddAsync(line);
-      name = parsed.name;
-      props = parsed.props;
+  // Snapshot the signal at start so a later openBulkImportModal() (which
+  // installs a fresh controller) can't make us look "un-aborted" mid-loop.
+  const signal = _bulkImportAbort ? _bulkImportAbort.signal : null;
+  const aborted = () => !!(signal && signal.aborted);
+  // try/finally guarantees the button is re-enabled and the progress label
+  // is cleared even if a parse or enrichment step throws — without this a
+  // single bad line could leave the modal in a permanently disabled state.
+  let built = [];
+  let persisted = false;
+  try {
+    // Parse pass runs in parallel: each parseQuickAddAsync awaits a shared
+    // chrono module (memoized in nlparse.js) and a small synchronous regex
+    // pass. Running them sequentially with await chained the cold CDN load
+    // and ~N microtask hops onto the same frame, which read as a freeze
+    // when a user pasted a batch. Promise.all lets the browser interleave
+    // them and yields to paint between microtasks.
+    const parseFn = typeof parseQuickAddAsync === 'function' ? parseQuickAddAsync : null;
+    if(parseFn){
+      const parsed = await Promise.all(lines.map(line =>
+        parseFn(line).catch(() => ({ name: line, props: {} }))
+      ));
+      if(aborted()) return;
+      built = parsed.map((p, i) => {
+        const name = (p && p.name) ? p.name : lines[i];
+        const props = (p && p.props) ? p.props : {};
+        return { name, props };
+      });
     } else {
-      const p = parseQuickAdd(line);
-      name = p.name;
-      props = p.props;
+      built = lines.map(line => {
+        const p = parseQuickAdd(line);
+        return { name: p.name || line, props: p.props || {} };
+      });
     }
-    if(!name){ name = line; props = {}; }
-    built.push({ name, props });
-  }
-  // Enrichment pass — only when the user opted in. Quick-add tokens (props)
-  // win over predicted metadata so explicit "@urgent" beats a model guess.
-  if(autoOn){
-    const total = built.length;
-    for(let i = 0; i < total; i++){
-      _setBulkProgress('Auto-organizing ' + (i + 1) + ' / ' + total + '…');
-      const enriched = await _bulkEnrichOne(built[i].name);
-      // Predicted fields go in FIRST, explicit quick-add tokens overlay on top.
-      built[i].props = Object.assign({}, enriched, built[i].props);
+    // Enrichment pass — only when the user opted in. Quick-add tokens (props)
+    // win over predicted metadata so explicit "@urgent" beats a model guess.
+    // Each _bulkEnrichOne runs on-device embeddings on the main thread, so
+    // we yield to the event loop between items. Without this, a batch of
+    // ~10 items locks the UI for several seconds while the WASM model runs
+    // back-to-back — the symptom users reported as a freeze.
+    if(autoOn){
+      const total = built.length;
+      for(let i = 0; i < total; i++){
+        if(aborted()) return;
+        _setBulkProgress('Auto-organizing ' + (i + 1) + ' / ' + total + '…');
+        // Yield so the progress text actually paints between items.
+        await new Promise(r => setTimeout(r, 0));
+        if(aborted()) return;
+        try {
+          const enriched = await _bulkEnrichOne(built[i].name);
+          // Predicted fields go in FIRST, explicit quick-add tokens overlay on top.
+          built[i].props = Object.assign({}, enriched, built[i].props);
+        } catch(e){ console.warn('[bulk-import] enrich failed for line', i, e); }
+      }
+      _setBulkProgress(null);
     }
+    if(aborted()) return;
+    // Persist phase — single render + save at the end.
+    for(const b of built){
+      const _bt = Object.assign({
+        id:++taskIdCtr, name:b.name, totalSec:0, sessions:0, created:timeNowFull(),
+        parentId:null, collapsed:false
+      }, defaultTaskProps(), b.props);
+      tasks.push(_bt);
+      _taskIndexRegister(_bt);
+    }
+    persisted = true;
+  } finally {
+    if(btn) btn.disabled = false;
     _setBulkProgress(null);
   }
-  // Persist phase — single render + save at the end.
-  for(const b of built){
-    const _bt = Object.assign({
-      id:++taskIdCtr, name:b.name, totalSec:0, sessions:0, created:timeNowFull(),
-      parentId:null, collapsed:false
-    }, defaultTaskProps(), b.props);
-    tasks.push(_bt);
-    _taskIndexRegister(_bt);
-  }
-  if(btn) btn.disabled = false;
+  // If the modal was dismissed before the persist phase ran, exit silently —
+  // no half-finished batch lands in the list and no toast suggests work
+  // happened. closeBulkImportModal already restored focus and reset state.
+  if(!persisted) return;
   closeBulkImportModal();
   const inp = gid('taskInput');
   if(inp) inp.value = '';
@@ -1918,20 +1979,32 @@ function updateTaskFilters(){
   // Render the parsed operator chips so the user sees what matched.
   if(typeof renderSearchOpPills === 'function') renderSearchOpPills();
   if(window._taskSearchSemantic && taskFilters.search && typeof semanticSearch === 'function' && typeof isIntelReady === 'function' && isIntelReady()){
+    // Debounce the semantic path the same way as the literal path. Without
+    // this, every keystroke fired a fresh semanticSearch → embedText, which
+    // is a main-thread WASM call. The request-id pattern below cancels stale
+    // RESULTS but does not cancel the in-flight WASM work — typing "groceries"
+    // queued 9 sequential inferences and the UI froze for the duration.
     const rawQ = gid('taskSearch').value.trim();
-    const myReq=++_semanticSearchReqId;
-    void (async () => {
-      try{
-        const results = await semanticSearch(rawQ, 800);
+    if(_updateTaskFiltersDebounce) clearTimeout(_updateTaskFiltersDebounce);
+    _updateTaskFiltersDebounce = setTimeout(() => {
+      _updateTaskFiltersDebounce = null;
+      // Re-read the live query at fire time so the request matches what the
+      // user actually settled on, not the keystroke that scheduled the timer.
+      const liveQ = (gid('taskSearch') && gid('taskSearch').value.trim()) || rawQ;
+      const myReq = ++_semanticSearchReqId;
+      void (async () => {
+        try{
+          const results = await semanticSearch(liveQ, 800);
+          if(myReq!==_semanticSearchReqId) return;
+          window._semanticScores = new Map(results.map(r => [r.id, r.score]));
+        }catch(e){
+          if(myReq!==_semanticSearchReqId) return;
+          window._semanticScores = null;
+        }
         if(myReq!==_semanticSearchReqId) return;
-        window._semanticScores = new Map(results.map(r => [r.id, r.score]));
-      }catch(e){
-        if(myReq!==_semanticSearchReqId) return;
-        window._semanticScores = null;
-      }
-      if(myReq!==_semanticSearchReqId) return;
-      renderTaskList();
-    })();
+        renderTaskList();
+      })();
+    }, 200);
     return;
   }
   window._semanticScores = null;

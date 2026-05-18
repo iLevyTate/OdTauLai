@@ -1257,6 +1257,9 @@ async function aiAlign(){
     let notesWritten = 0;
     const MAX_LLM_NOTES = 8;
     for(const t of active){
+      // Yield between iterations so the AI panel can repaint — alignValuesForTask
+      // may call embedText on a cache miss, which blocks the main thread.
+      await new Promise(r => setTimeout(r, 0));
       const vals = await alignValuesForTask(t.id);
       if(!vals.length) continue;
       const filtered = vals.filter(v => _cfg.dominant.includes(v));

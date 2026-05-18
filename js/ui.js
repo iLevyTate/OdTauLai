@@ -1502,6 +1502,13 @@ function renderTaskItem(t,depth){
       // Long-press only triggers when the finger hasn't moved enough to count
       // as a swipe. Enters bulk mode and selects this task as the first item.
       if(swiping) return;
+      // The host element may have been detached and replaced by a fresh
+      // renderTaskList between touchstart and now (any save / sync patch /
+      // filter change forces a re-render). Without this guard, the timer
+      // still fires on the orphan element and silently flips the user into
+      // bulk mode on a task they're no longer touching, with no touchend
+      // listener to clean it up.
+      if(!d.isConnected) return;
       _longPressFired=true;
       haptic(20);
       if(typeof isBulkMode === 'function' && !isBulkMode() && typeof toggleBulkMode === 'function'){
