@@ -492,16 +492,39 @@ if(typeof window !== 'undefined') window._maybeCheckStorageQuota = _maybeCheckSt
 
 let _embedEnsureIds=new Set();
 let _embedEnsureT=null;
-function _flushEmbedEnsure(){
+let _embedEnsureRunning=false;
+async function _flushEmbedEnsure(){
   _embedEnsureT=null;
+  if(_embedEnsureRunning) return; // another flush is mid-loop; new ids stay queued
   if(typeof embedStore === 'undefined' || !embedStore || !embedStore.ensure) return;
   const ids=[..._embedEnsureIds];
   _embedEnsureIds.clear();
-  ids.forEach(id=>{
-    const t=typeof findTask==='function'?findTask(id):null;
-    if(t) embedStore.ensure(t).catch(()=>{});
-  });
+  if(!ids.length){
+    if(typeof scheduleIntelDupRefresh==='function') scheduleIntelDupRefresh();
+    return;
+  }
+  // Process ensures one at a time with a yield between each. Firing them
+  // concurrently (the old forEach pattern) doesn't actually parallelize the
+  // work — the WASM embedding model is a single instance that serializes
+  // calls internally — but it does pin the main thread for the entire
+  // batch, which read as a UI freeze right after a bulk paste / multi-task
+  // save. Yielding via setTimeout(0) lets the browser paint between items.
+  _embedEnsureRunning = true;
+  try {
+    for(const id of ids){
+      const t = typeof findTask === 'function' ? findTask(id) : null;
+      if(!t) continue;
+      try { await embedStore.ensure(t); } catch(_){}
+      await new Promise(r => setTimeout(r, 0));
+    }
+  } finally {
+    _embedEnsureRunning = false;
+  }
   if(typeof scheduleIntelDupRefresh==='function') scheduleIntelDupRefresh();
+  // If new ids landed during the run, drain them on the next tick.
+  if(_embedEnsureIds.size && !_embedEnsureT){
+    _embedEnsureT = setTimeout(_flushEmbedEnsure, 250);
+  }
 }
 function _queueEmbedEnsure(ids){
   if(!ids||!ids.length) return;
