@@ -20,11 +20,15 @@
   </defs>
   <!-- Full-bleed plate (OS applies mask) -->
   <rect width="512" height="512" fill="url(#mbg)"/>
-  <!-- Marks scaled to ~80% Android safe zone (inset ~10% each side) -->
-  <g transform="translate(256 256) scale(1.17) translate(-256 -256)">
-    <path d="M 119.2 177 A 158 158 0 1 1 177 392.8"
-          fill="none" stroke="url(#mmark)" stroke-width="22" stroke-linecap="round"/>
-    <path d="M 168 268 L 228 328 L 352 184"
-          fill="none" stroke="url(#mmark)" stroke-width="28" stroke-linecap="round" stroke-linejoin="round" filter="url(#mglow)"/>
-  </g>
+  <!-- Marks at identical scale to icon.svg so the home-screen (maskable)
+       and splash / app-drawer (non-maskable) renders show the visible
+       mark at the same size and position. The earlier 1.17x scale-from-
+       centre made the mark on the home-screen icon ~17% larger than the
+       mark on the auto-generated PWA splash; the transition between the
+       two read as a small downward jump on launch. The mark already sits
+       inside the 80% maskable safe zone (arc r=158, max extent ~414/512). -->
+  <path d="M 119.2 177 A 158 158 0 1 1 177 392.8"
+        fill="none" stroke="url(#mmark)" stroke-width="22" stroke-linecap="round"/>
+  <path d="M 168 268 L 228 328 L 352 184"
+        fill="none" stroke="url(#mmark)" stroke-width="28" stroke-linecap="round" stroke-linejoin="round" filter="url(#mglow)"/>
 </svg>

@@ -2858,7 +2858,7 @@
   backdrop-filter:blur(8px);
   letter-spacing:0.02em;
 }
-body:has(.offline-indicator:not([style*="display:none"])){ padding-top:30px; }
+body:has(.offline-indicator:not([hidden])){ padding-top:30px; }
 
 /* Update-available banner — bottom of screen, dismissable */
 .update-banner{
@@ -3327,6 +3327,8 @@ body:has(.gen-load-ribbon:not([hidden])):has(.update-banner) .quota-warning{
 /* Lift above the mini-timer pill when it's visible (mini-timer occupies the
    same bottom-right corner at bottom:16px right:16px and is ~48px tall). */
 body:has(.mini-timer.visible) .export-toast{bottom:calc(76px + env(safe-area-inset-bottom,0px))}
+body:has(.gen-load-ribbon:not([hidden])) .export-toast{bottom:calc(84px + env(safe-area-inset-bottom,0px))}
+body:has(.mini-timer.visible):has(.gen-load-ribbon:not([hidden])) .export-toast{bottom:calc(140px + env(safe-area-inset-bottom,0px))}
 
 /* Action toast — like .export-toast but carries an inline action button
    (Undo). Stacks above .export-toast in the same bottom-right column. */
@@ -3340,8 +3342,16 @@ body:has(.mini-timer.visible) .export-toast{bottom:calc(76px + env(safe-area-ins
   opacity:0;pointer-events:none;transition:opacity .18s ease,transform .18s ease;
   max-width:min(90vw,420px);
 }
-.action-toast.show{opacity:1;pointer-events:auto;transform:translateY(0)}
+/* Stay non-interactive on the host even when visible — only the inline
+   .action-toast-btn (Undo) needs to catch taps. Otherwise the pill
+   silently swallows clicks on whatever task row sits behind it. */
+.action-toast.show{opacity:1;transform:translateY(0)}
+.action-toast .action-toast-btn{pointer-events:auto}
 body:has(.mini-timer.visible) .action-toast{bottom:calc(132px + env(safe-area-inset-bottom,0px))}
+/* Lift toast clear of the on-device LLM ribbon when it's streaming weights —
+   otherwise the toast lands directly on top of the ribbon's progress bar. */
+body:has(.gen-load-ribbon:not([hidden])) .action-toast{bottom:calc(140px + env(safe-area-inset-bottom,0px))}
+body:has(.mini-timer.visible):has(.gen-load-ribbon:not([hidden])) .action-toast{bottom:calc(196px + env(safe-area-inset-bottom,0px))}
 /* When a modal or command palette is open, lift the bottom-anchored auto-
    dismiss toasts above the modal's sticky footer so feedback isn't hidden
    behind it. Modals are flex-start anchored with a sticky .modal-foot at the
