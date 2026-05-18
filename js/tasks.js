@@ -457,6 +457,10 @@ function taskInputPaste(e){
   const { items, skippedLong } = parseBulkTaskPaste(text);
   if(items.length < 2) return;
   e.preventDefault();
+  // Kick off the chrono CDN import in parallel with the modal opening so the
+  // first parseQuickAddAsync inside confirmBulkImport doesn't block on a
+  // cold dynamic import. Fire-and-forget — failures are non-fatal.
+  if(typeof loadChrono === 'function'){ try { loadChrono().catch(()=>{}); } catch(_){} }
   openBulkImportModal(items, skippedLong);
 }
 
@@ -475,6 +479,11 @@ function openBulkImportModal(items, skippedLong){
   _syncBulkImportAutoToggle();
   ta.oninput = _updateBulkImportButtonState;
   ov.classList.add('open');
+  // Pre-warm the chrono CDN module while the user is reviewing — without this
+  // the first parseQuickAddAsync call inside confirmBulkImport blocks on the
+  // dynamic import (1-3s cold), which read as a UI freeze for users pasting
+  // a batch and immediately clicking Add.
+  if(typeof loadChrono === 'function'){ try { loadChrono().catch(()=>{}); } catch(_){} }
   setTimeout(() => ta.focus(), 30);
   // Modal focus management — trap Tab/Shift+Tab inside the dialog so users
   // can't accidentally tab back to the page behind it.
@@ -609,47 +618,66 @@ async function confirmBulkImport(){
   // double-fire and so they SEE that work is happening.
   const btn = gid('bulkImportConfirm');
   if(btn) btn.disabled = true;
-  // Build all tasks first (parse pass), then optionally enrich (slow pass),
-  // then close the modal — this way the progress UI stays visible during
-  // the slow path instead of blocking on a closed modal.
-  const built = [];
-  for(let i = 0; i < lines.length; i++){
-    const line = lines[i];
-    let name, props;
-    if(typeof parseQuickAddAsync === 'function'){
-      const parsed = await parseQuickAddAsync(line);
-      name = parsed.name;
-      props = parsed.props;
+  // try/finally guarantees the button is re-enabled and the progress label
+  // is cleared even if a parse or enrichment step throws — without this a
+  // single bad line could leave the modal in a permanently disabled state.
+  let built = [];
+  try {
+    // Parse pass runs in parallel: each parseQuickAddAsync awaits a shared
+    // chrono module (memoized in nlparse.js) and a small synchronous regex
+    // pass. Running them sequentially with await chained the cold CDN load
+    // and ~N microtask hops onto the same frame, which read as a freeze
+    // when a user pasted a batch. Promise.all lets the browser interleave
+    // them and yields to paint between microtasks.
+    const parseFn = typeof parseQuickAddAsync === 'function' ? parseQuickAddAsync : null;
+    if(parseFn){
+      const parsed = await Promise.all(lines.map(line =>
+        parseFn(line).catch(() => ({ name: line, props: {} }))
+      ));
+      built = parsed.map((p, i) => {
+        const name = (p && p.name) ? p.name : lines[i];
+        const props = (p && p.props) ? p.props : {};
+        return { name, props };
+      });
     } else {
-      const p = parseQuickAdd(line);
-      name = p.name;
-      props = p.props;
+      built = lines.map(line => {
+        const p = parseQuickAdd(line);
+        return { name: p.name || line, props: p.props || {} };
+      });
     }
-    if(!name){ name = line; props = {}; }
-    built.push({ name, props });
-  }
-  // Enrichment pass — only when the user opted in. Quick-add tokens (props)
-  // win over predicted metadata so explicit "@urgent" beats a model guess.
-  if(autoOn){
-    const total = built.length;
-    for(let i = 0; i < total; i++){
-      _setBulkProgress('Auto-organizing ' + (i + 1) + ' / ' + total + '…');
-      const enriched = await _bulkEnrichOne(built[i].name);
-      // Predicted fields go in FIRST, explicit quick-add tokens overlay on top.
-      built[i].props = Object.assign({}, enriched, built[i].props);
+    // Enrichment pass — only when the user opted in. Quick-add tokens (props)
+    // win over predicted metadata so explicit "@urgent" beats a model guess.
+    // Each _bulkEnrichOne runs on-device embeddings on the main thread, so
+    // we yield to the event loop between items. Without this, a batch of
+    // ~10 items locks the UI for several seconds while the WASM model runs
+    // back-to-back — the symptom users reported as a freeze.
+    if(autoOn){
+      const total = built.length;
+      for(let i = 0; i < total; i++){
+        _setBulkProgress('Auto-organizing ' + (i + 1) + ' / ' + total + '…');
+        // Yield so the progress text actually paints between items.
+        await new Promise(r => setTimeout(r, 0));
+        try {
+          const enriched = await _bulkEnrichOne(built[i].name);
+          // Predicted fields go in FIRST, explicit quick-add tokens overlay on top.
+          built[i].props = Object.assign({}, enriched, built[i].props);
+        } catch(e){ console.warn('[bulk-import] enrich failed for line', i, e); }
+      }
+      _setBulkProgress(null);
     }
+    // Persist phase — single render + save at the end.
+    for(const b of built){
+      const _bt = Object.assign({
+        id:++taskIdCtr, name:b.name, totalSec:0, sessions:0, created:timeNowFull(),
+        parentId:null, collapsed:false
+      }, defaultTaskProps(), b.props);
+      tasks.push(_bt);
+      _taskIndexRegister(_bt);
+    }
+  } finally {
+    if(btn) btn.disabled = false;
     _setBulkProgress(null);
   }
-  // Persist phase — single render + save at the end.
-  for(const b of built){
-    const _bt = Object.assign({
-      id:++taskIdCtr, name:b.name, totalSec:0, sessions:0, created:timeNowFull(),
-      parentId:null, collapsed:false
-    }, defaultTaskProps(), b.props);
-    tasks.push(_bt);
-    _taskIndexRegister(_bt);
-  }
-  if(btn) btn.disabled = false;
   closeBulkImportModal();
   const inp = gid('taskInput');
   if(inp) inp.value = '';
