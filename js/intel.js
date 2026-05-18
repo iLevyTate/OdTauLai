@@ -25,6 +25,32 @@ function getEmbedDim(){ return _embedDim; }
 function getActiveEmbedModelId(){ return _activeEmbedModel; }
 
 /**
+ * Pre-flight check: verify the browser can actually create a WebGPU device.
+ * Returns true only when adapter + device succeed; false on any failure.
+ *
+ * Mirrors the probe in gen.js. Without this, attempting `device: 'webgpu'`
+ * in pipeline() on hardware where WebGPU is nominally present but the GPU
+ * backend can't initialise (broken drivers, denied permissions, headless
+ * adapters) can trigger a fatal ONNX Runtime WASM `Aborted()` that kills
+ * the page — bypassing the surrounding try/catch and leaving the user
+ * with a dead tab instead of the WASM fallback they'd otherwise get.
+ */
+async function _probeWebGPU(){
+  try{
+    if(typeof navigator === 'undefined' || !navigator.gpu) return false;
+    const adapter = await navigator.gpu.requestAdapter();
+    if(!adapter) return false;
+    const device = await adapter.requestDevice();
+    if(!device) return false;
+    device.destroy();
+    return true;
+  }catch(e){
+    console.info('[intel] WebGPU probe failed — will use WASM (CPU)', e);
+    return false;
+  }
+}
+
+/**
  * @param {(progress: { progress?: number, status?: string }) => void} [onProgress]
  */
 async function intelLoad(onProgress){
@@ -59,24 +85,35 @@ async function intelLoad(onProgress){
     };
 
     try{
-      try{
-        _extractor = await pipeline('feature-extraction', EMBED_MODEL_WEBGPU, {
-          device: 'webgpu',
-          dtype: 'fp16',
-          progress_callback: cb,
-        });
-        _intelDevice = 'webgpu';
-        _embedDim = EMBED_DIM_WEBGPU;
-        _activeEmbedModel = EMBED_MODEL_WEBGPU;
-      }catch(e){
-        console.warn('[intel] WebGPU pipeline failed, falling back to WASM + bge-small', e);
-        // Surface a brief notification so the user knows the fallback happened
-        if(typeof showExportToast === 'function'){
-          const reason = (e && e.message && /401|unauthorized/i.test(e.message))
-            ? 'Auth error — using smaller model (WASM)'
-            : 'WebGPU unavailable — using WASM fallback';
-          showExportToast(reason);
+      // Only attempt WebGPU when a real adapter + device round-trip succeeds.
+      // Skipping the probe and letting pipeline() try directly can trigger a
+      // fatal WASM Aborted() on broken-driver setups — see _probeWebGPU.
+      const gpuOk = await _probeWebGPU();
+      let webgpuOk = false;
+      if(gpuOk){
+        try{
+          _extractor = await pipeline('feature-extraction', EMBED_MODEL_WEBGPU, {
+            device: 'webgpu',
+            dtype: 'fp16',
+            progress_callback: cb,
+          });
+          _intelDevice = 'webgpu';
+          _embedDim = EMBED_DIM_WEBGPU;
+          _activeEmbedModel = EMBED_MODEL_WEBGPU;
+          webgpuOk = true;
+        }catch(e){
+          console.warn('[intel] WebGPU pipeline failed, falling back to WASM + bge-small', e);
+          if(typeof showExportToast === 'function'){
+            const reason = (e && e.message && /401|unauthorized/i.test(e.message))
+              ? 'Auth error — using smaller model (WASM)'
+              : 'WebGPU unavailable — using WASM fallback';
+            showExportToast(reason);
+          }
         }
+      } else {
+        console.info('[intel] WebGPU not available — loading with WASM (CPU)');
+      }
+      if(!webgpuOk){
         await loadWasmFallback();
       }
       _intelReady = true;
