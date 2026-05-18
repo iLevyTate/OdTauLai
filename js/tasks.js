@@ -1946,20 +1946,32 @@ function updateTaskFilters(){
   // Render the parsed operator chips so the user sees what matched.
   if(typeof renderSearchOpPills === 'function') renderSearchOpPills();
   if(window._taskSearchSemantic && taskFilters.search && typeof semanticSearch === 'function' && typeof isIntelReady === 'function' && isIntelReady()){
+    // Debounce the semantic path the same way as the literal path. Without
+    // this, every keystroke fired a fresh semanticSearch → embedText, which
+    // is a main-thread WASM call. The request-id pattern below cancels stale
+    // RESULTS but does not cancel the in-flight WASM work — typing "groceries"
+    // queued 9 sequential inferences and the UI froze for the duration.
     const rawQ = gid('taskSearch').value.trim();
-    const myReq=++_semanticSearchReqId;
-    void (async () => {
-      try{
-        const results = await semanticSearch(rawQ, 800);
+    if(_updateTaskFiltersDebounce) clearTimeout(_updateTaskFiltersDebounce);
+    _updateTaskFiltersDebounce = setTimeout(() => {
+      _updateTaskFiltersDebounce = null;
+      // Re-read the live query at fire time so the request matches what the
+      // user actually settled on, not the keystroke that scheduled the timer.
+      const liveQ = (gid('taskSearch') && gid('taskSearch').value.trim()) || rawQ;
+      const myReq = ++_semanticSearchReqId;
+      void (async () => {
+        try{
+          const results = await semanticSearch(liveQ, 800);
+          if(myReq!==_semanticSearchReqId) return;
+          window._semanticScores = new Map(results.map(r => [r.id, r.score]));
+        }catch(e){
+          if(myReq!==_semanticSearchReqId) return;
+          window._semanticScores = null;
+        }
         if(myReq!==_semanticSearchReqId) return;
-        window._semanticScores = new Map(results.map(r => [r.id, r.score]));
-      }catch(e){
-        if(myReq!==_semanticSearchReqId) return;
-        window._semanticScores = null;
-      }
-      if(myReq!==_semanticSearchReqId) return;
-      renderTaskList();
-    })();
+        renderTaskList();
+      })();
+    }, 200);
     return;
   }
   window._semanticScores = null;
