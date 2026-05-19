@@ -393,12 +393,18 @@ function _startBgWorker(){
       'if(e.data==="start"){if(id)clearInterval(id);id=setInterval(function(){postMessage("tick")},1000)}' +
       'if(e.data==="stop"){if(id){clearInterval(id);id=null}}}'
     ],{type:'application/javascript'});
-    _bgWorker=new Worker(URL.createObjectURL(blob));
-    _bgWorker.onmessage=function(){
-      // This fires every 1s even when the tab is backgrounded
-      _bgWorkerTick();
-    };
-    _bgWorker.postMessage('start');
+    const url=URL.createObjectURL(blob);
+    try{
+      _bgWorker=new Worker(url);
+      _bgWorker.onmessage=function(){
+        // This fires every 1s even when the tab is backgrounded
+        _bgWorkerTick();
+      };
+      _bgWorker.postMessage('start');
+    }finally{
+      // Browser keeps the worker source alive; the URL itself is no longer needed.
+      URL.revokeObjectURL(url);
+    }
   }catch(e){
     // Workers may be blocked by CSP or not available — fall back silently
     _bgWorker=null;

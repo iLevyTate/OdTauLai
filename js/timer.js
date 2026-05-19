@@ -1,6 +1,6 @@
 // ========== CONFIG ==========
 function updateConfig(){cfg.work=Math.max(1,parseInt(gid('cfgWork').value)||25);cfg.short=Math.max(1,parseInt(gid('cfgShort').value)||5);cfg.long=Math.max(1,parseInt(gid('cfgLong').value)||15);cfg.cycle=Math.max(2,parseInt(gid('cfgCycle').value)||4);if(getTimerState()==='idle'){setPhaseTime();renderTimerChrome()}saveState('user')}
-function toggleOpt(id){const el=gid(id);el.classList.toggle('on');const on=el.classList.contains('on');el.setAttribute('aria-checked',on?'true':'false');if(id==='togBreak')cfg.autoBreak=on;if(id==='togWork')cfg.autoWork=on;if(id==='togSound'){cfg.sound=on;if(running){if(cfg.sound)schedulePhaseAudio();else cancelScheduledAudio()}}if(id==='togLink')cfg.linkTask=on;if(id==='togNotif'){cfg.notif=on;if(cfg.notif){reqNotifPerm().then(()=>{ if(typeof renderNotifStatus==='function') renderNotifStatus(); })}else{ if(typeof renderNotifStatus==='function') renderNotifStatus(); }}if(id==='togSnpNote')cfg.askSessionNote=on;saveState('user')}
+function toggleOpt(id){const el=gid(id);el.classList.toggle('on');const on=el.classList.contains('on');el.setAttribute('aria-checked',on?'true':'false');if(id==='togBreak')cfg.autoBreak=on;if(id==='togWork')cfg.autoWork=on;if(id==='togSound'){cfg.sound=on;if(!cfg.sound){cancelScheduledAudio();if(typeof swScheduledIntervalNodes!=='undefined'&&swScheduledIntervalNodes.length&&typeof cancelSwIntervalChimes==='function')cancelSwIntervalChimes(swScheduledIntervalNodes);if(typeof quickTimers!=='undefined'&&Array.isArray(quickTimers))quickTimers.forEach(qt=>{if(qt&&typeof cancelQtAudio==='function')cancelQtAudio(qt)});}else if(running){schedulePhaseAudio()}}if(id==='togLink')cfg.linkTask=on;if(id==='togNotif'){cfg.notif=on;if(cfg.notif){reqNotifPerm().then(()=>{ if(typeof renderNotifStatus==='function') renderNotifStatus(); })}else{ if(typeof renderNotifStatus==='function') renderNotifStatus(); }}if(id==='togSnpNote')cfg.askSessionNote=on;saveState('user')}
 // Settings is now a regular tab page. The legacy `settingsOpen` flag and
 // `toggleSettings()` accordion are kept as no-ops for back-compat with any
 // callers (Cmd+K, deep-links) until those are migrated.
@@ -42,7 +42,7 @@ let sessionHistory=[],intervals=[],intIdCtr=0,fireCounts={},lastFlash=null,lastT
 let tasks=[],taskIdCtr=0,activeTaskId=null,taskStartedAt=null,subtaskPromptParent=null;
 /** Preserved across renderTaskList when filters change while adding a subtask */
 let _subtaskFormDraftText='',_subtaskFormDraftParent=null;
-let lists=[],listIdCtr=0,activeListId=null;
+let lists=[],listIdCtr=0,activeListId=null,showAllLists=false;
 let taskFilters={search:'',status:'all',priority:'all',category:'all'};
 let taskSortBy='smart',taskView='list',editingTaskId=null,smartView='all';
 // UI preference: smart-view chip bar collapsed-by-default. Persisted with the

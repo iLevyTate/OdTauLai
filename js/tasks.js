@@ -836,11 +836,30 @@ function repairOrphanedTaskParents(){
   let n=0;
   for(const t of tasks){
     if(t.archived||t.parentId==null) continue;
+    // Self-loop: corrupt imports can produce t.parentId === t.id.
+    if(t.parentId===t.id){
+      console.warn('[tasks] Orphan repair: cleared self-loop parent for task',t.id);
+      t.parentId=null; n++; continue;
+    }
     const p=findTask(t.parentId);
     if(!p||p.archived){
       console.warn('[tasks] Orphan repair: cleared parent for task',t.id);
       t.parentId=null;
       n++;
+      continue;
+    }
+    // Walk up the parent chain to detect longer cycles (A → B → A).
+    const seen=new Set([t.id]);
+    let cur=p, depth=0;
+    while(cur && cur.parentId!=null && depth<256){
+      if(seen.has(cur.parentId)){
+        console.warn('[tasks] Orphan repair: broke parent cycle at task',t.id);
+        t.parentId=null; n++;
+        break;
+      }
+      seen.add(cur.id);
+      cur=findTask(cur.parentId);
+      depth++;
     }
   }
   return n;
@@ -966,6 +985,7 @@ async function removeTask(id){
     if(toRemove.includes(activeTaskId)){
       if(taskStartedAt){const t=findTask(activeTaskId);if(t)t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000)}
       activeTaskId=null;taskStartedAt=null;
+      if(typeof window!=='undefined'&&typeof window._updateActiveTaskTickSchedule==='function')window._updateActiveTaskTickSchedule();
     }
     for(const rid of toRemove) _taskIndexRemove(rid);
     tasks=tasks.filter(t=>!toRemove.includes(t.id));
@@ -984,6 +1004,7 @@ async function removeTask(id){
     if(toArchive.includes(activeTaskId)){
       if(taskStartedAt){const t=findTask(activeTaskId);if(t)t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000)}
       activeTaskId=null;taskStartedAt=null;
+      if(typeof window!=='undefined'&&typeof window._updateActiveTaskTickSchedule==='function')window._updateActiveTaskTickSchedule();
     }
     toArchive.forEach(tid=>{const t=findTask(tid);if(t)t.archived=true});
     // Undo affordance for accidental misfires (the × button is small).
@@ -1580,13 +1601,23 @@ async function removeList(id){
   lists=lists.filter(l=>l.id!==id);
   const fallbackId=lists[0].id;
   tasks.forEach(t=>{if(t.listId===id)t.listId=fallbackId});
-  if(activeListId===id)activeListId=fallbackId;
+  if(activeListId===id){
+    activeListId=fallbackId;
+    // If the user was in focus-on-list mode, the list they opted-in to
+    // focus on is gone. Don't silently re-focus on a different list they
+    // never chose — drop focus mode and let renderTaskList show everything.
+    if(typeof cfg==='object'&&cfg&&cfg.focusListMode){
+      cfg.focusListMode=false;
+      try{ document.body.classList.remove('app-focus-list'); }catch(_){}
+    }
+  }
   if(typeof invalidateListVectorCache==='function')invalidateListVectorCache();
   renderLists();renderTaskList();saveState('user');
   if(typeof renderListsManager==='function') renderListsManager();
   if(typeof renderAIPanel==='function') renderAIPanel();
 }
-function switchList(id){activeListId=id;renderLists();renderTaskList();saveState('user')}
+function switchList(id){activeListId=id;showAllLists=false;renderLists();renderTaskList();saveState('user')}
+function viewAllLists(){showAllLists=true;renderLists();renderTaskList();saveState('user')}
 function renderLists(){
   const bar=gid('listsBar');if(!bar)return;
   ensureDefaultList();
@@ -1598,10 +1629,25 @@ function renderLists(){
   // user can't strand themselves (removeList already guards against this, but
   // hiding the affordance is clearer).
   const onlyOne=lists.length<=1;
+  // "All" chip — clears list scoping so tasks from every list show up.
+  // Hidden when there's only one list (no scoping to clear).
+  if(!onlyOne){
+    const allChip=document.createElement('button');
+    allChip.className='list-chip list-chip--all'+(showAllLists?' active':'');
+    allChip.type='button';
+    allChip.title='Show tasks from every list';
+    allChip.onclick=function(){viewAllLists()};
+    const allName=document.createTextNode('All');
+    const allCnt=document.createElement('span');
+    allCnt.className='lc-count';
+    allCnt.textContent=String(tasks.filter(t=>!t.parentId&&!t.archived).length);
+    allChip.replaceChildren(allName,allCnt);
+    bar.appendChild(allChip);
+  }
   lists.forEach(l=>{
     const count=tasks.filter(t=>t.listId===l.id&&(!t.parentId)).length;
     const chip=document.createElement('button');
-    chip.className='list-chip'+(l.id===activeListId?' active':'');
+    chip.className='list-chip'+(!showAllLists&&l.id===activeListId?' active':'');
     chip.onclick=function(){switchList(l.id)};
     chip.title=l.description?l.description+'\n\n(double-click or ✎ to edit)':'Double-click or ✎ to edit list';
     chip.ondblclick=function(e){if(e)e.stopPropagation();editList(l.id)};
@@ -2057,9 +2103,9 @@ function matchesFilters(t){
   else if(t.archived)return false;
   // List filter — only apply on 'all' view, not on focused smart views
   const listSensitiveViews=['all','inbox','waiting','stuck'];
-  if(listSensitiveViews.includes(smartView)&&t.listId&&activeListId&&t.listId!==activeListId)return false;
+  if(!showAllLists&&listSensitiveViews.includes(smartView)&&t.listId&&activeListId&&t.listId!==activeListId)return false;
   // G-7: Focus-on-list mode forces list scoping in EVERY smart view
-  if(typeof cfg==='object'&&cfg&&cfg.focusListMode&&activeListId&&t.listId!==activeListId)return false;
+  if(!showAllLists&&typeof cfg==='object'&&cfg&&cfg.focusListMode&&activeListId&&t.listId!==activeListId)return false;
   // Smart view filters
   const today=todayISO();
   // hiddenUntil (snooze): hide from EVERY main view except 'snoozed' and 'archived'.
@@ -2347,7 +2393,7 @@ function updateFiltersActiveBadge(){
 
 function renderSmartViewCounts(){
   const today=todayISO();
-  const inList=t=>!t.listId||!activeListId||t.listId===activeListId;
+  const inList=t=>showAllLists||!t.listId||!activeListId||t.listId===activeListId;
   const active=tasks.filter(t=>!t.archived&&inList(t));
   const activeNotDone=active.filter(t=>t.status!=='done');
   const weekAhead=new Date();weekAhead.setDate(weekAhead.getDate()+7);

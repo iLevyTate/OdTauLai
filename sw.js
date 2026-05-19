@@ -1,5 +1,14 @@
-// OdTauLai Service Worker — keep CACHE_NAME aligned with js/version.js swCache
-const CACHE_NAME = 'odtaulai-v47';
+// OdTauLai Service Worker — CACHE_NAME pulled from the single source in
+// js/version.js so version bumps don't require editing three files.
+let CACHE_NAME = 'odtaulai-v47';
+try {
+  importScripts('./js/version.js');
+  if (self.ODTAULAI_RELEASE && self.ODTAULAI_RELEASE.swCache) {
+    CACHE_NAME = self.ODTAULAI_RELEASE.swCache;
+  }
+} catch (e) {
+  // version.js unavailable (e.g. offline install) — keep the inline default.
+}
 
 const ASSETS = [
   './',

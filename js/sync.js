@@ -481,8 +481,14 @@ function _resolvePeerId() {
   return saved;
 }
 
+let _syncInitPromise = null;
 async function syncInit() {
   if (_peer) return;
+  // Re-entry guard: parallel calls (e.g. rapid Connect clicks before the
+  // first peer is constructed) would otherwise each instantiate Peer and
+  // race for the broker id, leaving listeners orphaned.
+  if (_syncInitPromise) return _syncInitPromise;
+  _syncInitPromise = (async () => {
   _setSyncStatus('loading');
 
   let Peer;
@@ -573,6 +579,8 @@ async function syncInit() {
     _setSyncStatus('waiting');
     try { _peer.reconnect(); } catch(e) { console.warn('[Sync] reconnect', e); }
   });
+  })();
+  try { await _syncInitPromise; } finally { _syncInitPromise = null; }
 }
 
 // Schedule the next auto-reconnect attempt. Uses a fresh `setTimeout` so the

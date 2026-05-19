@@ -552,7 +552,9 @@ async function cognitaskRun(query, opts){
         readRounds++;
         if(typeof opts.onReadRound === 'function'){ try{ opts.onReadRound({ results, readRounds }); }catch(e){} }
         messages.push({ role: 'assistant', content: raw });
-        const payload = JSON.stringify(results).slice(0, 6000);
+        const fullJson = JSON.stringify(results);
+        const wasTruncated = fullJson.length > 6000;
+        const payload = wasTruncated ? (fullJson.slice(0, 6000) + ' …[TRUNCATED]') : fullJson;
         messages.push({ role: 'user', content: 'Tool result:\n' + payload + '\n\nNow return ONLY a JSON array of write operations (or [] if no changes), using task ids from context.' });
         continue;
       }

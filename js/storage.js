@@ -328,7 +328,7 @@ function saveState(reason){
     intervals, intIdCtr,
     quickTimers, qtIdCtr,
     activeTab,
-    lists, listIdCtr, activeListId,
+    lists, listIdCtr, activeListId, showAllLists,
     taskView, taskSortBy, smartView, smartViewsExpanded, taskGroupBy, theme, collapsedSections,
     taskFiltersSnapshot: (function(){
       const ts = gid('taskSearch'), st = gid('filterStatus'), pr = gid('filterPriority'), cat = gid('filterCategory'), sem = gid('taskSearchSemantic');
@@ -630,6 +630,7 @@ function _applyState(s){
       }));
       listIdCtr   = _int(s.listIdCtr, 0);
       activeListId = s.activeListId ?? null;
+      showAllLists = s.showAllLists === true;
     }
 
     // Scalars with enum validation
@@ -1300,7 +1301,7 @@ async function exportDataEncrypted(){
     exportedAt: new Date().toISOString(),
     state: {
       v: SCHEMA_VERSION,
-      tasks, lists, listIdCtr, taskIdCtr, activeListId,
+      tasks, lists, listIdCtr, taskIdCtr, activeListId, showAllLists,
       goals, goalIdCtr, logIdCtr, timeLog,
       sessionHistory, totalPomos, totalBreaks, totalFocusSec,
       collapsedSections, taskGroupBy, smartView, smartViewsExpanded, taskSortBy, taskView, taskFilters,
