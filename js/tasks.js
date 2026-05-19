@@ -966,6 +966,7 @@ async function removeTask(id){
     if(toRemove.includes(activeTaskId)){
       if(taskStartedAt){const t=findTask(activeTaskId);if(t)t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000)}
       activeTaskId=null;taskStartedAt=null;
+      if(typeof window!=='undefined'&&typeof window._updateActiveTaskTickSchedule==='function')window._updateActiveTaskTickSchedule();
     }
     for(const rid of toRemove) _taskIndexRemove(rid);
     tasks=tasks.filter(t=>!toRemove.includes(t.id));
@@ -984,6 +985,7 @@ async function removeTask(id){
     if(toArchive.includes(activeTaskId)){
       if(taskStartedAt){const t=findTask(activeTaskId);if(t)t.totalSec+=Math.floor((Date.now()-taskStartedAt)/1000)}
       activeTaskId=null;taskStartedAt=null;
+      if(typeof window!=='undefined'&&typeof window._updateActiveTaskTickSchedule==='function')window._updateActiveTaskTickSchedule();
     }
     toArchive.forEach(tid=>{const t=findTask(tid);if(t)t.archived=true});
     // Undo affordance for accidental misfires (the × button is small).
