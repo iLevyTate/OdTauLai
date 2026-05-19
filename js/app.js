@@ -626,6 +626,7 @@ let _lastKnownDate = (typeof todayKey === 'function') ? todayKey() : null;
 // the cap is measured from the actual midnight boundary, not from "now".
 const _ROLLOVER_MODAL_MAX_DEFER_MS = 30 * 60 * 1000; // 30 minutes
 let _pendingRolloverSince = 0;
+let _rolloverNagShown = false;
 function _isTaskModalOpen(){
   const m = (typeof document !== 'undefined') ? document.getElementById('taskModal') : null;
   return !!(m && m.classList && m.classList.contains('open'));
@@ -645,13 +646,22 @@ function _handleDayRollover(){
     if(_isTaskModalOpen()){
       if(!_pendingRolloverSince) _pendingRolloverSince = Date.now();
       const deferredFor = Date.now() - _pendingRolloverSince;
-      if(deferredFor < _ROLLOVER_MODAL_MAX_DEFER_MS){
-        return;
+      if(deferredFor >= _ROLLOVER_MODAL_MAX_DEFER_MS && !_rolloverNagShown){
+        // Past the cap. Don't silently force-archive mid-edit — that risks
+        // folding the user's current edits into yesterday's snapshot. Nag
+        // once and keep waiting; the modal-close hook will run the
+        // rollover the moment the user finishes.
+        _rolloverNagShown = true;
+        if(typeof showActionToast === 'function'){
+          showActionToast('Day has changed — close this task to archive yesterday', 'OK', () => {}, 8000);
+        } else {
+          console.warn('[app] day rollover deferred past cap; waiting on open modal');
+        }
       }
-      // Past the cap — fall through. Log so the proceed isn't invisible.
-      console.warn('[app] day rollover proceeding despite open modal after', Math.round(deferredFor / 1000), 's');
+      return;
     }
     _pendingRolloverSince = 0;
+    _rolloverNagShown = false;
     // If a Pomodoro is mid-flight when the calendar flips over, the existing
     // tick() will land its phase completion on today and split the session
     // across two archive entries. Pause first so pauseTimer's accounting

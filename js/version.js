@@ -1,6 +1,10 @@
-/** Single source for release identity — keep sw.js CACHE_NAME and pwa.js inline CACHE in sync. */
-window.ODTAULAI_RELEASE = {
-  version: 'v47',
-  buildDate: '2026-05-18',
-  swCache: 'odtaulai-v47',
-};
+/** Single source for release identity. Loadable from both a window
+ *  scope (script tag) and a ServiceWorkerGlobalScope (importScripts).
+ *  sw.js and pwa.js both read `swCache` from here. */
+(function(scope){
+  scope.ODTAULAI_RELEASE = {
+    version: 'v47',
+    buildDate: '2026-05-18',
+    swCache: 'odtaulai-v47',
+  };
+})(typeof self !== 'undefined' ? self : this);
