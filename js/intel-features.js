@@ -545,8 +545,14 @@ function _taskText(t){
 function _heuristicMetadata(name){
   const out = {};
   const lower = name.toLowerCase();
-  if(/\burgent|asap|critical\b/.test(lower)) out.priority = 'urgent';
-  else if(/\bimportant|soon\b/.test(lower)) out.priority = 'high';
+  // Alternation has lower precedence than the \b anchors. Without the
+  // group, `\burgent|asap|critical\b` parses as `\burgent` OR `asap` OR
+  // `critical\b` — so "urgently" / "urgentish" matched (leading-only),
+  // "asap" matched anywhere as a substring (no boundaries), and
+  // "moonsoon" matched the trailing-anchored `soon\b`. Group the
+  // alternation so both boundaries apply to every term.
+  if(/\b(urgent|asap|critical)\b/.test(lower)) out.priority = 'urgent';
+  else if(/\b(important|soon)\b/.test(lower)) out.priority = 'high';
   if(/\b(dentist|doctor|health|gym|workout|meditation|yoga|therapy|spiritual)\b/.test(lower)) out.category = 'bodyMindSpirit';
   else if(/\b(family|friend|date night|partner|spouse|romantic)\b/.test(lower)) out.category = 'relationships';
   else if(/\b(volunteer|donation|community|mentor|advocacy|neighborhood)\b/.test(lower)) out.category = 'community';
