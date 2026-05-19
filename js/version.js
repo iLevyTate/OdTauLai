@@ -4,7 +4,7 @@
 (function(scope){
   scope.ODTAULAI_RELEASE = {
     version: 'v47',
-    buildDate: '2026-05-18',
+    buildDate: '2026-05-19',
     swCache: 'odtaulai-v47',
   };
 })(typeof self !== 'undefined' ? self : this);
