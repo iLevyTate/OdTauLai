@@ -836,11 +836,30 @@ function repairOrphanedTaskParents(){
   let n=0;
   for(const t of tasks){
     if(t.archived||t.parentId==null) continue;
+    // Self-loop: corrupt imports can produce t.parentId === t.id.
+    if(t.parentId===t.id){
+      console.warn('[tasks] Orphan repair: cleared self-loop parent for task',t.id);
+      t.parentId=null; n++; continue;
+    }
     const p=findTask(t.parentId);
     if(!p||p.archived){
       console.warn('[tasks] Orphan repair: cleared parent for task',t.id);
       t.parentId=null;
       n++;
+      continue;
+    }
+    // Walk up the parent chain to detect longer cycles (A → B → A).
+    const seen=new Set([t.id]);
+    let cur=p, depth=0;
+    while(cur && cur.parentId!=null && depth<256){
+      if(seen.has(cur.parentId)){
+        console.warn('[tasks] Orphan repair: broke parent cycle at task',t.id);
+        t.parentId=null; n++;
+        break;
+      }
+      seen.add(cur.id);
+      cur=findTask(cur.parentId);
+      depth++;
     }
   }
   return n;
@@ -1582,7 +1601,16 @@ async function removeList(id){
   lists=lists.filter(l=>l.id!==id);
   const fallbackId=lists[0].id;
   tasks.forEach(t=>{if(t.listId===id)t.listId=fallbackId});
-  if(activeListId===id)activeListId=fallbackId;
+  if(activeListId===id){
+    activeListId=fallbackId;
+    // If the user was in focus-on-list mode, the list they opted-in to
+    // focus on is gone. Don't silently re-focus on a different list they
+    // never chose — drop focus mode and let renderTaskList show everything.
+    if(typeof cfg==='object'&&cfg&&cfg.focusListMode){
+      cfg.focusListMode=false;
+      try{ document.body.classList.remove('app-focus-list'); }catch(_){}
+    }
+  }
   if(typeof invalidateListVectorCache==='function')invalidateListVectorCache();
   renderLists();renderTaskList();saveState('user');
   if(typeof renderListsManager==='function') renderListsManager();
