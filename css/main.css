@@ -1,4 +1,32 @@
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  /* Pre-paint tab reconciliation. boot-tab.js stamps
+     data-boot-tab="<tab>" on <html> before the panels parse, so the
+     very first paint matches the user's saved tab instead of the
+     default 'tasks' panel. Without these rules, app.js would swap
+     tabs after first paint and the layout would jump on load. We
+     force-hide every top-level [data-tab] panel except the active
+     one. Pages without the early script (private mode / corrupt LS)
+     fall through to the existing default markup — <html> simply has
+     no data-boot-tab attribute and none of these rules apply. */
+  html[data-boot-tab="focus"]    [data-tab="tasks"],
+  html[data-boot-tab="focus"]    [data-tab="tools"],
+  html[data-boot-tab="focus"]    [data-tab="settings"],
+  html[data-boot-tab="tools"]    [data-tab="tasks"],
+  html[data-boot-tab="tools"]    [data-tab="focus"],
+  html[data-boot-tab="tools"]    [data-tab="settings"],
+  html[data-boot-tab="settings"] [data-tab="tasks"],
+  html[data-boot-tab="settings"] [data-tab="focus"],
+  html[data-boot-tab="settings"] [data-tab="tools"],
+  html[data-boot-tab="data"]     [data-tab="tasks"],
+  html[data-boot-tab="data"]     [data-tab="focus"],
+  html[data-boot-tab="data"]     [data-tab="tools"],
+  html[data-boot-tab="data"]     [data-tab="settings"]{ display:none !important; }
+  /* For tabs other than the default 'tasks', un-hide their root panel
+     so the first paint shows them. The `hidden` attribute on the panel
+     would otherwise keep it invisible until app.js sets it false. */
+  html[data-boot-tab="focus"]    [data-tab="focus"][hidden],
+  html[data-boot-tab="tools"]    [data-tab="tools"][hidden],
+  html[data-boot-tab="settings"] [data-tab="settings"][hidden]{ display:revert !important; }
   /* Kill the default mobile tap overlay (a black rectangle that ignores
      border-radius) so press feedback follows each component's own shape. */
   html{-webkit-tap-highlight-color:transparent}

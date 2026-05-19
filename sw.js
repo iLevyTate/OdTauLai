@@ -17,6 +17,7 @@ const ASSETS = [
   './favicon.ico',
   './css/main.css',
   './js/version.js',
+  './js/boot-tab.js',
   './js/event-delegation.js',
   './js/pwa.js',
   './js/config.js',

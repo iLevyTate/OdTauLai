@@ -54,6 +54,11 @@
 <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
 
 <script src="js/version.js"></script>
+<!-- Pre-paint boot resolver. Reads saved activeTab + theme from
+     localStorage and stamps them onto <html> so the very first paint
+     matches what the user last saw — no flash-of-default-tab + no
+     theme flip after the page already drew. -->
+<script src="js/boot-tab.js"></script>
 <!-- Delegated event dispatcher — must load before any data-action element is
      rendered or clicked. Replaces inline onclick/onchange/etc., enabling
      CSP without script-src 'unsafe-inline'. -->
