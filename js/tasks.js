@@ -558,10 +558,23 @@ function _syncBulkImportAutoToggle(){
     return;
   }
   wrap.hidden = false;
+  // Default the toggle ON whenever embeddings are ready. The user has lists
+  // configured and just pasted a batch — they almost always want routing.
+  // The old default-off behaviour silently dumped every paste into whatever
+  // list the user happened to be viewing, which was the most common cause
+  // of "why are all my tasks in Projects" confusion. Skip the auto-tick if
+  // only the LLM is available — that path is slow (seconds per task) and
+  // costs enough that opt-in still makes sense.
+  if(intelOk && !cb.dataset.userToggled){
+    cb.checked = true;
+  }
   if(hint){
     if(intelOk) hint.textContent = 'Route each task to the right list and fill in life area / priority via on-device embeddings (instant).';
     else hint.textContent = 'Embeddings not ready — falling back to the on-device LLM (slower, may take a few seconds per task).';
   }
+  // Remember explicit user toggles within a session so we don't re-tick the
+  // box for someone who deliberately turned it off.
+  cb.onchange = () => { cb.dataset.userToggled = '1'; };
 }
 
 /**
@@ -584,11 +597,17 @@ async function _bulkEnrichOne(name){
         if(pred.energyLevel) out.energyLevel = pred.energyLevel;
         if(Array.isArray(pred.tags) && pred.tags.length) out.tags = pred.tags;
       }
-      // List routing — only meaningful with multiple lists; predictListId
-      // returns null when scores are below confidence floor.
+      // List routing — only meaningful with multiple lists. We pass more
+      // permissive thresholds than the defaults: predictListId is shared with
+      // autoOrganizeIntoLists (which proposes moves on EXISTING tasks where a
+      // false positive costs the user trust), but in the bulk-import path the
+      // user has explicitly opted into routing — being conservative just
+      // dumps every soft-match into whatever list they happen to be viewing.
+      // minMargin: 0 means "always pick the winner"; minScore: 0.30 still
+      // requires a real semantic match (random pairs cosine around 0.15).
       if(typeof predictListId === 'function'){
         try{
-          const lid = await predictListId(name);
+          const lid = await predictListId(name, { minScore: 0.30, minMargin: 0 });
           if(lid != null) out.listId = lid;
         }catch(_){ /* skip */ }
       }
