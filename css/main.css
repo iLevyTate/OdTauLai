@@ -393,6 +393,7 @@
   .list-chip .lc-edit{margin-left:4px;opacity:0;color:#5a7a95;font-size:10px;transition:.15s;cursor:pointer}
   .list-chip:hover .lc-edit{opacity:.5}
   .list-chip .lc-edit:hover{opacity:1;color:#3d8bcc}
+  .list-chip--all{font-style:italic}
   .list-add{padding:6px 10px;background:transparent;border:1px dashed #2a3a4a;border-radius:6px;color:#5a8ab5;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit}
   .list-add:hover{border-color:#3d8bcc;color:#3d8bcc}
   .list-new-form{display:flex;gap:6px;align-items:center}

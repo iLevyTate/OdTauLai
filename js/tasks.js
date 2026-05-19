@@ -1586,7 +1586,8 @@ async function removeList(id){
   if(typeof renderListsManager==='function') renderListsManager();
   if(typeof renderAIPanel==='function') renderAIPanel();
 }
-function switchList(id){activeListId=id;renderLists();renderTaskList();saveState('user')}
+function switchList(id){activeListId=id;showAllLists=false;renderLists();renderTaskList();saveState('user')}
+function viewAllLists(){showAllLists=true;renderLists();renderTaskList();saveState('user')}
 function renderLists(){
   const bar=gid('listsBar');if(!bar)return;
   ensureDefaultList();
@@ -1598,10 +1599,25 @@ function renderLists(){
   // user can't strand themselves (removeList already guards against this, but
   // hiding the affordance is clearer).
   const onlyOne=lists.length<=1;
+  // "All" chip — clears list scoping so tasks from every list show up.
+  // Hidden when there's only one list (no scoping to clear).
+  if(!onlyOne){
+    const allChip=document.createElement('button');
+    allChip.className='list-chip list-chip--all'+(showAllLists?' active':'');
+    allChip.type='button';
+    allChip.title='Show tasks from every list';
+    allChip.onclick=function(){viewAllLists()};
+    const allName=document.createTextNode('All');
+    const allCnt=document.createElement('span');
+    allCnt.className='lc-count';
+    allCnt.textContent=String(tasks.filter(t=>!t.parentId&&!t.archived).length);
+    allChip.replaceChildren(allName,allCnt);
+    bar.appendChild(allChip);
+  }
   lists.forEach(l=>{
     const count=tasks.filter(t=>t.listId===l.id&&(!t.parentId)).length;
     const chip=document.createElement('button');
-    chip.className='list-chip'+(l.id===activeListId?' active':'');
+    chip.className='list-chip'+(!showAllLists&&l.id===activeListId?' active':'');
     chip.onclick=function(){switchList(l.id)};
     chip.title=l.description?l.description+'\n\n(double-click or ✎ to edit)':'Double-click or ✎ to edit list';
     chip.ondblclick=function(e){if(e)e.stopPropagation();editList(l.id)};
@@ -2057,9 +2073,9 @@ function matchesFilters(t){
   else if(t.archived)return false;
   // List filter — only apply on 'all' view, not on focused smart views
   const listSensitiveViews=['all','inbox','waiting','stuck'];
-  if(listSensitiveViews.includes(smartView)&&t.listId&&activeListId&&t.listId!==activeListId)return false;
+  if(!showAllLists&&listSensitiveViews.includes(smartView)&&t.listId&&activeListId&&t.listId!==activeListId)return false;
   // G-7: Focus-on-list mode forces list scoping in EVERY smart view
-  if(typeof cfg==='object'&&cfg&&cfg.focusListMode&&activeListId&&t.listId!==activeListId)return false;
+  if(!showAllLists&&typeof cfg==='object'&&cfg&&cfg.focusListMode&&activeListId&&t.listId!==activeListId)return false;
   // Smart view filters
   const today=todayISO();
   // hiddenUntil (snooze): hide from EVERY main view except 'snoozed' and 'archived'.
@@ -2347,7 +2363,7 @@ function updateFiltersActiveBadge(){
 
 function renderSmartViewCounts(){
   const today=todayISO();
-  const inList=t=>!t.listId||!activeListId||t.listId===activeListId;
+  const inList=t=>showAllLists||!t.listId||!activeListId||t.listId===activeListId;
   const active=tasks.filter(t=>!t.archived&&inList(t));
   const activeNotDone=active.filter(t=>t.status!=='done');
   const weekAhead=new Date();weekAhead.setDate(weekAhead.getDate()+7);

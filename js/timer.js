@@ -42,7 +42,7 @@ let sessionHistory=[],intervals=[],intIdCtr=0,fireCounts={},lastFlash=null,lastT
 let tasks=[],taskIdCtr=0,activeTaskId=null,taskStartedAt=null,subtaskPromptParent=null;
 /** Preserved across renderTaskList when filters change while adding a subtask */
 let _subtaskFormDraftText='',_subtaskFormDraftParent=null;
-let lists=[],listIdCtr=0,activeListId=null;
+let lists=[],listIdCtr=0,activeListId=null,showAllLists=false;
 let taskFilters={search:'',status:'all',priority:'all',category:'all'};
 let taskSortBy='smart',taskView='list',editingTaskId=null,smartView='all';
 // UI preference: smart-view chip bar collapsed-by-default. Persisted with the
