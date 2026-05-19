@@ -1565,8 +1565,13 @@ function importTasks(file){
     }
     // After successful import, re-repair and save, then re-render
     try {
-      // Run every task back through _repairTask to normalise types
+      // Run every task back through _repairTask to normalise types.
+      // _repairTask returns NEW object references, so the _taskById index
+      // points at stale pre-repair instances until we rebuild it — without
+      // that, findTask() returns ghost tasks that aren't in `tasks` and any
+      // subsequent edit silently misses.
       tasks = tasks.map(_repairTask).filter(Boolean);
+      if(typeof rebuildTaskIdIndex === 'function') rebuildTaskIdIndex();
       saveState('user');
       if(typeof renderTaskList === 'function') renderTaskList();
       if(typeof renderLists === 'function') renderLists();

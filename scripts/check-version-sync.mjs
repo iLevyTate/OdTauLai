@@ -23,8 +23,10 @@ if (!versionMatch) {
 }
 const versionCache = versionMatch[1];
 
-// Extract CACHE_NAME from sw.js
-const swMatch = swSrc.match(/const\s+CACHE_NAME\s*=\s*['"]([^'"]+)['"]/);
+// Extract CACHE_NAME from sw.js. The default-initializer may be `const` or
+// `let` (the latter when sw.js overwrites it from importScripts('version.js')),
+// so match either binding form.
+const swMatch = swSrc.match(/(?:const|let|var)\s+CACHE_NAME\s*=\s*['"]([^'"]+)['"]/);
 if (!swMatch) {
   console.error('❌ Could not find CACHE_NAME in sw.js');
   process.exit(1);
