@@ -53,6 +53,11 @@ const embedStore = {
     const prev = _embedPutByTask.get(taskId) || Promise.resolve();
     const p = prev.catch(() => {}).then(() => this._putNow(taskId, textHash, vec));
     _embedPutByTask.set(taskId, p);
+    // Drop the map entry once this put settles so the per-task chain
+    // doesn't leak references for the lifetime of the page. Skip the
+    // delete if a newer put has already overwritten our slot.
+    p.then(() => { if(_embedPutByTask.get(taskId) === p) _embedPutByTask.delete(taskId); },
+           () => { if(_embedPutByTask.get(taskId) === p) _embedPutByTask.delete(taskId); });
     return p;
   },
 
