@@ -244,7 +244,15 @@ function exportFile(format){
 }
 function exportClipboard(){const content=buildReport('txt');navigator.clipboard.writeText(content).then(()=>{const btn=gid('exportClipBtn')||document.querySelector('.export-clip');if(!btn)return;const orig=btn.textContent;btn.textContent='Copied!';btn.style.color='#2ecc71';btn.style.borderColor='#1a4a2a';setTimeout(()=>{btn.textContent=orig;btn.style.color='';btn.style.borderColor=''},1500)}).catch(()=>{const ta=document.createElement('textarea');ta.value=content;document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta)})}
 
-// v16 migration (WebLLM removal) — removed in v32; all active users migrated.
+// One-shot purge of legacy generative-AI keys (v48 dropped the on-device LLM).
+// Wrapped because private-browsing / quota-exceeded modes throw on access.
+try {
+  if (!localStorage.getItem('odtaulai_v48_migrated')) {
+    localStorage.removeItem('stupind_gen_cfg');
+    localStorage.removeItem('stupind_gen_history');
+    localStorage.setItem('odtaulai_v48_migrated', '1');
+  }
+} catch (_) {}
 
 // ========== Delegated handler wrappers ==========
 // Named functions for the cases the migration script left behind: multi-
@@ -833,7 +841,7 @@ if(typeof requestIdleCallback === 'function'){
   setTimeout(_bootIntelLoad, 1000);
 }
 
-/** Desktop palette shortcut label only — mobile shows icon + "Ask" via CSS. */
+/** Desktop palette shortcut label only — mobile shows just the icon via CSS. */
 (function syncCmdKKbdText(){
   const kbd = document.querySelector('#cmdKBtn .cmdk-btn-kbd');
   if (!kbd) return;

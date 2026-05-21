@@ -76,7 +76,6 @@ Not a chatbot. Not a wrapper around somebody else's API. Not a subscription. Jus
 
 - [Highlights](#highlights)
   - [The ambient intelligence](#the-ambient-intelligence-the-headline-feature)
-  - [Ask — optional on-device LLM](#ask--optional-on-device-llm-off-by-default)
   - [Impact scoring (Pareto 80/20)](#impact-scoring-pareto-8020)
   - [Deep-work timer](#deep-work-timer)
   - [ClickUp-style tasks](#clickup-style-tasks)
@@ -106,9 +105,9 @@ Not a chatbot. Not a wrapper around somebody else's API. Not a subscription. Jus
 
 ### The ambient intelligence (the headline feature)
 
-A compact sentence-embedding model — **`Xenova/gte-small`**, 384 dimensions, about 33 MB — loads into your browser via **Transformers.js**. Every task title + description is encoded into a vector. Cosine similarity in that vector space lets the app reason about **meaning and context**, not just keywords.
+A compact sentence-embedding model — **`Xenova/bge-small-en-v1.5`**, 384 dimensions, about 33 MB — loads into your browser via **Transformers.js**. Every task title + description is encoded into a vector. Cosine similarity in that vector space lets the app reason about **meaning and context**, not just keywords.
 
-Runs on **WebGPU** when available, **WASM** everywhere else (including iPhone). First load downloads the model weights from the Hugging Face / jsDelivr CDN; after that it's cached by the browser and the app is fully offline.
+Runs on **WebGPU** when available, **WASM** everywhere else (including iPhone). The model auto-downloads on first idle after page load, then is cached by the browser — fully offline after that. There is **no generative LLM** in this app: no chat, no token streaming, no cloud calls, no API keys.
 
 What you actually get from it:
 
@@ -118,26 +117,10 @@ What you actually get from it:
 - **Auto-organize into lists** — route tasks to the list whose name + description matches best. Preview before apply.
 - **Duplicate detection** — near-duplicate pairs by cosine ≥ 0.9, with archive-and-merge flow.
 - **Similar tasks** — top neighbors surface in the task detail drawer.
+- **Suggest due date** — kNN over your task history infers a sensible due date for a new task.
 - **Align values only** — narrow button for Schwartz-only alignment if you don't want other fields touched.
 
-The "understanding" is geometric by default. An **optional** tiny on-device LLM (see *Ask* below) is strictly opt-in, local-only, and gated behind an explicit Settings toggle plus an explicit download click — no cloud LLM, no calls to OpenAI / Anthropic / anyone.
-
-### Ask — optional on-device LLM (off by default)
-
-Turn on **Settings → Integrations → Generative AI (beta)** and click *Download model* to enable a natural-language interface:
-
-- Open the command palette (`Cmd/Ctrl + K`), prefix your input with `?`, or click the **Ask** toggle.
-- Type a plain-English request: *"make everything tagged #work due tomorrow urgent"*, *"archive all done errands from last week"*, *"create a task 'call mom' tomorrow evening"*.
-- The model (default **`Xenova/SmolLM2-360M-Instruct`**, ~230 MB q4, Apache-2.0) runs locally via Transformers.js — **WebGPU** when available, **WASM** everywhere else. iOS Safari works; expect slower first-token latency on WASM.
-- Output is a **JSON batch of the same task operations the UI already executes** (create, update, mark done, archive, move, tag, etc.). Nothing auto-applies — every proposed change lands in the existing preview pane with per-field checkboxes, destructive-action ACK, and the 10-deep undo stack.
-
-| Preset | Model | Size (q4) | Best for |
-|---|---|---|---|
-| Tiny | SmolLM2-135M-Instruct | ~90 MB | Older phones, fast first token |
-| **Balanced** *(default)* | **SmolLM2-360M-Instruct** | **~230 MB** | **Most devices** |
-| Bigger | Qwen2.5-0.5B-Instruct | ~360 MB | Desktops with WebGPU |
-
-Clear the LLM via your browser's "clear site data" — weights live in the browser HTTP cache, not IndexedDB. Same privacy posture as the embedding model: no task text ever leaves the device.
+The "understanding" is geometric: cosine similarity in a 384‑dimensional vector space. No language model, no chat — just fast, deterministic embeddings that run entirely on your device.
 
 ### Impact scoring (Pareto 80/20)
 
@@ -313,13 +296,11 @@ OdTauLai/
 │   ├── timer.js              pomodoro, quick timers, stopwatch, chimes
 │   ├── audio.js              Web Audio scheduling + wake-lock
 │   ├── ui.js                 renderers, command palette, task item
-│   ├── ai.js                 Transformers.js pipeline, semantic features
-│   ├── intel.js              intelligence bootstrap + status
-│   ├── intel-features.js     harmonize, auto-organize, duplicates
+│   ├── ai.js                 UI glue: preview, undo, settings, smart-add
+│   ├── intel.js              embedding pipeline loader + status
+│   ├── intel-features.js     harmonize, auto-organize, duplicates, kNN predict
 │   ├── embed-store.js        IndexedDB vector cache
-│   ├── gen.js                optional local LLM loader (opt-in, off by default)
-│   ├── ask.js                NL → op batch orchestrator (retrieval + prompt)
-│   ├── tool-schema.js        JSON-schema + validator for LLM tool calls
+│   ├── tool-schema.js        op vocabulary + validator (proposed-op pipeline)
 │   ├── calfeeds.js           iCal / ICS parser + renderer
 │   ├── sync.js               WebRTC P2P (PeerJS)
 │   ├── pwa.js                service-worker registration + update flow
@@ -337,7 +318,7 @@ OdTauLai/
 | Library | Purpose | When it loads |
 |---|---|---|
 | [`@huggingface/transformers`](https://huggingface.co/docs/transformers.js) | on-device embeddings | first time you use an AI feature |
-| [`Xenova/gte-small`](https://huggingface.co/Xenova/gte-small) | 384-dim sentence embedding model (~33 MB) | first AI feature use, then cached |
+| [`Xenova/bge-small-en-v1.5`](https://huggingface.co/Xenova/bge-small-en-v1.5) | 384-dim sentence embedding model (~33 MB) | first AI feature use, then cached |
 | [`chrono-node`](https://github.com/wanasit/chrono) | natural-language dates | first time you quick-add with dates |
 | [`peerjs`](https://peerjs.com/) | WebRTC signalling client | only if you enable P2P sync |
 
@@ -439,7 +420,7 @@ Host `@huggingface/transformers`, the model files, `chrono-node`, and `peerjs` y
 <details>
 <summary><b>Can I remove the AI entirely?</b></summary>
 
-Yes — it's strictly opt-in. If you never visit the Tools tab or toggle semantic search, the embedding model never downloads. If you never enable *Generative AI* in Settings, no LLM downloads either. To strip the code entirely, delete `js/ai.js`, `js/intel.js`, `js/intel-features.js`, `js/embed-store.js`, `js/gen.js`, `js/ask.js`, `js/tool-schema.js` and remove their `<script>` tags.
+Yes. The embedding model is the only "AI" in the app — no LLM, no chat. The model auto-downloads in the background on first idle; if you want to skip it entirely, delete `js/ai.js`, `js/intel.js`, `js/intel-features.js`, `js/embed-store.js`, `js/tool-schema.js` and remove their `<script>` tags. The rest of the app (tasks, timer, sync, calendar) keeps working.
 
 </details>
 
@@ -454,8 +435,7 @@ Frameworks rot. `git clone`, open in any browser, and in 10 years this will stil
 
 ## Not in scope (deliberately)
 
-- **Cloud** LLMs — inference always happens on the device you're using.
-- Free-form chat loops, persistent conversation memory, or "assistant" personalities. The optional Ask feature is one-shot: query → proposed ops → you review & apply.
+- **Any generative LLM** — cloud or on-device. The app is embeddings-only by design: fast, deterministic, no token streaming, no chat loops, no "assistant" personality.
 - Cloud accounts, user profiles, team features.
 - Analytics. Telemetry. A/B tests. "Engagement."
 - Push notifications to your phone while the app is fully closed (browsers don't allow this without a cloud backend — by design).
@@ -493,7 +473,7 @@ See also: **[CONTRIBUTING.md](CONTRIBUTING.md)** · **[ARCHITECTURE.md](ARCHITEC
 Built with:
 
 - [Transformers.js](https://huggingface.co/docs/transformers.js) — on-device inference.
-- [`Xenova/gte-small`](https://huggingface.co/Xenova/gte-small) — the embedding model.
+- [`Xenova/bge-small-en-v1.5`](https://huggingface.co/Xenova/bge-small-en-v1.5) — the embedding model.
 - [chrono-node](https://github.com/wanasit/chrono) — natural-language date parsing.
 - [PeerJS](https://peerjs.com/) — WebRTC signalling client.
 

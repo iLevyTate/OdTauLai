@@ -20,7 +20,7 @@
     const manifest = {
       name: 'OdTauLai — On device task app using local ambient intelligence',
       short_name: 'OdTauLai',
-      description: 'On-device Pomodoro timer + task manager. A small local embedding model (~33 MB) captures the meaning and context of your tasks — not just keywords — for semantic search, smart suggestions, duplicates, list routing, and values alignment. Optional on-device generative "Ask" mode (opt-in, no data leaves the browser). Works offline. Optional P2P sync. No account, no tracking.',
+      description: 'On-device Pomodoro timer + task manager. A small local embedding model (~33 MB) captures the meaning and context of your tasks — not just keywords — for semantic search, smart suggestions, duplicates, list routing, and values alignment. Works offline. Optional P2P sync. No account, no tracking.',
       start_url: location.pathname.split('/').slice(0,-1).join('/') + '/' + (location.pathname.split('/').pop() || ''),
       scope: location.pathname.split('/').slice(0,-1).join('/') + '/',
       display: 'standalone',

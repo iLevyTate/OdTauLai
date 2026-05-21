@@ -21,12 +21,10 @@ flowchart LR
     app[js/app.js]
     pwa[js/pwa.js]
   end
-  subgraph intelligence [On-device AI]
+  subgraph intelligence [On-device intelligence]
     intel[js/intel.js<br/>embeddings]
     embedstore[js/embed-store.js]
     intelFeat[js/intel-features.js]
-    gen[js/gen.js<br/>LLM]
-    ask[js/ask.js<br/>Cognitask + Ask]
     toolschema[js/tool-schema.js]
     ai[js/ai.js<br/>UI glue]
   end
@@ -37,22 +35,13 @@ flowchart LR
   index --> version --> utils --> icons --> timer --> storage --> nlparse --> audio --> tasks --> ui
   index --> intel --> embedstore --> intelFeat
   index --> toolschema
-  index --> gen
-  toolschema --> ask
-  gen --> ask
-  ask --> ui
   ui --> ai
   index --> sync
   index --> cal
   index --> pwa
   index --> app
   app --> intel
-  app --> gen
-  ai --> gen
   ai --> intel
-  ui --> ask
-  ask --> intel
-  ask --> gen
   intelFeat --> tasks
   sync --> storage
   cal --> storage
@@ -74,62 +63,36 @@ Core mutable state (tasks, timer, goals, lists, …) lives primarily in [`js/tim
 
 ## On‑device intelligence
 
-Two separate Transformers.js pipelines, loaded independently:
+A single Transformers.js embedding pipeline drives every "AI" surface — there is no generative LLM in this app.
 
 | Pipeline | File | Model | Purpose | When it loads |
 |---|---|---|---|---|
-| Embedding | [`js/intel.js`](js/intel.js) | WebGPU: `Xenova/gte-base-en-v1.5` (768‑dim, ~110 MB). WASM: `Xenova/bge-small-en-v1.5` (384‑dim) | Semantic search, smart‑add, harmonize, auto‑organize, duplicates, category centroids | First AI feature used |
-| Generative (optional, opt‑in) | [`js/gen.js`](js/gen.js) | `HuggingFaceTB/SmolLM2-360M-Instruct` q4 by default (~230 MB); presets include Qwen2.5 0.5B/1.5B | Natural‑language **Ask** (Cmd/Ctrl+K, `?`) — multi‑turn **Cognitask** loop in [`js/ask.js`](js/ask.js) turns requests into validated JSON ops | Only after Settings → Integrations → Generative AI is enabled AND the user clicks *Download* |
+| Embedding | [`js/intel.js`](js/intel.js) | `Xenova/bge-small-en-v1.5` (384‑dim, ~33 MB quantized) on both WebGPU and WASM | Semantic search, smart‑add, harmonize, auto‑organize, duplicates, category centroids, list routing, due‑date kNN, values alignment | Automatically on first idle (`requestIdleCallback`) after page load |
 
-Both use **WebGPU when available, WASM fallback everywhere else**. Weights are cached by the browser's HTTP cache (the service worker explicitly does **not** precache CDN model URLs, to avoid exhausting the PWA cache quota on mobile).
+Uses **WebGPU when available, WASM fallback everywhere else** — same model, different backend. Weights are cached by the browser's HTTP cache (the service worker explicitly does **not** precache the CDN model URL, to avoid exhausting the PWA cache quota on mobile).
 
-### Gen auto‑rehydrate (Ask LLM)
+### Proposed‑op pipeline
 
-[`js/ai.js`](js/ai.js) defines `genAutoRehydrateIfCached()`: on DOMContentLoaded (after a short delay + `requestIdleCallback` when available), if generative Ask is **enabled**, weights for the selected model are recorded as **downloaded** (`isGenDownloaded`), and the pipeline is not already **ready** for that model, it calls `genLoad()` once. That turns `isGenReady()` true after a full page reload without requiring Settings → **Load** again, as long as the browser HTTP cache still holds the weights. Failures are silent (user can still load manually).
-
-### Cognitask / Ask flow (retrieval‑augmented, multi‑turn)
-
-`cognitaskRun` lives in [`js/ask.js`](js/ask.js) (same script order as the browser; `askRun` is the stable entry point). Read‑only ops (`QUERY_TASKS`, `GET_TASK_DETAIL`, `GET_CALENDAR_EVENTS`, `LIST_CATEGORIES`, `LIST_LISTS` — see `readOnly` in [`js/tool-schema.js`](js/tool-schema.js)) execute immediately; the loop allows up to three read rounds plus a final write turn (enforced by `COGNITASK_MAX_READ_ROUNDS` / `COGNITASK_MAX_TURNS`), then returns write ops for preview.
+Embedding-driven proposers (harmonize, auto-organize, dedupe, reclassify, due‑date suggestion, smart-add enrichment) emit JSON ops in the vocabulary defined in [`js/tool-schema.js`](js/tool-schema.js). Every op flows through the same preview/apply pipeline:
 
 ```
-user query
+proposer (harmonize / auto-organize / dedupe / suggest-due-date / …)
    │
-   ├──► embedText()  ───►  semanticSearch(query, 10)  ───┐
-   │                                                      │
-   ├──► top‑20 recently‑modified open tasks  ────────────►│ compact JSON lines (≤200 chars/task, ≤1800 chars total)
-   │                                                      │
-   ├──► Calendar (next 7 days) from cal feeds  ────────────►│ capped block in user prompt
-   ▼                                                      ▼
-[ system prompt: TOOL_SCHEMA + few‑shot ]            [ user prompt: lists + calendar + context + request ]
-                          │
-                          ▼
-                 genGenerate() — streaming (per turn; up to three read rounds plus a final write turn). **Qwen2.5‑1.5B‑Instruct** passes `tools` from `buildOpenAIToolsFromToolSchema()` into `apply_chat_template`; the model replies with `<tool_call>` JSON, parsed by `parseQwen25ToolCallBlocks` (falls back to JSON-array `parseOpsJson` if no tags). Other presets use the all-in-prompt JSON array only.
-                          │
-            read-only JSON? ──yes──► runReadOp() ──► append tool result; next turn
-                          │
-                          no (write ops or done)
-                          ▼
-               parseOpsJson()  (tolerant JSON array)
-                          │
-                          ▼
-               validateOps(writeOps, ctx)
-                          │
-      valid ops ─────────┴──────────► acceptProposedOps()
-                                             │
-                                             ▼
-                                   _pendingOps  →  _renderPendingOps()
-                                             │
-                                             ▼
-                                   intelApplyPending()  →  executeIntelOp()
-                                             │
-                                             ▼
-                                        undo stack (10 deep)
+   ▼
+validateOps(ops, ctx) in js/tool-schema.js
+   │  required fields, enum coercion, id existence checks
+   ▼
+acceptProposedOps()  →  _pendingOps  →  _renderPendingOps()
+   │
+   ▼  per-field checkboxes, destructive ACK, source badge
+intelApplyPending()  →  executeIntelOp()
+   │
+   ▼
+undo stack (10 deep, 60s extended ring)
 ```
 
 Safety invariants:
 
-- **Hard cap** of 50 ops per response; ops 51+ are recorded as `BATCH_LIMIT` in `rejected[]` and only the first 50 are validated (not an all-or-nothing reject).
-- **Every** LLM‑proposed op is filtered through `validateOps()` in [`js/tool-schema.js`](js/tool-schema.js): required fields, enum coercion, id existence checks (against live `tasks[]` / `lists[]`).
-- **No auto‑apply, ever** — ops land in the existing preview UI with per‑field checkboxes and the 10‑deep undo stack.
+- **No auto‑apply, ever** — ops land in the preview UI with per‑field checkboxes and the 10‑deep undo stack.
 - **Destructive ACK** — any `DELETE_TASK`, or ≥5 `ARCHIVE_TASK` / `CHANGE_LIST` in one batch, triggers an additional confirmation before apply.
-- **No outbound calls** beyond the one‑time model weight fetch from the same Hugging Face CDN already used by the embedding model.
+- **No outbound calls** beyond the one‑time embedding model weight fetch from the Hugging Face CDN.

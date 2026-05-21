@@ -27,15 +27,7 @@ function ctxFrom(tasksArr, listsArr) {
   };
 }
 
-test('schema block enumerates every op name', () => {
-  const { toolSchemaPromptBlock, TOOL_SCHEMA } = loadSchema();
-  const block = toolSchemaPromptBlock();
-  for (const name of Object.keys(TOOL_SCHEMA)) {
-    assert.match(block, new RegExp('- ' + name + '\\('), 'missing ' + name);
-  }
-});
-
-test('OPEN_TASK_DETAIL is not an LLM tool (removed from schema)', () => {
+test('OPEN_TASK_DETAIL is not in the schema', () => {
   const { TOOL_SCHEMA } = loadSchema();
   assert.equal(TOOL_SCHEMA.OPEN_TASK_DETAIL, undefined);
 });
@@ -73,13 +65,6 @@ test('validator: UPDATE_TASK rejects malformed hiddenUntil', () => {
   assert.equal(r.valid.length, 1);
   // Optional fields with null coercion are silently dropped — not an outright reject.
   assert.equal(r.valid[0].args.hiddenUntil, undefined);
-});
-
-test('tolerant JSON parser strips code fences and ignores trailing prose', () => {
-  const { parseOpsJson } = loadSchema();
-  const out = parseOpsJson('```json\n[{"name":"MARK_DONE","args":{"id":5}}]\n```\n\nSome trailing text');
-  assert.equal(out.length, 1);
-  assert.equal(out[0].name, 'MARK_DONE');
 });
 
 test('validator: happy path passes', () => {
@@ -304,22 +289,6 @@ test('validator: name field coercion preserves carriage return', () => {
   assert.equal(r.valid[0].args.name, 'a\r\nb');
 });
 
-test('parser: escaped quotes and backslashes inside strings round-trip', () => {
-  const { parseOpsJson } = loadSchema();
-  const raw = '[{"name":"ADD_NOTE","args":{"id":1,"text":"say \\"hi\\" and \\\\ run"}}]';
-  const out = parseOpsJson(raw);
-  assert.equal(out.length, 1);
-  assert.equal(out[0].args.text, 'say "hi" and \\ run');
-});
-
-test('parser: nested bracket inside string value does not end outer array early', () => {
-  const { parseOpsJson } = loadSchema();
-  const raw = '[{"name":"ADD_NOTE","args":{"id":1,"text":"has ] bracket"}}]';
-  const out = parseOpsJson(raw);
-  assert.equal(out.length, 1);
-  assert.equal(out[0].args.text, 'has ] bracket');
-});
-
 test('validator: coerce int id from decimal string', () => {
   const { validateOps } = loadSchema();
   const ctx = ctxFrom([{ id: 42, archived: false }], []);
@@ -379,10 +348,3 @@ test('validator: op must include plain args object (not raw op fallback)', () =>
   assert.match(r.rejected[0].reason, /MISSING_OR_INVALID_ARGS/);
 });
 
-test('parser: first JSON array on a new line is preferred over stray [ in prose', () => {
-  const { parseOpsJson } = loadSchema();
-  const raw = 'Notes: see [old] list.\n[{"name":"MARK_DONE","args":{"id":1}}]';
-  const out = parseOpsJson(raw);
-  assert.equal(out.length, 1);
-  assert.equal(out[0].name, 'MARK_DONE');
-});
