@@ -319,28 +319,12 @@ window.syncQaHintVisibility=syncQaHintVisibility;
  * Keyboard handler for the task input. Centralized here so the inline HTML
  * stays small and the behavior is testable.
  *
- *   Enter         → addTask() (or applySmartAddAndSubmit when LLM preview exists)
+ *   Enter         → addTask() (or applySmartAddAndSubmit when preview exists)
  *   Escape        → clear the input (a quick discard of an aborted thought)
  *   Cmd/Ctrl+Enter → reserved for "add and open detail" — see follow-up
  */
 function onTaskInputKey(event){
   if(event.key==='Enter' && !event.isComposing){
-    const inp=event.target;
-    const raw=(inp && typeof inp.value==='string') ? inp.value : '';
-    // README documents `?` prefix as one of three Ask entry points (alongside
-    // Cmd/Ctrl+K and the Ask toggle). Route directly into the palette in Ask
-    // mode with the rest of the line pre-filled — user still confirms with
-    // Enter inside the palette, so an accidental `?` typo is recoverable.
-    if(raw.trim().charAt(0)==='?' && typeof openCmdK==='function'){
-      event.preventDefault();
-      const rest=raw.trim().slice(1).trim();
-      if(inp) inp.value='';
-      window._smartAddPreview=null;
-      if(typeof clearLiveParsePreview==='function') clearLiveParsePreview();
-      if(typeof maybeShowEnhanceBtn==='function') maybeShowEnhanceBtn();
-      openCmdK({ask:true, prefill:rest});
-      return;
-    }
     if(window._smartAddPreview) applySmartAddAndSubmit();
     else addTask();
     return;
@@ -540,10 +524,8 @@ function closeBulkImportModal(){
 }
 
 /**
- * Show the Auto-organize toggle iff at least one of the on-device models is
- * ready. The hint text reflects which path will run (embeddings vs LLM)
- * so the user knows what they're opting into. Hidden entirely if neither
- * model is loaded — toggling it would do nothing useful.
+ * Show the Auto-organize toggle iff embeddings are ready. Hidden entirely
+ * when the model isn't loaded — toggling would do nothing useful.
  */
 function _syncBulkImportAutoToggle(){
   const wrap = gid('bulkImportAutoWrap');
@@ -551,88 +533,52 @@ function _syncBulkImportAutoToggle(){
   const cb = gid('bulkImportAuto');
   if(!wrap || !cb) return;
   const intelOk = (typeof isIntelReady === 'function') && isIntelReady();
-  const genOk = (typeof isGenReady === 'function') && isGenReady();
-  if(!intelOk && !genOk){
+  if(!intelOk){
     wrap.hidden = true;
     cb.checked = false;
     return;
   }
   wrap.hidden = false;
-  // Default the toggle ON whenever embeddings are ready. The user has lists
-  // configured and just pasted a batch — they almost always want routing.
-  // The old default-off behaviour silently dumped every paste into whatever
-  // list the user happened to be viewing, which was the most common cause
-  // of "why are all my tasks in Projects" confusion. Skip the auto-tick if
-  // only the LLM is available — that path is slow (seconds per task) and
-  // costs enough that opt-in still makes sense.
-  if(intelOk && !cb.dataset.userToggled){
+  if(!cb.dataset.userToggled){
     cb.checked = true;
   }
   if(hint){
-    if(intelOk) hint.textContent = 'Route each task to the right list and fill in life area / priority via on-device embeddings (instant).';
-    else hint.textContent = 'Embeddings not ready — falling back to the on-device LLM (slower, may take a few seconds per task).';
+    hint.textContent = 'Route each task to the right list and fill in life area / priority via on-device embeddings (instant).';
   }
-  // Remember explicit user toggles within a session so we don't re-tick the
-  // box for someone who deliberately turned it off.
   cb.onchange = () => { cb.dataset.userToggled = '1'; };
 }
 
 /**
- * Enrich a single bulk-imported task with predicted metadata. Returns an
- * object of fields to merge onto the task. Embeddings preferred (fast);
- * the LLM is the fallback when embeddings haven't been built yet.
+ * Enrich a single bulk-imported task with predicted metadata via on-device
+ * embeddings. Returns an object of fields to merge onto the task. kNN over
+ * existing tasks produces category, priority, effort, energy, tags; list +
+ * due date come from predictListId / predictDueDate helpers.
  */
 async function _bulkEnrichOne(name){
   const out = {};
-  // Embedding-based path — produces category, priority, effort, energy, tags
-  // via kNN over existing tasks. List + due date come from separate
-  // embedding-driven helpers (predictListId, predictDueDate).
-  if(typeof isIntelReady === 'function' && isIntelReady() && typeof predictMetadata === 'function'){
-    try{
-      const pred = await predictMetadata(name, 5);
-      if(pred){
-        if(pred.category) out.category = pred.category;
-        if(pred.priority && pred.priority !== 'normal') out.priority = pred.priority;
-        if(pred.effort) out.effort = pred.effort;
-        if(pred.energyLevel) out.energyLevel = pred.energyLevel;
-        if(Array.isArray(pred.tags) && pred.tags.length) out.tags = pred.tags;
-      }
-      // List routing — only meaningful with multiple lists. We pass more
-      // permissive thresholds than the defaults: predictListId is shared with
-      // autoOrganizeIntoLists (which proposes moves on EXISTING tasks where a
-      // false positive costs the user trust), but in the bulk-import path the
-      // user has explicitly opted into routing — being conservative just
-      // dumps every soft-match into whatever list they happen to be viewing.
-      // minMargin: 0 means "always pick the winner"; minScore: 0.30 still
-      // requires a real semantic match (random pairs cosine around 0.15).
-      if(typeof predictListId === 'function'){
-        try{
-          const lid = await predictListId(name, { minScore: 0.30, minMargin: 0 });
-          if(lid != null) out.listId = lid;
-        }catch(_){ /* skip */ }
-      }
-      // Due-date kNN — needs a quorum of similar past tasks with dueDates.
-      if(typeof predictDueDate === 'function'){
-        try{
-          const dd = await predictDueDate(name, 5);
-          if(dd) out.dueDate = dd;
-        }catch(_){ /* skip */ }
-      }
-      return out;
-    }catch(e){ /* fall through to LLM */ }
-  }
-  // LLM fallback — produces priority/dueDate/effort/tags from freeform text.
-  if(typeof isGenReady === 'function' && isGenReady() && typeof genParseFreeform === 'function'){
-    try{
-      const parsed = await genParseFreeform(name);
-      if(parsed && typeof parsed === 'object'){
-        if(parsed.priority && parsed.priority !== 'normal') out.priority = parsed.priority;
-        if(parsed.dueDate) out.dueDate = parsed.dueDate;
-        if(parsed.effort) out.effort = parsed.effort;
-        if(Array.isArray(parsed.tags) && parsed.tags.length) out.tags = parsed.tags;
-      }
-    }catch(e){ /* swallow — bulk import shouldn't fail because one task didn't enrich */ }
-  }
+  if(typeof isIntelReady !== 'function' || !isIntelReady() || typeof predictMetadata !== 'function') return out;
+  try{
+    const pred = await predictMetadata(name, 5);
+    if(pred){
+      if(pred.category) out.category = pred.category;
+      if(pred.priority && pred.priority !== 'normal') out.priority = pred.priority;
+      if(pred.effort) out.effort = pred.effort;
+      if(pred.energyLevel) out.energyLevel = pred.energyLevel;
+      if(Array.isArray(pred.tags) && pred.tags.length) out.tags = pred.tags;
+    }
+    if(typeof predictListId === 'function'){
+      try{
+        const lid = await predictListId(name, { minScore: 0.30, minMargin: 0 });
+        if(lid != null) out.listId = lid;
+      }catch(_){ /* skip */ }
+    }
+    if(typeof predictDueDate === 'function'){
+      try{
+        const dd = await predictDueDate(name, 5);
+        if(dd) out.dueDate = dd;
+      }catch(_){ /* skip */ }
+    }
+  }catch(_){ /* enrichment is best-effort */ }
   return out;
 }
 

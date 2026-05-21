@@ -305,12 +305,6 @@ window.openTaskDetailAndCloseWhatNext = function(id){
   if(typeof openTaskDetail === 'function') openTaskDetail(Number(id));
   if(typeof closeWhatNext === 'function') closeWhatNext();
 };
-window.selectGenModelFromSelect = function(){
-  if(typeof selectGenModel === 'function') selectGenModel(this.value);
-};
-window.setGenTimeoutFromInput = function(){
-  if(typeof setGenTimeout === 'function') setGenTimeout(this.value);
-};
 window.checklistAddOnEnter = function(e){
   if(!e || e.key !== 'Enter') return;
   const taskId = Number(this.dataset.taskId);
@@ -718,8 +712,6 @@ document.addEventListener('visibilitychange', () => {
 if(typeof renderSyncPanel==='function') renderSyncPanel();
 
 if(typeof renderAIPanel==='function') renderAIPanel();
-if(typeof renderGenSettings==='function') renderGenSettings();
-if(typeof syncAskPromoChip==='function') syncAskPromoChip();
 // Bottom-sheet swipe-to-dismiss on the task detail modal (mobile only).
 if(typeof _initTaskModalSwipeDismiss==='function') _initTaskModalSwipeDismiss();
 // Drag-drop reorder via Sortable.js — replaces the broken native HTML5 drag
@@ -764,8 +756,11 @@ setTimeout(() => { renderSystemInfo(); _checkStoragePressure(); }, 400);
 window.addEventListener('online',  () => renderSystemInfo());
 window.addEventListener('offline', () => renderSystemInfo());
 
-// Deferred intelligence load — small embedding model (~33 MB), WebGPU or WASM
-setTimeout(() => {
+// Ambient intelligence — automatically load the small embedding model
+// (~33 MB, WebGPU or WASM) on first idle so users get semantic features
+// without flipping a toggle. requestIdleCallback yields to user interaction
+// during boot; setTimeout fallback covers browsers without rIC.
+function _bootIntelLoad(){
   if(typeof intelLoad !== 'function') return;
   const w = document.getElementById('intelProgressWrap');
   const bar = document.getElementById('intelProgressBar');
@@ -831,10 +826,12 @@ setTimeout(() => {
     if(typeof renderAIPanel === 'function') renderAIPanel();
     else if(typeof syncSemanticSearchUi === 'function') syncSemanticSearchUi();
   });
-}, 1000);
-
-// LLM auto-rehydrate from HTTP cache lives in js/ai.js (genAutoRehydrateIfCached)
-// so the header chip + footer ribbon stay in sync — no second timer here.
+}
+if(typeof requestIdleCallback === 'function'){
+  requestIdleCallback(_bootIntelLoad, { timeout: 3000 });
+} else {
+  setTimeout(_bootIntelLoad, 1000);
+}
 
 /** Desktop palette shortcut label only — mobile shows icon + "Ask" via CSS. */
 (function syncCmdKKbdText(){

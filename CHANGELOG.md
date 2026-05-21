@@ -1,5 +1,14 @@
 # Changelog
 
+## v48 — 2026-05-21
+
+- **Removed generative AI (Ask) entirely.** The on-device LLM (SmolLM2 / Qwen2.5 via Transformers.js), the Ask chat sheet, the `?` task-input prefix, the GenAI settings panel, the download ribbon, and all LLM-only surfaces (Daily brief, Weekly review, AI rephrase, AI suggest tags, "Break down with AI", parse-with-LLM smart-add button, AI rationale annotations on harmonize/auto-organize/dedupe/what-next) are gone. Embedding-based ambient intelligence stays — semantic search, kNN metadata prediction, life-area classification, values alignment, duplicate detection, list routing, due-date kNN suggestion — all unchanged.
+- **Single mobile-friendly embedding model**: `Xenova/bge-small-en-v1.5` (384-dim, ~33 MB quantized) now runs on every device. Dropped the WebGPU/WASM dual-model split — bge-small works equally well on both backends, simplifying the load path and shrinking the WebGPU download from ~110 MB to ~33 MB.
+- **Auto-load on first idle**: the embedding model now warms up automatically via `requestIdleCallback` after first paint. No more "Load model first" toggle for ambient features — they just work after the one-time download.
+- **Storage migration**: bump to `bge-small-en-v1.5-unified-v3` triggers a one-shot re-embed of open tasks on first boot. `GEN_CFG` / `GEN_HISTORY` localStorage keys are no longer written.
+- **Deleted**: `js/gen.js`, `js/ask.js`, `tests/gen-autoload.test.mjs`, `tests/gen-cfg.test.mjs`, `tests/gen-native-tools.test.mjs`, `tests/hybrid-ai.test.mjs`, `tests/ask-pipeline.test.mjs`, `tests/tasks-input-ask-prefix.test.mjs`.
+- Service worker cache rotated to `odtaulai-v48`.
+
 ## v46 — 2026-04-30
 
 - **Ask (`?` prefix)**: completed the third Ask-LLM entry point promised in README — typing `? archive everything done last week` (or any line beginning with `?`) into the main task input now opens the command palette in Ask mode with the rest of the line pre-filled and the caret at end-of-text. Previously only Cmd/Ctrl+K and the Ask toggle chip routed to Ask; the `?` prefix in the main input fell through to `addTask()` and created a literal task. Smart-add preview is cleared during the routing so it can't intercept the next Enter (`js/tasks.js` `onTaskInputKey`, `js/ui.js` `openCmdK` gains `opts.prefill`).

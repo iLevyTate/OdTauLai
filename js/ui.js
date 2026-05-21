@@ -137,579 +137,54 @@ function calToday(){calMonth=null;renderTaskList()}
 
 // ========== COMMAND PALETTE (Cmd+K) ==========
 let cmdkActiveIdx=0,cmdkFilteredItems=[];
-let cmdkMode='find'; // 'find' | 'ask'
-let _cmdkAskCtl=null;
-let _cmdkAskHistoryIdx=-1;
-let _cmdkAskBusy=false;
-let _cmdkLastReply=null;
-// Multi-turn conversation state for the Ask sheet. Each turn captures the
-// user's question and the assistant's reply so the conversation persists
-// while the palette is open, follow-up turns can reference prior context,
-// and the UI reads as a chat instead of a one-shot command. Cleared on
-// close, on switch back to Find mode, and on "New chat".
-let _cmdkAskTurns = [];
-let _cmdkAskTurnIdSeq = 0;
-// How many prior turns are threaded back into the LLM prompt as conversation
-// context. Capped so a long session doesn't blow up the prompt — the on-
-// device model has a fixed context window and the most recent turns are by
-// far the most relevant to a follow-up question.
-const _CMDK_ASK_CONTEXT_TURNS = 4;
 let _cmdkPrevFocus=null;
-function openCmdK(opts){
-  const openAsk = opts && opts.ask === true;
-  const prefill = (opts && typeof opts.prefill === 'string') ? opts.prefill : '';
+function openCmdK(){
   const ov=gid('cmdkOverlay');if(!ov)return;
   _cmdkPrevFocus=document.activeElement;
   ov.classList.add('open');
-  cmdkMode=openAsk?'ask':'find';
-  _cmdkAskHistoryIdx=-1;_cmdkLastReply=null;_cmdkAskBusy=false;
   _applyCmdkMode();
   const inp=gid('cmdkInput');
-  if(inp)inp.value=prefill;
+  if(inp)inp.value='';
   cmdkActiveIdx=0;renderCmdK();
   if(inp){
     try{inp.focus({preventScroll:true})}catch(_){inp.focus()}
-    if(prefill){
-      try{inp.setSelectionRange(prefill.length, prefill.length)}catch(_){}
-    }
   }
   if(typeof installTabTrap==='function') installTabTrap(ov);
 }
 function closeCmdK(){
-  _cmdkAbortAsk();
   if(typeof removeTabTrap==='function') removeTabTrap();
   gid('cmdkOverlay').classList.remove('open');
   if(_cmdkPrevFocus&&_cmdkPrevFocus.focus)try{_cmdkPrevFocus.focus()}catch(_){}
   _cmdkPrevFocus=null;
-  // Wipe the conversation when the palette closes. Re-opening should start
-  // a fresh chat — keeping stale turns around made the next session look
-  // like it had answered a question it never received.
-  _cmdkAskTurns = [];
 }
-function _cmdkAbortAsk(){
-  if(_cmdkAskCtl){try{_cmdkAskCtl.abort()}catch(_){}_cmdkAskCtl=null}
-  if(typeof genAbort==='function'){try{genAbort()}catch(_){}}
-  _cmdkAskBusy=false;
-}
-function cmdkSetAskMode(on){
-  // Leaving ask mode mid-generation must actually stop the model, not just
-  // the UI affordance. Otherwise tokens keep decoding in the background and
-  // the next Ask turn sees stale state.
-  if(!on && (_cmdkAskBusy || _cmdkAskCtl)) _cmdkAbortAsk();
-  // Leaving ask mode wipes the conversation so flipping back is a clean
-  // start. Keep turns when toggling into ask mode (no-op).
-  if(!on) _cmdkAskTurns = [];
-  cmdkMode=on?'ask':'find';
-  _applyCmdkMode();
-  renderCmdK();
-}
-function cmdkToggleAsk(){cmdkSetAskMode(cmdkMode!=='ask')}
 function _cmdkTouchOrNarrowUI(){
   return typeof matchMedia==='function' && (matchMedia('(max-width: 640px)').matches || matchMedia('(pointer: coarse)').matches);
 }
 function _syncCmdkFindHint(){
   const h=gid('cmdkFindHint');
   if(!h)return;
-  if(cmdkMode!=='find'){h.hidden=true;return}
   h.hidden=!_cmdkTouchOrNarrowUI();
 }
 function _applyCmdkMode(){
-  const panel=gid('cmdkOverlay')?.querySelector('.cmdk-panel');
   const input=gid('cmdkInput');
-  const tog=gid('cmdkAskToggle');
-  const reply=gid('cmdkAskReply');
-  const results=gid('cmdkResults');
-  if(panel)panel.classList.toggle('cmdk-panel--ask',cmdkMode==='ask');
-  if(input){
-    input.placeholder=cmdkMode==='ask'
-      ?'Ask about or edit your tasks — follow-ups stay in context…'
-      :'Search tasks, actions, views… (? for Ask)';
-  }
-  if(tog){
-    tog.classList.toggle('cmdk-ask-toggle--active',cmdkMode==='ask');
-    tog.setAttribute('aria-pressed',cmdkMode==='ask'?'true':'false');
-  }
-  if(reply){
-    if(cmdkMode==='ask'){
-      reply.hidden=false;
-      // Always render from the canonical _cmdkAskTurns state so opening Ask
-      // mid-conversation (e.g. user toggled find then back) shows the chat,
-      // not a stale fragment.
-      _renderAskConversation();
-    } else {
-      reply.hidden=true; reply.textContent='';
-    }
-  }
-  if(results)results.hidden = !!(cmdkMode==='ask');
+  if(input) input.placeholder='Search tasks, actions, views…';
   _syncCmdkFindHint();
 }
 function _cmdkFootFindText(){
   const foot=gid('cmdkFoot');if(!foot)return;
   if(_cmdkTouchOrNarrowUI()){
-    foot.textContent='Tap a row to run · Ask = on-device AI · outside = close';
+    foot.textContent='Tap a row to run · outside = close';
   }else{
     const mod=/(Mac|iPhone|iPod|iPad)/i.test(navigator.platform||'')?'⌘':'Ctrl';
     foot.textContent=mod+'/Ctrl+K · ↑↓ · Enter · Esc';
   }
 }
-function _cmdkFootAskText(){
-  const foot=gid('cmdkFoot');if(!foot)return;
-  const mod=/(Mac|iPhone|iPod|iPad)/i.test(navigator.platform||'')?'⌘':'Ctrl';
-  const genReady=typeof isGenReady==='function'&&isGenReady();
-  if(_cmdkTouchOrNarrowUI()){
-    foot.textContent='Enter = run on-device · toggle Ask to browse actions · '+(genReady?'Model ready':'Model not loaded');
-  }else{
-    foot.textContent=mod+'/Ctrl+K · Enter = ask · Esc · '+(genReady?'Model ready':'Model not loaded');
-  }
-}
-// ---- Multi-turn Ask conversation rendering ----------------------------------
-// Each turn in `_cmdkAskTurns` produces a Q bubble + an A bubble. The render
-// is a full rebuild from state because state transitions (streaming → done,
-// error, etc.) come from async callbacks and re-rebuilding is simpler and
-// faster than threading partial-update logic through five status branches.
-// Everything below uses textContent / createElement — the model output is
-// never trusted as HTML.
-
-function _cmdkAskNewTurn(q){
-  const turn = {
-    id: ++_cmdkAskTurnIdSeq,
-    q: String(q || ''),
-    status: 'streaming', // streaming | answer | ops | empty | error | need-model
-    text: '',
-    stream: '',
-    ops: null,
-    rejected: null,
-    destructiveLevel: 'none',
-    readRounds: 0,
-    // need-model carries structured info instead of HTML so the bubble can
-    // build the action button safely.
-    needModel: null,
-  };
-  _cmdkAskTurns.push(turn);
-  return turn;
-}
-function _cmdkAskCurrent(){
-  return _cmdkAskTurns.length ? _cmdkAskTurns[_cmdkAskTurns.length-1] : null;
-}
-function _cmdkAskUpdate(turn, patch){
-  if(!turn) return;
-  Object.assign(turn, patch);
-  _renderAskConversation();
-}
-
-// Serialise a finished turn into "assistant content" for prompt context.
-// Skipped turns (streaming, error, need-model) return null so the LLM never
-// sees half-formed state.
-function _cmdkAskSerialiseAssistant(turn){
-  if(!turn) return null;
-  if(turn.status === 'answer') return String(turn.text || '').slice(0, 600);
-  if(turn.status === 'ops'){
-    const n = Array.isArray(turn.ops) ? turn.ops.length : 0;
-    return n > 0 ? '[' + n + ' change' + (n!==1?'s':'') + ' proposed]' : '[no changes]';
-  }
-  if(turn.status === 'empty') return '[no answer]';
-  return null;
-}
-
-// Build the prior-turn context (capped) to ship into askRun.
-function _cmdkAskPriorTurnsFor(currentTurn){
-  const out = [];
-  for(const t of _cmdkAskTurns){
-    if(t === currentTurn) break;
-    if(t.status === 'streaming') break;
-    const a = _cmdkAskSerialiseAssistant(t);
-    if(!a) continue;
-    out.push({ user: String(t.q || ''), assistant: a });
-  }
-  if(out.length > _CMDK_ASK_CONTEXT_TURNS) return out.slice(-_CMDK_ASK_CONTEXT_TURNS);
-  return out;
-}
-
-// Compute the "need-model" structured payload once so render code stays dumb.
-function _cmdkAskNeedModelInfo(){
-  const cfg = typeof getGenCfg === 'function' ? getGenCfg() : null;
-  const cached = !!(cfg && typeof isGenDownloaded === 'function' && isGenDownloaded(cfg.modelId));
-  const loading = typeof isGenLoading === 'function' && isGenLoading();
-  let sizeMb = 230;
-  try{
-    if(cfg && typeof getGenPresets === 'function'){
-      const presets = getGenPresets() || [];
-      const p = presets.find(x => x && x.id === cfg.modelId);
-      if(p && typeof p.sizeMb === 'number') sizeMb = p.sizeMb;
-    }
-  }catch(_){}
-  return { cached, loading, sizeMb };
-}
-
-function _renderAskConversation(){
-  const reply = gid('cmdkAskReply');
-  if(!reply) return;
-  reply.replaceChildren();
-  if(!_cmdkAskTurns.length){
-    const h = document.createElement('div');
-    h.className = 'cmdk-ask-hint';
-    h.textContent = 'Press Enter to run on-device. No auto-apply — you’ll preview every proposed change.';
-    reply.appendChild(h);
-    return;
-  }
-  // Conversation toolbar: "New chat" lets the user wipe context without
-  // closing the palette so a fresh question doesn't get coloured by the
-  // previous topic in the LLM prompt.
-  const bar = document.createElement('div');
-  bar.className = 'cmdk-ask-bar';
-  const newBtn = document.createElement('button');
-  newBtn.type = 'button';
-  newBtn.className = 'cmdk-ask-bar-btn';
-  newBtn.textContent = '+ New chat';
-  newBtn.title = 'Clear this conversation';
-  newBtn.onclick = () => {
-    _cmdkAbortAsk();
-    _cmdkAskTurns = [];
-    _renderAskConversation();
-    const inp = gid('cmdkInput');
-    if(inp){ inp.value = ''; try{ inp.focus(); }catch(_){} }
-  };
-  bar.appendChild(newBtn);
-  const count = document.createElement('span');
-  count.className = 'cmdk-ask-bar-count';
-  count.textContent = _cmdkAskTurns.length + ' turn' + (_cmdkAskTurns.length!==1?'s':'');
-  bar.appendChild(count);
-  reply.appendChild(bar);
-
-  for(const t of _cmdkAskTurns){
-    // User bubble
-    const qWrap = document.createElement('div');
-    qWrap.className = 'cmdk-ask-turn cmdk-ask-turn--q';
-    const qBubble = document.createElement('div');
-    qBubble.className = 'cmdk-ask-bubble cmdk-ask-bubble--q';
-    qBubble.textContent = t.q;
-    qWrap.appendChild(qBubble);
-    reply.appendChild(qWrap);
-
-    // Assistant bubble
-    const aWrap = document.createElement('div');
-    aWrap.className = 'cmdk-ask-turn cmdk-ask-turn--a';
-    const aBubble = document.createElement('div');
-    aBubble.className = 'cmdk-ask-bubble cmdk-ask-bubble--a';
-
-    if(t.status === 'streaming'){
-      const row = document.createElement('div');
-      row.className = 'cmdk-ask-row';
-      const sp = document.createElement('span');
-      sp.className = 'cmdk-ask-spinner';
-      sp.setAttribute('aria-hidden', 'true');
-      const lbl = document.createElement('span');
-      lbl.className = 'cmdk-ask-label';
-      lbl.textContent = t.text || 'Thinking on-device…';
-      const stop = document.createElement('button');
-      stop.type = 'button';
-      stop.className = 'cmdk-ask-stop';
-      stop.textContent = 'Stop';
-      stop.dataset.action = 'cmdkAskStop';
-      row.appendChild(sp); row.appendChild(lbl); row.appendChild(stop);
-      aBubble.appendChild(row);
-      if(t.stream){
-        const det = document.createElement('details');
-        det.className = 'cmdk-ask-details';
-        const sum = document.createElement('summary');
-        sum.textContent = 'Show raw output';
-        det.appendChild(sum);
-        const pre = document.createElement('pre');
-        pre.className = 'cmdk-ask-stream';
-        pre.textContent = t.stream;
-        det.appendChild(pre);
-        aBubble.appendChild(det);
-      }
-    } else if(t.status === 'answer'){
-      const body = document.createElement('div');
-      body.className = 'cmdk-ask-answer-body';
-      body.textContent = String(t.text || '').trim();
-      aBubble.appendChild(body);
-      const foot = document.createElement('div');
-      foot.className = 'cmdk-ask-answer-foot';
-      foot.textContent = 'Answered on-device. No changes were applied.';
-      aBubble.appendChild(foot);
-    } else if(t.status === 'ops'){
-      const dn = document.createElement('div');
-      dn.className = 'cmdk-ask-done';
-      dn.textContent = t.text || 'Proposed.';
-      aBubble.appendChild(dn);
-      if(t.rejected && t.rejected.length){
-        const det = document.createElement('details');
-        det.className = 'cmdk-ask-rejected';
-        const sum = document.createElement('summary');
-        sum.textContent = t.rejected.length + ' rejected — show reasons';
-        det.appendChild(sum);
-        const list = document.createElement('ul');
-        list.className = 'cmdk-ask-rejected-list';
-        t.rejected.slice(0, 25).forEach(r => {
-          const li = document.createElement('li');
-          const op = (r && r.op) || (r && r.name) || 'op';
-          const why = (r && (r.reason || r.error || r.message)) || 'invalid';
-          li.textContent = String(op) + ' — ' + String(why);
-          list.appendChild(li);
-        });
-        if(t.rejected.length > 25){
-          const more = document.createElement('li');
-          more.className = 'cmdk-ask-rejected-more';
-          more.textContent = '+ ' + (t.rejected.length - 25) + ' more';
-          list.appendChild(more);
-        }
-        det.appendChild(list);
-        aBubble.appendChild(det);
-      }
-    } else if(t.status === 'empty'){
-      const em = document.createElement('div');
-      em.className = 'cmdk-ask-empty';
-      em.textContent = t.text || 'No changes proposed.';
-      aBubble.appendChild(em);
-    } else if(t.status === 'error'){
-      const ed = document.createElement('div');
-      ed.className = 'cmdk-ask-error';
-      ed.textContent = t.text || 'Error';
-      aBubble.appendChild(ed);
-    } else if(t.status === 'need-model'){
-      const info = t.needModel || _cmdkAskNeedModelInfo();
-      const ed = document.createElement('div');
-      ed.className = 'cmdk-ask-error';
-      if(info.loading){
-        ed.textContent = 'Local AI is still loading — give it a moment and try again.';
-      } else {
-        const lead = document.createElement('span');
-        lead.textContent = info.cached
-          ? 'Local AI is ready but not loaded into memory yet. '
-          : 'This app runs the chat model fully on-device. Nothing leaves your browser. First time needs a one-off ~' + info.sizeMb + ' MB download. ';
-        ed.appendChild(lead);
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'btn-ghost btn-sm cmdk-ask-enable';
-        btn.dataset.action = 'genDownloadClick';
-        btn.textContent = info.cached ? 'Load now' : 'Download local AI (~' + info.sizeMb + ' MB)';
-        ed.appendChild(btn);
-      }
-      aBubble.appendChild(ed);
-    }
-    aWrap.appendChild(aBubble);
-    reply.appendChild(aWrap);
-  }
-  // Auto-scroll the conversation so the newest turn is visible without the
-  // user having to scroll. requestAnimationFrame so layout is settled before
-  // we measure scrollHeight.
-  requestAnimationFrame(() => { try{ reply.scrollTop = reply.scrollHeight; }catch(_){} });
-}
-
-// Back-compat shims: a few older call sites and tests reference these names.
-// They now route through the turn-based renderer instead of clobbering the
-// whole reply DOM. Safe to remove once we're confident nothing external uses
-// them — kept here for the next release cycle.
-function _renderAskAnswer(text){
-  const t = _cmdkAskCurrent();
-  if(t) _cmdkAskUpdate(t, { status: 'answer', text: String(text || '') });
-}
-function _renderAskRejected(rejected){
-  const t = _cmdkAskCurrent();
-  if(t) _cmdkAskUpdate(t, { rejected });
-}
-function _renderAskStatus(state,msg){
-  // Map the legacy state vocabulary onto the active turn (or — for need-model
-  // pre-submit cases — push a synthetic turn that hosts the CTA).
-  const cur = _cmdkAskCurrent();
-  if(state === 'streaming'){
-    if(cur) _cmdkAskUpdate(cur, { status: 'streaming', text: msg || 'Thinking on-device…' });
-    return;
-  }
-  if(state === 'error'){
-    if(cur) _cmdkAskUpdate(cur, { status: 'error', text: msg || 'Error' });
-    return;
-  }
-  if(state === 'empty'){
-    if(cur) _cmdkAskUpdate(cur, { status: 'empty', text: msg || 'No changes proposed.' });
-    return;
-  }
-  if(state === 'done'){
-    if(cur) _cmdkAskUpdate(cur, { status: 'ops', text: msg || 'Proposed.' });
-    return;
-  }
-  if(state === 'need-model'){
-    // Surface the download/load CTA as a turn so the user sees it inline in
-    // the conversation (instead of a global banner that hides their query).
-    // If there's no current turn yet (caller hit need-model before pushing
-    // a question), push a synthetic one with the question they tried to ask.
-    const info = _cmdkAskNeedModelInfo();
-    let target = cur;
-    if(!target){
-      const inp = gid('cmdkInput');
-      const q = inp && inp.value ? inp.value.trim() : '(load required)';
-      target = _cmdkAskNewTurn(q);
-    }
-    _cmdkAskUpdate(target, { status: 'need-model', needModel: info });
-  }
-}
-function _updateAskLabel(totalChars){
-  const lbl=gid('cmdkAskLabel');if(!lbl)return;
-  // Try to extract "count so far" by scanning for completed op entries
-  // without doing a full parse — just count top-level `{"name"` occurrences.
-  const stream=gid('cmdkAskStream');
-  const txt=stream?stream.textContent:'';
-  const matches=txt.match(/\{\s*"name"/g);
-  const n=matches?matches.length:0;
-  if(n>0)lbl.textContent=`Planning ${n} change${n!==1?'s':''}…`;
-  else lbl.textContent='Thinking on-device…';
-}
-async function cmdkAskSubmit(){
-  if(_cmdkAskBusy)return;
-  const input=gid('cmdkInput');if(!input)return;
-  const q=input.value.trim();
-  if(!q)return;
-  if(typeof askRun!=='function'){
-    const t = _cmdkAskNewTurn(q);
-    _cmdkAskUpdate(t, { status: 'error', text: 'Ask pipeline unavailable' });
-    input.value=''; return;
-  }
-  if(typeof isGenReady!=='function'||!isGenReady()){
-    const t = _cmdkAskNewTurn(q);
-    _cmdkAskUpdate(t, { status: 'need-model', needModel: _cmdkAskNeedModelInfo() });
-    input.value=''; return;
-  }
-  // Push the new turn FIRST so the user's question appears in the chat
-  // immediately. Then clear the input so they can type the follow-up while
-  // the assistant is still streaming the previous answer.
-  const turn = _cmdkAskNewTurn(q);
-  _renderAskConversation();
-  input.value='';
-  _cmdkAskHistoryIdx=-1;
-  // Snapshot prior turns before the streaming turn moves to a non-final
-  // status — the LLM prompt should see only the *prior* finished context.
-  const priorTurns = _cmdkAskPriorTurnsFor(turn);
-  _cmdkAskBusy=true;
-  _cmdkAskCtl=new AbortController();
-  try{
-    const res=await askRun(q,{
-      signal:_cmdkAskCtl.signal,
-      priorTurns,
-      onReadRound:()=>{
-        _cmdkAskUpdate(turn, { text: 'Running read-only tools on-device…' });
-      },
-      onToken:(t)=>{
-        turn.stream += t;
-        // Update inline label with op-count progress so the user sees the
-        // model is making progress, not just spinning.
-        const matches = turn.stream.match(/\{\s*"name"/g);
-        const n = matches ? matches.length : 0;
-        const lbl = n > 0
-          ? 'Planning ' + n + ' change' + (n!==1?'s':'') + '…'
-          : (turn.text && turn.text !== 'Thinking on-device…' ? turn.text : 'Thinking on-device…');
-        _cmdkAskUpdate(turn, { text: lbl });
-      },
-    });
-    _cmdkLastReply=res;
-    if(!res.ok){
-      const reason=res.reason||'Unknown error';
-      if(reason==='ABORTED'){
-        _cmdkAskUpdate(turn, { status: 'error', text: 'Stopped.' });
-      } else if(reason==='TIMEOUT'){
-        _cmdkAskUpdate(turn, { status: 'error', text: 'Timed out — try a shorter request or a smaller model.' });
-      } else if(reason==='GEN_NOT_READY'){
-        _cmdkAskUpdate(turn, { status: 'need-model', needModel: _cmdkAskNeedModelInfo() });
-      } else if(typeof reason === 'string' && reason.startsWith('PARSE_FAILED')){
-        _cmdkAskUpdate(turn, { status: 'error', text: 'Couldn’t parse a valid plan. Try rephrasing.' });
-      } else {
-        _cmdkAskUpdate(turn, { status: 'error', text: reason });
-      }
-      return;
-    }
-    if(!res.ops.length){
-      if(res.chatAnswer){
-        _cmdkAskUpdate(turn, { status: 'answer', text: res.chatAnswer });
-        return;
-      }
-      _cmdkAskUpdate(turn, { status: 'empty', text: 'No changes to apply, and no answer came back. Try rephrasing — e.g. "what is overdue?" or "make task 3 urgent".' });
-      return;
-    }
-    if(typeof acceptProposedOps==='function'){
-      await acceptProposedOps(res.ops,{source:'ask',destructiveLevel:res.destructiveLevel});
-    }
-    const n=res.ops.length;
-    const extra=res.rejected&&res.rejected.length?` (${res.rejected.length} rejected)`:'';
-    const rrd=res.readRounds>0?` ${res.readRounds} read step${res.readRounds!==1?'s':''} ·`:'';
-    _cmdkAskUpdate(turn, {
-      status: 'ops',
-      text: `Proposed ${n} change${n!==1?'s':''}${extra}.${rrd} Opened Tools — review before applying.`,
-      ops: res.ops,
-      rejected: res.rejected || null,
-      destructiveLevel: res.destructiveLevel,
-      readRounds: res.readRounds || 0,
-    });
-    // Don't auto-close the palette anymore. The chat is the value — leaving
-    // it open lets the user follow up with "now archive those" or "wait,
-    // undo that" without the conversation vanishing. Tools opens in the
-    // background where they can preview/apply at their own pace.
-  }catch(e){
-    _cmdkAskUpdate(turn, { status: 'error', text: (e&&e.message)||'Error' });
-  }finally{
-    _cmdkAskBusy=false;
-    _cmdkAskCtl=null;
-    // Re-focus the input so a follow-up question is one keystroke away.
-    const inp = gid('cmdkInput');
-    if(inp){ try{ inp.focus(); }catch(_){} }
-  }
-}
-function cmdkAskStop(){
-  if(_cmdkAskCtl){try{_cmdkAskCtl.abort()}catch(_){}}
-  if(typeof genAbort==='function')genAbort();
-}
-
-/** Open the palette pre-switched to Ask mode (used by the promo chip). */
-function openAskMode(){
-  openCmdK({ask:true});
-}
-
-/** Show the task-input promo chip only when the LLM is ready AND the user
- * hasn't dismissed/hidden it. Default is hidden — Ask is also reachable via
- * the Cmd/Ctrl+K palette so promoting it inline is opt-in noise reduction. */
-function syncAskPromoChip(){
-  const chip=gid('askPromoChip');
-  if(!chip)return;
-  const ready=typeof isGenReady==='function'&&isGenReady();
-  const allowed=!(typeof cfg==='object'&&cfg&&cfg.askPromoHidden);
-  chip.hidden = !((ready&&allowed));
-}
-/** User-toggle to surface the inline Ask promo. Persists to cfg. */
-function showAskPromo(){
-  if(typeof cfg==='object'&&cfg){cfg.askPromoHidden=false;saveState('user');}
-  syncAskPromoChip();
-}
-function hideAskPromo(){
-  if(typeof cfg==='object'&&cfg){cfg.askPromoHidden=true;saveState('user');}
-  syncAskPromoChip();
-}
-window.showAskPromo=showAskPromo;
-window.hideAskPromo=hideAskPromo;
 function renderCmdK(){
   const rawInput=gid('cmdkInput');
-  let rawVal=rawInput?rawInput.value:'';
-  // Prefix "? " toggles Ask mode and strips the prefix from the query.
-  if(cmdkMode!=='ask'&&(rawVal.startsWith('?')||rawVal.startsWith('？'))){
-    const rest=rawVal.replace(/^[?？]\s*/,'');
-    if(rawInput)rawInput.value=rest;
-    rawVal=rest;
-    // If there's an Ask turn running from a previous invocation, kill it
-    // cleanly before flipping modes so the new Ask state isn't racing the
-    // old one.
-    if(_cmdkAskBusy||_cmdkAskCtl)_cmdkAbortAsk();
-    cmdkSetAskMode(true);
-    return;
-  }
-  if(cmdkMode==='ask'){
-    const results=gid('cmdkResults');
-    if(results)results.hidden = true;
-    _cmdkFootAskText();
-    return;
-  }
+  const rawVal=rawInput?rawInput.value:'';
   const q=rawVal.toLowerCase().trim();
   const results=gid('cmdkResults');
   const ic=(n)=>(typeof window.icon==='function'?window.icon(n):'');
-  const askAction={type:'action',label:'Ask the AI (natural language)',icon:ic('spark'),kbd:'?',run:()=>{openCmdK({ask:true})}};
   const navActions=[
     {type:'action',label:'Go to Tasks',icon:ic('list'),kbd:'1',run:()=>showTab('tasks')},
     {type:'action',label:'Go to Timer',icon:ic('timer'),kbd:'2',run:()=>showTab('focus')},
@@ -734,11 +209,7 @@ function renderCmdK(){
     {type:'action',label:'Focus-on-list mode (hide other lists)',icon:ic('folder'),run:()=>toggleFocusListMode()},
     {type:'action',label:(isBulkMode()?'Exit bulk-edit mode':'Bulk-edit mode (multi-select)'),icon:ic('check'),run:()=>toggleBulkMode()},
     {type:'action',label:'Save current view…',icon:ic('star'),run:()=>savePerspectivePrompt()},
-    {type:'action',label:'Daily brief (top tasks today)',icon:ic('sparkles'),run:()=>showDailyBriefCard()},
-    {type:'action',label:'Weekly review (last 7 days)',icon:ic('clipboard'),run:()=>showWeeklyReviewCard()},
-    {type:'action',label:'AI: Rephrase open task title',icon:ic('wand'),run:()=>rephraseActiveTaskTitle()},
-    {type:'action',label:'AI: Suggest tags for open task',icon:ic('spark'),run:()=>suggestTagsForTask()},
-    {type:'action',label:'AI: Suggest due date for open task',icon:ic('calendar'),run:()=>suggestDueDateForTask()},
+    {type:'action',label:'Suggest due date for open task',icon:ic('calendar'),run:()=>suggestDueDateForTask()},
     {type:'action',label:'Snooze open task — 1 day',icon:ic('moon'),run:()=>{ if(editingTaskId!=null) snoozeTaskForDays(editingTaskId,1); else if(typeof showExportToast==='function') showExportToast('Open a task first.') }},
     {type:'action',label:'Snooze open task — 3 days',icon:ic('moon'),run:()=>{ if(editingTaskId!=null) snoozeTaskForDays(editingTaskId,3); else if(typeof showExportToast==='function') showExportToast('Open a task first.') }},
     {type:'action',label:'Snooze open task — 1 week',icon:ic('moon'),run:()=>{ if(editingTaskId!=null) snoozeTaskForDays(editingTaskId,7); else if(typeof showExportToast==='function') showExportToast('Open a task first.') }},
@@ -755,11 +226,6 @@ function renderCmdK(){
     {type:'action',label:'Toggle semantic search',icon:ic('search'),run:()=>{showTab('tasks');if(typeof isIntelReady !== 'function' || !isIntelReady()){if(typeof syncHeaderAIChip === 'function') syncHeaderAIChip('error', 'Load model first — open Tools');showTab('tools');return}const cb=gid('taskSearchSemantic');if(cb){cb.checked=!cb.checked;if(typeof toggleTaskSearchSemantic==='function')toggleTaskSearchSemantic()}}},
   ];
   const items=[];
-  const askMatches=!q||askAction.label.toLowerCase().includes(q);
-  if(askMatches){
-    items.push({section:'Ask'});
-    items.push(askAction);
-  }
   // Append saved perspectives dynamically
   if(typeof cfg === 'object' && cfg && Array.isArray(cfg.perspectives)){
     cfg.perspectives.forEach(p => {
@@ -868,7 +334,7 @@ function renderCmdK(){
       ['theme dark light',                  'Theme (dark / light)',          'set-general'],
       ['sound chime audio',                 'Sound & chimes',                'set-general'],
       ['notification permission',           'Notifications',                 'set-general'],
-      ['ai model llm embedding download',   'AI / on-device model',          'set-integrations'],
+      ['ai embedding model download',       'AI / on-device model',          'set-integrations'],
       ['sync peer p2p webrtc',              'Sync (peer-to-peer)',           'set-integrations'],
       ['export import backup csv json ical','Data export / import',          'set-about'],
       ['encrypt password',                  'Encrypted backup',              'set-about'],
@@ -913,34 +379,6 @@ function cmdkRun(idx){
 }
 function cmdkKeydown(e){
   if(e.key==='Escape'){closeCmdK();return}
-  if(cmdkMode==='ask'){
-    if(e.key==='Enter'){e.preventDefault();cmdkAskSubmit();return}
-    if(e.key==='ArrowUp'){
-      if(typeof getAskHistory!=='function')return;
-      const hist=getAskHistory();
-      if(!hist.length)return;
-      e.preventDefault();
-      _cmdkAskHistoryIdx=Math.min(_cmdkAskHistoryIdx+1,hist.length-1);
-      const item=hist[_cmdkAskHistoryIdx];
-      if(item){const inp=gid('cmdkInput');if(inp){inp.value=item.text}}
-      return;
-    }
-    if(e.key==='ArrowDown'){
-      if(_cmdkAskHistoryIdx<=0){_cmdkAskHistoryIdx=-1;const inp=gid('cmdkInput');if(inp)inp.value='';e.preventDefault();return}
-      const hist=typeof getAskHistory==='function'?getAskHistory():[];
-      _cmdkAskHistoryIdx=Math.max(_cmdkAskHistoryIdx-1,0);
-      const item=hist[_cmdkAskHistoryIdx];
-      if(item){const inp=gid('cmdkInput');if(inp)inp.value=item.text}
-      e.preventDefault();
-      return;
-    }
-    // Backspace on empty exits Ask mode
-    if(e.key==='Backspace'){
-      const inp=gid('cmdkInput');
-      if(inp&&inp.value===''){e.preventDefault();cmdkSetAskMode(false);return}
-    }
-    return;
-  }
   if(e.key==='ArrowDown'){e.preventDefault();cmdkActiveIdx=Math.min(cmdkActiveIdx+1,cmdkFilteredItems.length-1);renderCmdK()}
   else if(e.key==='ArrowUp'){e.preventDefault();cmdkActiveIdx=Math.max(cmdkActiveIdx-1,0);renderCmdK()}
   else if(e.key==='Enter'){e.preventDefault();cmdkRun(cmdkActiveIdx)}
@@ -1947,15 +1385,6 @@ function openTaskDetail(id){
   refreshMdSimilarTasks(id);
   // Show the Break-down accordion only when a generative model is loaded.
   // Content is lazy-rendered on toggle to avoid spending tokens unless asked.
-  const bdWrap = gid('mdBreakdownWrap');
-  if(bdWrap){
-    const llmOn = typeof isGenReady === 'function' && isGenReady();
-    bdWrap.hidden = !(llmOn);
-    const bdAcc = gid('mdBreakdownAccordion');
-    if(bdAcc) bdAcc.classList.remove('open');
-    const bdBody = gid('mdBreakdownBody');
-    if(bdBody){ bdBody.textContent = ''; delete bdBody.dataset.loaded; }
-  }
   renderMdHabitLog(t);
   renderMdSessions(t);
   gid('taskModal').classList.add('open');
@@ -2577,18 +2006,6 @@ window.toggleSimilarAccordion = function(){
   if(acc) acc.classList.toggle('open');
 };
 
-window.toggleBreakdownAccordion = function(){
-  const acc = gid('mdBreakdownAccordion');
-  if(!acc) return;
-  const opening = !acc.classList.contains('open');
-  acc.classList.toggle('open');
-  // Lazy-load suggestions the first time the user opens the accordion.
-  const body = gid('mdBreakdownBody');
-  if(opening && body && !body.dataset.loaded){
-    if(typeof runMdBreakdown === 'function') runMdBreakdown();
-  }
-};
-
 function updateMiniTimer(){
   const el=gid('miniTimer');if(!el)return;
   // Hide on the Timer tab (the full timer is already visible there)
@@ -2844,128 +2261,6 @@ function refreshOpenTaskModalIfMatches(taskId){
 }
 window.refreshOpenTaskModalIfMatches = refreshOpenTaskModalIfMatches;
 
-// ========== G-10 DAILY BRIEF + G-11 WEEKLY REVIEW ==========
-// Both render as a temporary modal-ish card. They're narrative-only (no ops),
-// so no validator pipeline — but we still gate on isGenReady() and degrade
-// gracefully when the LLM hasn't been loaded.
-function _briefCard(title){
-  let host = document.getElementById('aiBriefCard');
-  if(!host){
-    host = document.createElement('div');
-    host.id = 'aiBriefCard';
-    host.className = 'ai-brief-card';
-    document.body.appendChild(host);
-  }
-  host.replaceChildren();
-  host.hidden = false;
-  const head = document.createElement('div'); head.className = 'aibc-head';
-  const h = document.createElement('span'); h.className = 'aibc-title'; h.textContent = title;
-  const close = document.createElement('button'); close.type = 'button'; close.className = 'aibc-close';
-  close.textContent = '✕'; close.onclick = function(){ host.hidden = true; };
-  head.append(h, close);
-  host.appendChild(head);
-  const body = document.createElement('div'); body.className = 'aibc-body';
-  host.appendChild(body);
-  return body;
-}
-async function showDailyBriefCard(){
-  const body = _briefCard('Daily brief');
-  if(typeof isGenReady !== 'function' || !isGenReady()){
-    body.textContent = 'Load the on-device LLM (Settings → Integrations → Generative AI) to enable AI briefs.';
-    return;
-  }
-  body.textContent = 'Composing…';
-  // Gather context
-  const today = (typeof todayKey === 'function') ? todayKey() : (new Date()).toISOString().slice(0,10);
-  const open = (Array.isArray(tasks) ? tasks : []).filter(t => t && !t.archived && t.status !== 'done');
-  // Use the existing rankWhatNext for the top-N
-  let ranked = [];
-  try{ if(typeof rankWhatNext === 'function') ranked = rankWhatNext(open, {}).slice(0, 5); }catch(_){}
-  if(!ranked.length) ranked = open.slice(0, 5);
-  const topTasks = ranked.map(r => ({ name: (r.task || r).name, due: (r.task || r).dueDate || null, priority: (r.task || r).priority || 'none' }));
-  const dueTodayCount = open.filter(t => t.dueDate === today).length;
-  const overdueCount = open.filter(t => t.dueDate && t.dueDate < today).length;
-  const blockedCount = open.filter(t => Array.isArray(t.blockedBy) && t.blockedBy.length).length;
-  let events = [];
-  try{ if(typeof getCalFeedEventsForDate === 'function') events = (getCalFeedEventsForDate(today) || []).slice(0, 3).map(e => ({ time: e.time || 'all-day', summary: e.summary || '' })); }catch(_){}
-  const out = await genDailyBrief({ topTasks, dueTodayCount, overdueCount, blockedCount, events });
-  body.textContent = (typeof out === 'string' && out.trim()) ? out.trim() : '(No brief generated.)';
-}
-async function showWeeklyReviewCard(){
-  const body = _briefCard('Weekly review');
-  if(typeof isGenReady !== 'function' || !isGenReady()){
-    body.textContent = 'Load the on-device LLM (Settings → Integrations → Generative AI) to enable weekly reviews.';
-    return;
-  }
-  body.textContent = 'Reviewing…';
-  const all = Array.isArray(tasks) ? tasks : [];
-  const weekAgoMs = Date.now() - 7 * 86400000;
-  const stuckCutoff = Date.now() - 7 * 86400000;
-  const isoDateOnly = s => (typeof s === 'string') ? s.slice(0, 10) : '';
-  const done = all.filter(t => t && t.status === 'done' && t.completedAt && new Date(isoDateOnly(t.completedAt) + 'T00:00:00').getTime() >= weekAgoMs);
-  const blocked = all.filter(t => t && !t.archived && t.status !== 'done' && Array.isArray(t.blockedBy) && t.blockedBy.length);
-  const stuck = all.filter(t => t && !t.archived && t.status !== 'done' && typeof t.lastModified === 'number' && t.lastModified > 0 && t.lastModified < stuckCutoff);
-  // Reopened detection: tasks that have completedAt cleared but had it before — we don't track this explicitly; approximate as tasks with `notes` mentioning "reopen" or with recent updates and status open. Skip for now.
-  const reopened = [];
-  const out = await genWeeklyReview({
-    doneCount: done.length,
-    done: done.slice(0, 12).map(t => ({ name: t.name, completedAt: t.completedAt })),
-    reopened: reopened.slice(0, 6),
-    blocked: blocked.slice(0, 6).map(t => ({ name: t.name, blockedBy: (t.blockedBy || []).slice(0, 3) })),
-    stuck: stuck.slice(0, 6).map(t => ({ name: t.name, lastModified: t.lastModified })),
-  });
-  body.textContent = (typeof out === 'string' && out.trim()) ? out.trim() : '(No review generated.)';
-}
-window.showDailyBriefCard = showDailyBriefCard;
-window.showWeeklyReviewCard = showWeeklyReviewCard;
-
-// ========== G-9 REPHRASE / G-13 AUTO-TAG (per-task surface) ==========
-// Surfaced via task-detail drawer buttons (wired below) and palette commands.
-async function rephraseActiveTaskTitle(taskId){
-  const id = taskId != null ? taskId : editingTaskId;
-  if(id == null){
-    if(typeof showExportToast === 'function') showExportToast('Open a task first (click any task), then rerun this action.');
-    return;
-  }
-  if(typeof isGenReady !== 'function' || !isGenReady()){
-    if(typeof showExportToast === 'function') showExportToast('Load the LLM first (Settings → Integrations → Generative AI)');
-    return;
-  }
-  const t = (typeof findTask === 'function') ? findTask(id) : null;
-  if(!t) return;
-  const next = await genRephrase(t);
-  if(!next || next === t.name) return;
-  // Land in the existing op preview pipeline instead of mutating directly.
-  if(typeof acceptProposedOps === 'function'){
-    await acceptProposedOps([{ name: 'UPDATE_TASK', args: { id: t.id, name: next }, _rationale: 'AI rephrase suggestion' }], { source: 'ai-rephrase', destructiveLevel: 'none' });
-  }
-}
-async function suggestTagsForTask(taskId){
-  const id = taskId != null ? taskId : editingTaskId;
-  if(id == null){
-    if(typeof showExportToast === 'function') showExportToast('Open a task first (click any task), then rerun this action.');
-    return;
-  }
-  if(typeof isGenReady !== 'function' || !isGenReady()){
-    if(typeof showExportToast === 'function') showExportToast('Load the LLM first (Settings → Integrations → Generative AI)');
-    return;
-  }
-  const t = (typeof findTask === 'function') ? findTask(id) : null;
-  if(!t || typeof genSuggestTags !== 'function') return;
-  const allTags = new Set();
-  (Array.isArray(tasks) ? tasks : []).forEach(x => (x.tags || []).forEach(tg => allTags.add(tg)));
-  const res = await genSuggestTags(t, Array.from(allTags));
-  if(!res || !Array.isArray(res.tags) || !res.tags.length) return;
-  const newOnes = res.tags.filter(tg => !(t.tags || []).includes(tg));
-  if(!newOnes.length){
-    if(typeof showExportToast === 'function') showExportToast('No new tags to suggest');
-    return;
-  }
-  if(typeof acceptProposedOps === 'function'){
-    const ops = newOnes.map(tag => ({ name: 'ADD_TAG', args: { id: t.id, tag }, _rationale: res.rationale || '' }));
-    await acceptProposedOps(ops, { source: 'ai-tag-suggest', destructiveLevel: 'none' });
-  }
-}
 async function suggestDueDateForTask(taskId){
   const id = taskId != null ? taskId : editingTaskId;
   if(id == null){
@@ -2991,8 +2286,6 @@ async function suggestDueDateForTask(taskId){
     await acceptProposedOps([{ name: 'UPDATE_TASK', args: { id: t.id, dueDate: next }, _rationale: 'kNN median of similar tasks' }], { source: 'ai-due-suggest', destructiveLevel: 'none' });
   }
 }
-window.rephraseActiveTaskTitle = rephraseActiveTaskTitle;
-window.suggestTagsForTask = suggestTagsForTask;
 window.suggestDueDateForTask = suggestDueDateForTask;
 
 // ========== G-18 TODAY-VIEW CALENDAR EVENTS ==========
