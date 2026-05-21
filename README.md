@@ -208,7 +208,7 @@ A derived impact score ranks every active task from signals you already have —
 ### The 10-second path
 
 ```bash
-git clone https://github.com/<you>/STUPInD.git OdTauLai
+git clone https://github.com/iLevyTate/OdTauLai.git
 cd OdTauLai
 python3 -m http.server 8080
 # open http://localhost:8080
@@ -275,6 +275,7 @@ OdTauLai/
 ├── sw.js                     service worker (shell precache)
 ├── css/main.css              themed design system with CSS variables
 ├── js/
+│   ├── config.js             CDN URLs, model id, storage keys (window.ODTAULAI_CONFIG)
 │   ├── version.js            release id (keep in sync with sw.js cache name)
 │   ├── utils.js              helpers, date, DOM
 │   ├── storage.js            localStorage + IndexedDB persistence
@@ -400,7 +401,7 @@ Yes — the beta P2P sync uses WebRTC. Your data goes peer-to-peer; only the han
 <details>
 <summary><b>How do I run this on a corporate network that blocks CDNs?</b></summary>
 
-Host `@huggingface/transformers`, the model files, `chrono-node`, and `peerjs` yourself; update the CDN URLs in `js/ai.js`, `js/nlparse.js`, and `js/sync.js`.
+Host `@huggingface/transformers`, the model files, `chrono-node`, and `peerjs` yourself; all CDN URLs are centralized in [`js/config.js`](js/config.js) (`window.ODTAULAI_CONFIG`) — point them at your mirror. The PeerJS fallback also ships at `js/vendor/peerjs.min.js`.
 
 </details>
 
