@@ -1,10 +1,17 @@
 /**
- * Guard against drift between the canonical manifest.json and the inline
+ * Guard against drift between the canonical manifest.json and the minimal
  * file:// fallback manifest constructed in js/pwa.js.
  *
- * The inline manifest exists because file:// can't reliably load relative
- * manifest assets. We can't dedupe the source, but we can fail CI when the
- * two go out of sync on the visible-to-users fields.
+ * History: the inline manifest used to duplicate ~10 fields from
+ * manifest.json — they drifted during the v48 cleanup. Audit finding M-2
+ * trimmed the stub to the 5 essentials needed for file:// install
+ * (name, short_name, display, theme_color, background_color); this test
+ * pins those so the stub can't silently diverge from manifest.json on the
+ * fields that ARE still duplicated.
+ *
+ * The omitted fields (description, display_override, categories,
+ * orientation, etc.) intentionally live only in manifest.json — file://
+ * install gets a degraded but coherent metadata set.
  */
 import test from 'node:test';
 import assert from 'node:assert';
@@ -43,26 +50,19 @@ test('pwa.js inline manifest "display" matches manifest.json', () => {
   assert.equal(pwaInlineField('display'), manifest.display);
 });
 
-test('pwa.js inline manifest "orientation" matches manifest.json', () => {
-  assert.equal(pwaInlineField('orientation'), manifest.orientation);
-});
-
-function pwaInlineArray(name){
-  // Match `name: ['a', 'b', ...]` or with double quotes.
-  const re = new RegExp(`${name}\\s*:\\s*\\[([^\\]]+)\\]`);
-  const m = pwaSrc.match(re);
-  if(!m) return null;
-  return m[1].split(',').map(s => s.trim().replace(/^['"]|['"]$/g, ''));
-}
-
-test('pwa.js inline manifest "display_override" matches manifest.json', () => {
-  // Regression for AUDIT.md H-NEW-2: pwa.js was missing window-controls-overlay.
-  const pwaArr = pwaInlineArray('display_override');
-  assert.deepStrictEqual(pwaArr, manifest.display_override);
-});
-
-test('pwa.js inline manifest "categories" matches manifest.json', () => {
-  // Regression for AUDIT.md H-NEW-2: pwa.js was missing "lifestyle".
-  const pwaArr = pwaInlineArray('categories');
-  assert.deepStrictEqual(pwaArr, manifest.categories);
+test('pwa.js inline manifest does NOT redeclare fields that drifted in v48', () => {
+  // Regression guard for AUDIT.md M-2: these fields used to be duplicated
+  // in the inline stub and silently drifted from manifest.json. After M-2
+  // they live only in manifest.json. If someone re-adds them to the inline
+  // stub, this fails so we notice before they drift again.
+  const inlineStart = pwaSrc.indexOf('const manifest = {');
+  const inlineEnd = pwaSrc.indexOf('};', inlineStart);
+  assert.ok(inlineStart > 0 && inlineEnd > inlineStart, 'inline manifest block not found');
+  const block = pwaSrc.slice(inlineStart, inlineEnd);
+  for (const field of ['description', 'display_override', 'categories', 'orientation']) {
+    assert.ok(
+      !new RegExp(`\\b${field}\\b\\s*:`).test(block),
+      `${field} should not be redeclared in the file:// stub — manifest.json is the only source`,
+    );
+  }
 });
