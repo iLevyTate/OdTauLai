@@ -502,8 +502,7 @@ function getCalFeedEventsForDate(isoDate){
   _loadCalFeeds();
   const out = [];
   // G-19: optional "hide past" filter — drops timed events that already ended.
-  // Read from cfg if present; otherwise no-op so callers (like LLM context
-  // builders) get the unfiltered set.
+  // Read from cfg if present; otherwise no-op so callers get the unfiltered set.
   const hidePast = !!(typeof cfg === 'object' && cfg && cfg.calHidePast);
   const now = Date.now();
   _calFeeds.feeds.forEach(feed => {

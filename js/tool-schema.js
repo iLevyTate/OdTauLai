@@ -327,66 +327,7 @@ function validateOps(raw, ctx){
   return out;
 }
 
-/**
- * Render a short human-readable schema block (used for documentation /
- * enumerates. Generated once at load time from TOOL_SCHEMA above.
- */
-function toolSchemaPromptBlock(){
-  const lines = [];
-  Object.keys(TOOL_SCHEMA).forEach(name => {
-    const s = TOOL_SCHEMA[name];
-    const req = s.required.length ? s.required.join(',') : '';
-    const opt = s.optional.length ? s.optional.map(x => x + '?').join(',') : '';
-    const args = [req, opt].filter(Boolean).join(',');
-    lines.push('- ' + name + '(' + args + ')');
-  });
-  return lines.join('\n');
-}
-
-/**
- * Tolerant parser: strip code fences, find first balanced [...] block,
- * return parsed Array or throw.
- */
-function parseOpsJson(text){
-  if(typeof text !== 'string') throw new Error('NOT_STRING');
-  let s = text;
-  s = s.replace(/^\s*```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '');
-  // Prefer a line that starts with '[' (avoids matching '[' inside prose)
-  let open = -1;
-  let offset = 0;
-  for(const line of s.split('\n')){
-    const t = line.replace(/^\s+/, '');
-    if(t.charAt(0) === '['){ open = offset + (line.length - t.length); break; }
-    offset += line.length + 1;
-  }
-  if(open < 0) open = s.indexOf('[');
-  if(open < 0) throw new Error('NO_ARRAY');
-  let depth = 0;
-  let inStr = false;
-  let esc = false;
-  let end = -1;
-  for(let i = open; i < s.length; i++){
-    const c = s[i];
-    if(inStr){
-      if(esc){ esc = false; continue; }
-      if(c === '\\'){ esc = true; continue; }
-      if(c === '"') inStr = false;
-      continue;
-    }
-    if(c === '"'){ inStr = true; continue; }
-    if(c === '['){ depth++; continue; }
-    if(c === ']'){ depth--; if(depth === 0){ end = i + 1; break; } }
-  }
-  if(end < 0) throw new Error('UNBALANCED_ARRAY');
-  const slice = s.slice(open, end);
-  return JSON.parse(slice);
-}
-
 if(typeof window !== 'undefined'){
   window.TOOL_SCHEMA = TOOL_SCHEMA;
   window.validateOps = validateOps;
-  window.toolSchemaPromptBlock = toolSchemaPromptBlock;
-  window.parseOpsJson = parseOpsJson;
-  window.ASK_MAX_OPS = ASK_MAX_OPS;
-  window.coerceToolArg = _coerceArg;
 }

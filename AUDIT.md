@@ -122,13 +122,7 @@ This is the single largest untested coordinator in the project. A regression her
 
 ## Low-severity findings
 
-### L-1 — Dead config key `V16_MIGRATED`
-
-`js/config.js:28` declares `V16_MIGRATED: 'stupind_v16_migrated'`. The codebase has zero readers or writers of this key (verified via grep across `js/`). The comment at `js/app.js:231` confirms the migration was removed in v32. Safe to delete.
-
----
-
-### L-2 — `pwa.js` polls install state with two layered timeouts
+### L-1 — `pwa.js` polls install state with two layered timeouts
 
 ```
 js/pwa.js:174-175
@@ -140,7 +134,7 @@ These exist to compensate for `beforeinstallprompt` racing with platform detecti
 
 ---
 
-### L-3 — `escAttr()` is used inside inline JS handlers, but does not protect that context
+### L-2 — `escAttr()` is used inside inline JS handlers, but does not protect that context
 
 `js/calfeeds.js:640-642`:
 ```
@@ -155,7 +149,7 @@ Today this is **not exploitable** because feed IDs are generated internally (`'c
 
 ---
 
-### L-4 — Inline icon-only buttons rely on `title` for screen readers
+### L-3 — Inline icon-only buttons rely on `title` for screen readers
 
 Several dynamically-rendered icon-only buttons carry only `title="..."` (e.g., `js/calfeeds.js:640-642`: 👁/↻/×). `title` is not reliably announced by screen readers. Pair each with `aria-label`.
 
@@ -197,8 +191,7 @@ Modules ranked by **untested user-facing surface area** (lines × user-impact):
 2. **M-1** — Extend `check-version-sync.mjs` to cover `pwa.js` (one-PR fix, ~3 lines)
 3. **M-3** — Move `gid('headerDate')` mutation out of module top level
 4. **M-5 + coverage** — extract day-rollover from `app.js` and add a test
-5. **L-1** — Delete dead `V16_MIGRATED` config key
-6. **H-2** — Multi-PR migration to delegated handlers, then drop CSP `'unsafe-inline'`
-7. **M-4** — Fix the chip-loop rebuild while addressing H-1
-8. **M-2** — De-duplicate inline manifest in `pwa.js`
-9. **L-3, L-4, L-2** — sweep at leisure
+5. **H-2** — Multi-PR migration to delegated handlers, then drop CSP `'unsafe-inline'`
+6. **M-4** — Fix the chip-loop rebuild while addressing H-1
+7. **M-2** — De-duplicate inline manifest in `pwa.js`
+8. **L-1, L-2, L-3** — sweep at leisure

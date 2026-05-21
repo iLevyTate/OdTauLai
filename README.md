@@ -318,7 +318,7 @@ OdTauLai/
 | Library | Purpose | When it loads |
 |---|---|---|
 | [`@huggingface/transformers`](https://huggingface.co/docs/transformers.js) | on-device embeddings | first time you use an AI feature |
-| [`Xenova/gte-small`](https://huggingface.co/Xenova/gte-small) | 384-dim sentence embedding model (~33 MB) | first AI feature use, then cached |
+| [`Xenova/bge-small-en-v1.5`](https://huggingface.co/Xenova/bge-small-en-v1.5) | 384-dim sentence embedding model (~33 MB) | first AI feature use, then cached |
 | [`chrono-node`](https://github.com/wanasit/chrono) | natural-language dates | first time you quick-add with dates |
 | [`peerjs`](https://peerjs.com/) | WebRTC signalling client | only if you enable P2P sync |
 
@@ -473,7 +473,7 @@ See also: **[CONTRIBUTING.md](CONTRIBUTING.md)** · **[ARCHITECTURE.md](ARCHITEC
 Built with:
 
 - [Transformers.js](https://huggingface.co/docs/transformers.js) — on-device inference.
-- [`Xenova/gte-small`](https://huggingface.co/Xenova/gte-small) — the embedding model.
+- [`Xenova/bge-small-en-v1.5`](https://huggingface.co/Xenova/bge-small-en-v1.5) — the embedding model.
 - [chrono-node](https://github.com/wanasit/chrono) — natural-language date parsing.
 - [PeerJS](https://peerjs.com/) — WebRTC signalling client.
 
