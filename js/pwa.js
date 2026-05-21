@@ -11,24 +11,25 @@
   </svg>`;
   const iconUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(iconSvg);
 
-  // On file://, override to inline manifest + icons so install still works
+  // On file://, override to inline manifest + icons so install still works.
+  // The full canonical manifest lives in manifest.json (served via the static
+  // <link rel="manifest"> on http(s)); this minimal stub covers only what
+  // file:// install actually needs. Fields like display_override, categories,
+  // description, and orientation are intentionally absent here — duplicating
+  // them was the M-2 drift surface that bit us during the v48 cleanup.
   if (isFileProtocol) {
     document.getElementById('pwa-apple-icon').href = iconUrl;
     document.getElementById('pwa-favicon').href = iconUrl;
-    // Fields below are kept in sync with manifest.json — see
-    // tests/pwa-manifest-sync.test.mjs which asserts the alignment.
+    const path = location.pathname.split('/');
+    const scope = path.slice(0, -1).join('/') + '/';
     const manifest = {
       name: 'OdTauLai — On device task app using local ambient intelligence',
       short_name: 'OdTauLai',
-      description: 'On-device Pomodoro timer + task manager. A small local embedding model (~33 MB) captures the meaning and context of your tasks — not just keywords — for semantic search, smart suggestions, duplicates, list routing, and values alignment. Works offline. Optional P2P sync. No account, no tracking.',
-      start_url: location.pathname.split('/').slice(0,-1).join('/') + '/' + (location.pathname.split('/').pop() || ''),
-      scope: location.pathname.split('/').slice(0,-1).join('/') + '/',
+      start_url: scope + (path[path.length - 1] || ''),
+      scope: scope,
       display: 'standalone',
-      display_override: ['window-controls-overlay', 'standalone', 'minimal-ui'],
-      orientation: 'any',
       background_color: '#0a1320',
       theme_color: '#0a1320',
-      categories: ['productivity', 'utilities', 'lifestyle'],
       icons: [
         {src: iconUrl, sizes: '192x192', type: 'image/svg+xml', purpose: 'any'},
         {src: iconUrl, sizes: '512x512', type: 'image/svg+xml', purpose: 'any'},

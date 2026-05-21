@@ -15,7 +15,7 @@ Most findings have been resolved by subsequent feature waves. Each section below
 | H-1 | High | ✅ Fixed | Allow-list + addEventListener migration |
 | H-2 | High | ✅ Fixed | CSP hardened; inline handlers eliminated |
 | M-1 | Medium | ✅ Fixed | `check-version-sync.mjs` extended to `pwa.js` |
-| M-2 | Medium | 🟡 Open | `pwa.js` inline manifest still duplicated |
+| M-2 | Medium | ✅ Fixed | `pwa.js` inline stub trimmed to 5 essential fields; drift surface eliminated |
 | M-3 | Medium | ✅ Fixed | `setHeaderDate()` wrapper added |
 | M-4 | Medium | ✅ Fixed | Same migration as H-1 |
 | M-5 | Medium | 🟡 Open | `js/app.js` still lacks direct test coverage |
@@ -97,9 +97,11 @@ The `pwa.js` fallback can silently drift. Risk: if `version.js` fails to load (a
 
 ### M-2 — `js/pwa.js` carries an inline manifest that duplicates `manifest.json`
 
-**Evidence**: `js/pwa.js:18-35` constructs a full PWA manifest inline (name, short_name, theme_color, icons, etc.) for the `file://` fallback path. Every field must be kept in sync with `manifest.json`. Today both say `theme_color: '#0a1320'`, but there's no test or guard that they agree.
+> ✅ **Fixed.** The inline manifest was trimmed to a minimal stub covering only the 5 fields file:// install actually needs (`name`, `short_name`, `display`, `background_color`, `theme_color`, plus `icons` using the embedded SVG data: URI). `description`, `display_override`, `categories`, and `orientation` no longer live in the stub — manifest.json is the only source. `tests/pwa-manifest-sync.test.mjs` was updated: pins the remaining 5 duplicated fields and includes a regression guard that fails if the dropped fields are ever re-added to the inline stub.
+>
+> Note: the AUDIT originally proposed `fetch('./manifest.json')` + reinline. That was reconsidered — `fetch` reliably fails on `file://` (same-origin-from-file restrictions), so on that path we'd end up using a stub anyway. Just shipping the stub directly is simpler and skips the round-trip on the only code path that ever runs this block.
 
-**Fix**: have `pwa.js` `fetch('./manifest.json')` and re-inline its contents as a Blob URL. Falls back to a minimal stub only if the fetch fails.
+**Evidence**: `js/pwa.js:18-35` constructed a full PWA manifest inline (name, short_name, theme_color, icons, etc.) for the `file://` fallback path. Every field had to be kept in sync with `manifest.json`. Today both say `theme_color: '#0a1320'`, but there was no test or guard that they agree.
 
 ---
 
@@ -220,9 +222,8 @@ Modules ranked by **untested user-facing surface area** (lines × user-impact):
 
 **Original list (April 2026):** H-1 → M-1 → M-3 → M-5 → H-2 → M-4 → M-2 → L-*
 
-**Status as of v48 (May 2026):** H-1, H-2, M-1, M-3, M-4, L-2 are all closed (see annotations above). Open items, ordered by remaining risk:
+**Status as of v48 (May 2026):** H-1, H-2, M-1, M-2, M-3, M-4, L-2 are all closed (see annotations above). Open items, ordered by remaining risk:
 
 1. **M-5** — extract day-rollover and share-target/file-handler IIFEs from `js/app.js`, add unit coverage. Highest remaining risk because day-rollover wakeup bugs are invisible to CI.
-2. **M-2** — de-duplicate `pwa.js` inline manifest against `manifest.json` (fetch + reinline, fall back to stub). Drift is currently caught by humans, not tests.
-3. **L-3** — accessibility sweep on dynamically-rendered icon-only buttons (`title` is not screen-reader reliable; pair with `aria-label`).
-4. **L-1** — replace `pwa.js` install-state dual `setTimeout` polling with a `MutationObserver` or single gated call. Working today, smell.
+2. **L-3** — accessibility sweep on dynamically-rendered icon-only buttons (`title` is not screen-reader reliable; pair with `aria-label`).
+3. **L-1** — replace `pwa.js` install-state dual `setTimeout` polling with a `MutationObserver` or single gated call. Working today, smell.
