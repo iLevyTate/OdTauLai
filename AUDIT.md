@@ -1,8 +1,27 @@
 # OdTauLai — Post-Feature-Wave Audit
 
-**Scope**: codebase state on branch `audit-findings`, head `40617a1` (cache `odtaulai-v43`, build 2026-04-27), after the wave of UX/UI/coverage PRs (#21–#25).
+**Original scope**: codebase state on branch `audit-findings`, head `40617a1` (cache `odtaulai-v43`, build 2026-04-27), after the wave of UX/UI/coverage PRs (#21–#25).
 
 **Method**: read-only static analysis of `js/`, `sw.js`, `js/pwa.js`, `index.html`, and the `tests/` inventory. No code was modified by this audit. Each finding lists severity, evidence with file:line citations, and a suggested fix that's small enough to land in a focused follow-up branch.
+
+---
+
+## Status as of v48 (2026-05-21)
+
+Most findings have been resolved by subsequent feature waves. Each section below is annotated with a ✅ Fixed / 🟡 Open / 🔵 Obsolete banner. The original analysis text is preserved so readers can see what the issue was, why it mattered, and how it was addressed.
+
+| Finding | Severity | Status | Resolved in |
+|---|---|---|---|
+| H-1 | High | ✅ Fixed | Allow-list + addEventListener migration |
+| H-2 | High | ✅ Fixed | CSP hardened; inline handlers eliminated |
+| M-1 | Medium | ✅ Fixed | `check-version-sync.mjs` extended to `pwa.js` |
+| M-2 | Medium | 🟡 Open | `pwa.js` inline manifest still duplicated |
+| M-3 | Medium | ✅ Fixed | `setHeaderDate()` wrapper added |
+| M-4 | Medium | ✅ Fixed | Same migration as H-1 |
+| M-5 | Medium | 🟡 Open | `js/app.js` still lacks direct test coverage |
+| L-1 | Low | 🟡 Open | `pwa.js` install-state polling still has layered timeouts |
+| L-2 | Low | 🔵 Obsolete | The `escAttr`-in-inline antipattern can no longer exist (H-2 removed all inline handlers) |
+| L-3 | Low | 🟡 Open | Dynamic icon-only buttons still rely on `title` for screen readers |
 
 ---
 
@@ -17,6 +36,8 @@
 ## High-severity findings
 
 ### H-1 — XSS via malicious backup-import (category id injection)
+
+> ✅ **Fixed.** `ensureClassificationConfig` now strips every imported category id through a `[A-Za-z0-9_-]` allow-list (`js/intel-features.js:161`), so an imported config can no longer smuggle quotes or HTML. The original `innerHTML +=` sink at `intel-features.js:510` was also migrated to `createElement` + `addEventListener` (now at `intel-features.js:521,529`), removing the inline-handler interpolation path entirely. Combined fix means the attack is closed at both ends — both Option 1 and Option 3 from the original recommendation landed.
 
 **Vector**: `importData` (`js/storage.js:821-845`) accepts user-supplied JSON, parses it, and applies the embedded `cfg` directly via `_applyState`. `_applyState` assigns `cfg = s.cfg` (`js/storage.js:425`). On the next render, every category id flows into an inline onclick:
 
@@ -40,6 +61,8 @@ Option 1 is the smallest blast radius; option 3 is the better long-term move (se
 
 ### H-2 — Inline event handlers force `script-src 'unsafe-inline'` in CSP
 
+> ✅ **Fixed.** Every inline `on<event>="..."` in `index.html` was migrated to `data-action` + the central dispatcher in `js/event-delegation.js`. `'unsafe-inline'` is no longer in `script-src` (see `index.html:45` — the production CSP). `scripts/check-inline-handlers.mjs` is wired into CI (`.github/workflows/ci.yml`) and fails the build if any `on<event>=` reappears in `index.html` — so the protection can't quietly regress.
+
 **Evidence**: `index.html:34` declares `script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net https://unpkg.com`. The `'unsafe-inline'` is required because the codebase uses `onclick="..."` inline handlers in dozens of places (`index.html` nav tabs at lines 96, 112, 116, 120; many dynamically-rendered buttons in `js/tasks.js`, `js/ai.js`, `js/calfeeds.js`, `js/ui.js`, `js/intel-features.js`).
 
 Once `'unsafe-inline'` is in `script-src`, CSP provides essentially zero defense against any future XSS bug — including H-1 above. CSP nonce/hash mode would also work but doesn't compose well with hand-rolled string-templated DOM construction.
@@ -51,6 +74,8 @@ Once `'unsafe-inline'` is in `script-src`, CSP provides essentially zero defense
 ## Medium-severity findings
 
 ### M-1 — Cache version is three-way coupled; CI guard misses one copy
+
+> ✅ **Fixed.** `scripts/check-version-sync.mjs` now reads `js/pwa.js` (line 16) and verifies the inline-SW fallback string against `version.js`, in addition to the `sw.js` check. CI runs this as the "Version sync" step; the v48 cache rotation flushed all three to `odtaulai-v48` and the test enforces it.
 
 **Evidence**: the canonical cache identifier (`odtaulai-v43`) is duplicated across three files:
 
@@ -80,6 +105,8 @@ The `pwa.js` fallback can silently drift. Risk: if `version.js` fails to load (a
 
 ### M-3 — `js/utils.js:59` performs a top-level DOM mutation at module load
 
+> ✅ **Fixed.** `js/utils.js:61` now wraps the call: `function setHeaderDate(){const el=gid('headerDate');if(el) el.textContent=dateStr();}`. `js/app.js:387` invokes it during init alongside the other `render*` calls. Tests that load `utils.js` standalone no longer crash on the missing `#headerDate`.
+
 ```
 js/utils.js:59
 gid('headerDate').textContent = dateStr();
@@ -95,6 +122,8 @@ This runs at script-evaluation time. It works today only because `<script src="j
 ---
 
 ### M-4 — `intel-features.js:508-511` rebuilds a chip row inside a forEach loop
+
+> ✅ **Fixed.** Resolved as a side effect of the H-1 migration. The chip row is now built via `createElement` once and listeners attached via `addEventListener` (no `innerHTML +=` inside the loop), eliminating both the O(n²) rewrite and the XSS interpolation site.
 
 ```
 js/intel-features.js:508-511
@@ -135,6 +164,8 @@ These exist to compensate for `beforeinstallprompt` racing with platform detecti
 ---
 
 ### L-2 — `escAttr()` is used inside inline JS handlers, but does not protect that context
+
+> 🔵 **Obsolete.** The H-2 migration removed every inline JS handler in the codebase, so the antipattern this finding describes can no longer exist. `escAttr` is still used for HTML *attribute* values (its actual safe context) where it's correct.
 
 `js/calfeeds.js:640-642`:
 ```
@@ -187,11 +218,11 @@ Modules ranked by **untested user-facing surface area** (lines × user-impact):
 
 ## Recommended triage order
 
-1. **H-1** — XSS via malicious backup-import (one-PR fix in `ensureClassificationConfig`)
-2. **M-1** — Extend `check-version-sync.mjs` to cover `pwa.js` (one-PR fix, ~3 lines)
-3. **M-3** — Move `gid('headerDate')` mutation out of module top level
-4. **M-5 + coverage** — extract day-rollover from `app.js` and add a test
-5. **H-2** — Multi-PR migration to delegated handlers, then drop CSP `'unsafe-inline'`
-6. **M-4** — Fix the chip-loop rebuild while addressing H-1
-7. **M-2** — De-duplicate inline manifest in `pwa.js`
-8. **L-1, L-2, L-3** — sweep at leisure
+**Original list (April 2026):** H-1 → M-1 → M-3 → M-5 → H-2 → M-4 → M-2 → L-*
+
+**Status as of v48 (May 2026):** H-1, H-2, M-1, M-3, M-4, L-2 are all closed (see annotations above). Open items, ordered by remaining risk:
+
+1. **M-5** — extract day-rollover and share-target/file-handler IIFEs from `js/app.js`, add unit coverage. Highest remaining risk because day-rollover wakeup bugs are invisible to CI.
+2. **M-2** — de-duplicate `pwa.js` inline manifest against `manifest.json` (fetch + reinline, fall back to stub). Drift is currently caught by humans, not tests.
+3. **L-3** — accessibility sweep on dynamically-rendered icon-only buttons (`title` is not screen-reader reliable; pair with `aria-label`).
+4. **L-1** — replace `pwa.js` install-state dual `setTimeout` polling with a `MutationObserver` or single gated call. Working today, smell.
