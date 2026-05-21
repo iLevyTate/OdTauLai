@@ -11,20 +11,18 @@ window.ODTAULAI_CONFIG = Object.freeze({
   TRANSFORMERS_CDN: 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.1',
   CHRONO_CDN:       'https://cdn.jsdelivr.net/npm/chrono-node@2.7.7/+esm',
 
-  // ── Embedding models ─────────────────────────────────────────────────────
-  EMBED_MODEL_WEBGPU: 'Xenova/bge-base-en-v1.5',
-  EMBED_MODEL_WASM:   'Xenova/bge-small-en-v1.5',
-  EMBED_DIM_WEBGPU:   768,
-  EMBED_DIM_WASM:     384,
-  /** Version string for IndexedDB migration — bump when model or dim strategy changes */
-  EMBED_MODEL_VER:    'bge-base-en-v1.5-migration-v2',
+  // ── Embedding model ──────────────────────────────────────────────────────
+  // Single model for every device — bge-small runs on WebGPU (fp32/fp16) and
+  // WASM equally well, ~33 MB quantized, 384-dim, mobile-friendly.
+  EMBED_MODEL:     'Xenova/bge-small-en-v1.5',
+  EMBED_DIM:       384,
+  /** Version string for IndexedDB migration — bump when model changes */
+  EMBED_MODEL_VER: 'bge-small-en-v1.5-unified-v3',
 
   // ── localStorage keys ────────────────────────────────────────────────────
   STORAGE_KEYS: Object.freeze({
     STATE:              'stupind_state',
     ARCHIVE:            'stupind_archive',
-    GEN_CFG:            'stupind_gen_cfg',
-    GEN_HISTORY:        'stupind_gen_history',
     CARD_DENSITY:       'stupind_card_density',
     SHOW_DONE_ALL:      'stupind_show_done_all',
     SWIPE_TIP_DISMISSED:'odtaulai_swipe_tip_dismissed',

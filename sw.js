@@ -1,6 +1,6 @@
 // OdTauLai Service Worker — CACHE_NAME pulled from the single source in
 // js/version.js so version bumps don't require editing three files.
-let CACHE_NAME = 'odtaulai-v47';
+let CACHE_NAME = 'odtaulai-v48';
 try {
   importScripts('./js/version.js');
   if (self.ODTAULAI_RELEASE && self.ODTAULAI_RELEASE.swCache) {
@@ -32,8 +32,6 @@ const ASSETS = [
   './js/nlparse.js',
   './js/intel-features.js',
   './js/tool-schema.js',
-  './js/gen.js',
-  './js/ask.js',
   './js/ui.js',
   './js/ai.js',
   './js/sync.js',

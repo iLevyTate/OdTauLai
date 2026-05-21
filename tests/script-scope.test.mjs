@@ -3,8 +3,7 @@
  * lexical scope, so a `let` or `const` with the same name in two different
  * js/*.js files throws `SyntaxError: Identifier '<name>' has already been
  * declared` at parse time — silently killing every function in the second
- * file. That's what broke Tools + GenAI settings in v28 (both gen.js and
- * ai.js declared `let _genLastError`).
+ * file.
  *
  * This test reproduces the browser-level collision by:
  *   1. Reading index.html and extracting the <script src="js/*.js"> load order.
@@ -37,7 +36,7 @@ test('index.html loads at least the core classic scripts', () => {
   assert.ok(order.length >= 5, `expected several js/*.js scripts, got ${order.length}`);
   assert.ok(order.includes('js/version.js'), 'version.js must be loaded');
   assert.ok(order.includes('js/ai.js'), 'ai.js must be loaded');
-  assert.ok(order.includes('js/gen.js'), 'gen.js must be loaded');
+  assert.ok(order.includes('js/intel.js'), 'intel.js must be loaded');
 });
 
 test('classic scripts share one lexical scope without duplicate let/const/class', () => {
