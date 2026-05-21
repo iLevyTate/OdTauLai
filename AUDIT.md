@@ -179,7 +179,7 @@ Modules ranked by **untested user-facing surface area** (lines × user-impact):
 | `js/ai.js` | 2533 | Partial (3) | — | `ai-classify-apply`, `ai-split`, `hybrid-ai`. ~1500 LOC of intel-features integration paths still untested. |
 | `js/intel-features.js` | 1360 | Partial (1) | — | `category-config` covers config normalization. Classification render and life-area math are not directly tested. |
 
-**Tests covering modules well**: `js/tasks.js` (4 tests), `js/timer.js` (2), `js/calfeeds.js` (2), `js/storage.js` (2), `js/utils.js` (2), `js/sync.js`, `js/gen.js` (3), `js/embed-store.js`, `js/intel.js`, `js/tool-schema.js`, `js/version.js`, `js/ask.js`.
+**Tests covering modules well**: `js/tasks.js` (4 tests), `js/timer.js` (2), `js/calfeeds.js` (2), `js/storage.js` (2), `js/utils.js` (2), `js/sync.js`, `js/embed-store.js`, `js/intel.js`, `js/tool-schema.js`, `js/version.js`.
 
 ---
 

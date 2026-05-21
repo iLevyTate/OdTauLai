@@ -1,7 +1,8 @@
-// ========== TOOL SCHEMA (LLM-proposed ops → executeIntelOp input) ==========
-// Mirrors every branch of executeIntelOp() in js/ai.js:104. The Ask pipeline
-// produces JSON in this vocabulary; validateOps filters/coerces before they
-// reach the existing _pendingOps preview.
+// ========== TOOL SCHEMA (proposed ops → executeIntelOp input) ==========
+// Mirrors every branch of executeIntelOp() in js/ai.js. Harmonize,
+// auto-organize, dedupe, and other embedding-driven proposers funnel through
+// validateOps which filters/coerces before they reach the existing
+// _pendingOps preview.
 
 const ASK_MAX_OPS = 50;
 
@@ -175,7 +176,7 @@ function _listExists(id, ctx){
 }
 
 /**
- * Validate a JSON array of ops produced by the local LLM.
+ * Validate a JSON array of proposed ops (from embedding-driven proposers).
  * @param {any} raw - Parsed JSON (should be Array).
  * @param {{ tasksById: Map<number,object>, listsById: Map<number,object> }} ctx
  * @returns {{ valid: Array, rejected: Array<{op:any, reason:string}>, destructiveLevel: 'none'|'warn'|'hard', truncated: boolean }}
@@ -327,7 +328,7 @@ function validateOps(raw, ctx){
 }
 
 /**
- * Render a short human-readable schema block that the LLM system prompt
+ * Render a short human-readable schema block (used for documentation /
  * enumerates. Generated once at load time from TOOL_SCHEMA above.
  */
 function toolSchemaPromptBlock(){
@@ -381,54 +382,11 @@ function parseOpsJson(text){
   return JSON.parse(slice);
 }
 
-/**
- * OpenAI / Qwen2.5-style tool list for `tokenizer.apply_chat_template(..., { tools })`.
- * Parameter types are a best-effort hint; `validateOps` is still authoritative.
- */
-function buildOpenAIToolsFromToolSchema(){
-  const out = [];
-  for(const name of Object.keys(TOOL_SCHEMA)){
-    const def = TOOL_SCHEMA[name];
-    const required = (def && Array.isArray(def.required)) ? def.required.slice() : [];
-    const optional = (def && Array.isArray(def.optional)) ? def.optional : [];
-    const seen = new Set();
-    const properties = {};
-    for(const k of required.concat(optional)){
-      if(seen.has(k)) continue;
-      seen.add(k);
-      if(k === 'parts'){
-        properties[k] = {
-          type: 'array',
-          description: 'Subtasks, each { name, effort? }',
-          items: { type: 'object', additionalProperties: true },
-        };
-        continue;
-      }
-      let t = 'string';
-      if(k === 'id' || k === 'listId' || k === 'newParentId' || k === 'parentId' || k === 'checkId' || k === 'blockerId' || k === 'limit' || k === 'estimateMin')
-        t = 'integer';
-      if(k === 'feedId' || k === 'eventUid')
-        t = 'string';
-      properties[k] = { type: t, description: k };
-    }
-    out.push({
-      type: 'function',
-      function: {
-        name: name,
-        description: 'Task manager operation: ' + name,
-        parameters: { type: 'object', properties, required: required.length ? required : [] },
-      },
-    });
-  }
-  return out;
-}
-
 if(typeof window !== 'undefined'){
   window.TOOL_SCHEMA = TOOL_SCHEMA;
   window.validateOps = validateOps;
   window.toolSchemaPromptBlock = toolSchemaPromptBlock;
   window.parseOpsJson = parseOpsJson;
-  window.buildOpenAIToolsFromToolSchema = buildOpenAIToolsFromToolSchema;
   window.ASK_MAX_OPS = ASK_MAX_OPS;
   window.coerceToolArg = _coerceArg;
 }

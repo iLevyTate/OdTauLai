@@ -634,7 +634,7 @@ function _renderPendingSimpleCard(op, idx){
   const st = _describeOpStructured(op);
   if(st.kind === 'update') return '';
   const ic = st.icon ? _pendingIcon(st.icon) : '';
-  const rat = op._rationale ? `<span class="pending-rationale" title="LLM rationale">${esc(op._rationale)}</span>` : '';
+  const rat = op._rationale ? `<span class="pending-rationale" title="Rationale">${esc(op._rationale)}</span>` : '';
   return `<div class="pending-simple-card${st.danger ? ' pending-simple-card--danger' : ''}">
     <label class="pending-simple-row">
       <input type="checkbox" class="pending-op-master" data-op-idx="${idx}" checked>
@@ -674,7 +674,7 @@ function _renderPendingUpdateCard(op, idx){
       ${pill}
     </label>`;
   }).join('');
-  const rat = op._rationale ? `<div class="pending-rationale pending-rationale--card" title="LLM rationale">${esc(op._rationale)}</div>` : '';
+  const rat = op._rationale ? `<div class="pending-rationale pending-rationale--card" title="Rationale">${esc(op._rationale)}</div>` : '';
   return `<div class="pending-task-card">
     <div class="pending-card-head">
       <label class="pending-card-head-lbl">
@@ -811,9 +811,9 @@ function intelRejectPending(){
 }
 
 /**
- * Hook used by js/ask.js (and future callers) to seed the existing preview
- * pipeline with externally-proposed ops. Respects the same checkbox/undo
- * machinery as harmonize/auto-organize. Never auto-applies.
+ * Seed the existing preview pipeline with externally-proposed ops. Respects
+ * the same checkbox/undo machinery as harmonize/auto-organize. Never
+ * auto-applies.
  *
  * @param {Array<{name:string,args:object}>} ops
  * @param {{ source?:string, destructiveLevel?:'none'|'warn'|'hard' }} [meta]
@@ -1167,7 +1167,7 @@ function renderAIPanel(){
       </div>
       <div class="intel-card-body">
         <div class="intel-desc intel-desc-short">
-          <p class="intel-lead"><strong>Understand your tasks</strong> — runs on this device. <span class="intel-nogen">No cloud LLM, no chat.</span></p>
+          <p class="intel-lead"><strong>Understand your tasks</strong> — runs on this device. <span class="intel-nogen">No cloud, no chat — embeddings only.</span></p>
           <div class="intel-feature-grid">
             <div class="intel-feature">
               <span class="intel-feature-ic" aria-hidden="true">${_IC.search}</span>
@@ -1183,7 +1183,7 @@ function renderAIPanel(){
             </div>
           </div>
           <details class="intel-details"><summary>How it works</summary>
-            <p class="intel-details-body">An on-device embedding model (<strong>${embedModel}</strong>) encodes each task’s meaning as a vector — WebGPU uses bge-base (~110 MB), WASM uses bge-small (~33 MB). Cosine similarity drives semantic search, duplicate detection, smart-add hints, list routing, similar tasks, and harmonize proposals. Your task text stays local.</p>
+            <p class="intel-details-body">An on-device embedding model (<strong>${embedModel}</strong>, ~33 MB) encodes each task’s meaning as a vector. Cosine similarity drives semantic search, duplicate detection, smart-add hints, list routing, similar tasks, and harmonize proposals. Your task text stays local.</p>
           </details>
         </div>
         <div id="intelProgressWrap" class="intel-progress-wrap" hidden>

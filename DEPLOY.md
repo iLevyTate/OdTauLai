@@ -167,7 +167,7 @@ Then update `manifest.json` colors to match your brand:
 
 OdTauLai ships a permissive meta CSP in `index.html` — practical, not maximalist. The shipped policy allows `'unsafe-inline'` (the app uses inline `onclick` handlers throughout), `'wasm-unsafe-eval'` (Transformers.js needs it), and broad `connect-src http: https:` (calendar feeds in `js/calfeeds.js` accept user-configured CORS proxy URLs). On most static hosts (Netlify, GitHub Pages, Vercel, Cloudflare Pages) this is what gets served and everything works.
 
-If your host wants to enforce a stricter CSP via HTTP headers (overriding the meta tag), the embedding and optional Ask features need at least these allow-list entries:
+If your host wants to enforce a stricter CSP via HTTP headers (overriding the meta tag), the embedding model needs at least these allow-list entries:
 
 ```
 default-src 'self';
@@ -182,7 +182,7 @@ Note: this stricter alternative drops `'unsafe-inline'` from `script-src`, which
 
 Why each entry:
 - `cdn.jsdelivr.net` — Transformers.js ESM module + its WASM/worker assets.
-- `huggingface.co` + `cdn-lfs.huggingface.co` — embedding model weights (`Xenova/gte-small`) and, if the user enables Ask, the generative model weights (e.g. `HuggingFaceTB/SmolLM2-360M-Instruct`).
+- `huggingface.co` + `cdn-lfs.huggingface.co` — embedding model weights (`Xenova/bge-small-en-v1.5`).
 - `worker-src blob:` — Transformers.js spawns a Web Worker from a blob URL for background inference.
 
 If you enable P2P sync (PeerJS), also add your signalling server (default `wss://*.peerjs.com`) to `connect-src`.

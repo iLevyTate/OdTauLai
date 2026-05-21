@@ -1282,7 +1282,7 @@
   .task-toolbar-row{border:0;padding:0;margin:0;display:flex;gap:8px;flex-wrap:wrap}
   /* Sdot colour for Tasks panel */
   .sdot--tasks{background:#e056a0}
-  /* Plugin panel containers (genAI, sync, calfeeds) fill available row width */
+  /* Plugin panel containers (sync, calfeeds) fill available row width */
   .srow-full{width:100%}
   /* System info text block */
   .system-info{font-size:11px;color:var(--text-3);line-height:1.6;font-variant-numeric:tabular-nums}
@@ -2495,21 +2495,6 @@
 .intel-progress-track{height:8px;background:var(--bg-3);border-radius:999px;overflow:hidden}
 .intel-progress-bar{height:100%;background:var(--accent);border-radius:999px;transition:width .3s}
 .intel-progress-info{font-size:11px;color:var(--text-3);display:flex;gap:8px;justify-content:space-between}
-/* Generative LLM download / rehydrate — visible on every tab */
-.gen-load-ribbon{position:fixed;left:50%;bottom:max(12px,env(safe-area-inset-bottom));transform:translateX(-50%);z-index:var(--z-toast);display:flex;flex-direction:column;gap:8px;min-width:min(440px,94vw);max-width:94vw;padding:11px 15px;border-radius:12px;background:var(--bg-1);border:1px solid var(--border-strong);box-shadow:0 10px 36px rgba(0,0,0,.22)}
-.gen-load-ribbon[hidden]{display:none!important}
-.gen-load-ribbon__track{position:relative;height:7px;background:var(--bg-3);border-radius:999px;overflow:hidden}
-.gen-load-ribbon__bar{height:100%;width:0%;background:var(--accent);border-radius:999px;transition:width .22s ease-out}
-.gen-load-ribbon__txt{font-size:12px;color:var(--text-1);line-height:1.4;font-weight:600}
-@keyframes genRibbonIndet{
-  0%{transform:translateX(-100%)}
-  100%{transform:translateX(320%)}
-}
-.gen-load-ribbon__track--indeterminate .gen-load-ribbon__bar{width:38%!important;transition:none;animation:genRibbonIndet 1.35s ease-in-out infinite}
-@media (max-width:480px){
-  .gen-load-ribbon{padding:9px 12px;min-width:min(360px,96vw)}
-  .gen-load-ribbon__txt{font-size:11px}
-}
 .intel-start-list{margin:8px 0 10px 1.1em;padding:0;font-size:12px;line-height:1.55;color:var(--text-2)}
 .intel-start-list li{margin:4px 0}
 
@@ -2681,18 +2666,6 @@
 .task-enhance-btn--llm{color:var(--accent)}
 .task-enhance-btn--llm:hover{color:var(--accent-hover,var(--accent));filter:brightness(1.2)}
 
-.md-breakdown-body{display:flex;flex-direction:column;gap:8px;padding:4px 0 2px}
-.md-breakdown-list{display:flex;flex-direction:column;gap:4px}
-.md-breakdown-row{display:flex;align-items:center;gap:8px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;font-size:12px;cursor:pointer}
-.md-breakdown-row:hover{border-color:var(--accent)}
-.md-breakdown-row input[type="checkbox"]{flex-shrink:0;accent-color:var(--accent)}
-.md-breakdown-name{flex:1;word-break:break-word;color:var(--text-1)}
-.md-breakdown-effort{flex-shrink:0;font-size:10px;font-weight:700;padding:2px 6px;border-radius:999px;background:rgba(61,139,204,.12);border:1px solid rgba(61,139,204,.28);color:var(--accent)}
-.md-breakdown-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
-.md-breakdown-btn{padding:6px 12px;font-size:12px;font-weight:600;font-family:inherit;background:var(--bg-2);border:1px solid var(--border);border-radius:999px;color:var(--text-1);cursor:pointer;margin-top:8px}
-.md-breakdown-btn:hover{border-color:var(--accent)}
-.md-breakdown-btn--primary{background:var(--accent);border-color:var(--accent);color:#fff}
-.md-breakdown-btn--primary:hover{filter:brightness(1.1)}
 
 .pending-simple-card{background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:0;overflow:hidden}
 .pending-simple-card--danger{border-color:var(--danger);background:rgba(231,76,60,.06)}
@@ -2906,16 +2879,6 @@ body:has(.offline-indicator:not([hidden])){ padding-top:30px; }
    + new SW available). Now the quota warning floats above the update banner. */
 body:has(.update-banner) .quota-warning{
   bottom:calc(72px + env(safe-area-inset-bottom,0px));
-}
-/* Long-running model download — gen-load-ribbon at bottom-center is the user's
-   only signal that weights are streaming in. Don't let transient banners cover
-   it; lift the banners instead so the progress bar stays readable. */
-body:has(.gen-load-ribbon:not([hidden])) .update-banner,
-body:has(.gen-load-ribbon:not([hidden])) .quota-warning{
-  bottom:calc(80px + env(safe-area-inset-bottom,0px));
-}
-body:has(.gen-load-ribbon:not([hidden])):has(.update-banner) .quota-warning{
-  bottom:calc(136px + env(safe-area-inset-bottom,0px));
 }
 
 /* Mobile tweaks */
@@ -3328,8 +3291,6 @@ body:has(.gen-load-ribbon:not([hidden])):has(.update-banner) .quota-warning{
 /* Lift above the mini-timer pill when it's visible (mini-timer occupies the
    same bottom-right corner at bottom:16px right:16px and is ~48px tall). */
 body:has(.mini-timer.visible) .export-toast{bottom:calc(76px + env(safe-area-inset-bottom,0px))}
-body:has(.gen-load-ribbon:not([hidden])) .export-toast{bottom:calc(84px + env(safe-area-inset-bottom,0px))}
-body:has(.mini-timer.visible):has(.gen-load-ribbon:not([hidden])) .export-toast{bottom:calc(140px + env(safe-area-inset-bottom,0px))}
 
 /* Action toast — like .export-toast but carries an inline action button
    (Undo). Stacks above .export-toast in the same bottom-right column. */
@@ -3349,10 +3310,6 @@ body:has(.mini-timer.visible):has(.gen-load-ribbon:not([hidden])) .export-toast{
 .action-toast.show{opacity:1;transform:translateY(0)}
 .action-toast .action-toast-btn{pointer-events:auto}
 body:has(.mini-timer.visible) .action-toast{bottom:calc(132px + env(safe-area-inset-bottom,0px))}
-/* Lift toast clear of the on-device LLM ribbon when it's streaming weights —
-   otherwise the toast lands directly on top of the ribbon's progress bar. */
-body:has(.gen-load-ribbon:not([hidden])) .action-toast{bottom:calc(140px + env(safe-area-inset-bottom,0px))}
-body:has(.mini-timer.visible):has(.gen-load-ribbon:not([hidden])) .action-toast{bottom:calc(196px + env(safe-area-inset-bottom,0px))}
 /* When a modal or command palette is open, lift the bottom-anchored auto-
    dismiss toasts above the modal's sticky footer so feedback isn't hidden
    behind it. Modals are flex-start anchored with a sticky .modal-foot at the
@@ -3626,7 +3583,7 @@ body:has(.cmdk-overlay.open)  #actionToast{
 }
 
 /* ══════════════════════════════════════════════════════════════════════════ */
-/* ASK MODE — command-palette natural-language input                          */
+/* Command palette                                                            */
 /* ══════════════════════════════════════════════════════════════════════════ */
 .cmdk-input-row{display:flex;align-items:center;gap:0;border-bottom:1px solid var(--border)}
 .cmdk-input-row .cmdk-input{border-bottom:none;flex:1}
@@ -3639,75 +3596,6 @@ body:has(.cmdk-overlay.open)  #actionToast{
   padding:1px 5px;border-radius:3px;color:var(--text-2);
 }
 .cmdk-find-hint strong{color:var(--text-2);font-weight:600}
-.cmdk-ask-toggle{
-  margin-right:10px;padding:6px 12px;font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;
-  background:var(--bg-2);color:var(--text-3);border:1px solid var(--border);border-radius:999px;cursor:pointer;font-family:inherit;flex-shrink:0;
-}
-.cmdk-ask-toggle:hover{background:var(--bg-3);color:var(--text-2)}
-.cmdk-ask-toggle--active{background:var(--accent-bg);color:var(--accent);border-color:var(--accent)}
-.cmdk-panel--ask .cmdk-input{color:var(--accent)}
-.cmdk-ask-reply{
-  padding:14px 16px;max-height:40vh;overflow-y:auto;-webkit-overflow-scrolling:touch;
-  background:var(--bg-2);border-bottom:1px solid var(--border);font-size:13px;color:var(--text-1);
-}
-.cmdk-ask-hint{font-size:12px;color:var(--text-3);line-height:1.5}
-.cmdk-ask-hint strong{color:var(--text-2)}
-.cmdk-ask-streaming{display:flex;flex-direction:column;gap:10px}
-.cmdk-ask-row{display:flex;align-items:center;gap:10px}
-.cmdk-ask-spinner{
-  display:inline-block;width:12px;height:12px;border-radius:50%;
-  border:2px solid var(--border);border-top-color:var(--accent);
-  animation:cmdk-ask-spin 0.8s linear infinite;flex-shrink:0;
-}
-@keyframes cmdk-ask-spin{to{transform:rotate(360deg)}}
-.cmdk-ask-label{font-size:12px;color:var(--text-2);font-weight:500;flex:1}
-.cmdk-ask-details{font-size:11px;color:var(--text-3)}
-.cmdk-ask-details summary{cursor:pointer;user-select:none;padding:2px 0}
-.cmdk-ask-details summary:hover{color:var(--text-2)}
-.cmdk-ask-stream{
-  margin:6px 0 0;font-family:var(--font-mono);font-size:11.5px;line-height:1.45;color:var(--text-3);
-  background:var(--bg-1);border:1px solid var(--border);border-radius:6px;padding:10px 12px;
-  max-height:26vh;overflow-y:auto;white-space:pre-wrap;word-break:break-word;
-}
-.cmdk-ask-stop{
-  padding:4px 10px;font-size:11px;font-weight:600;font-family:inherit;
-  background:transparent;color:var(--danger);border:1px solid var(--danger);border-radius:4px;cursor:pointer;flex-shrink:0;
-}
-.cmdk-ask-stop:hover{background:rgba(231,76,60,.08)}
-.cmdk-ask-error{color:var(--danger);font-size:13px;line-height:1.5}
-.cmdk-ask-error button{margin-left:8px;vertical-align:middle}
-.cmdk-ask-empty{color:var(--text-3);font-size:13px;font-style:italic}
-.cmdk-ask-done{color:var(--success,#2ecc71);font-size:13px;font-weight:500}
-.cmdk-ask-answer{display:flex;flex-direction:column;gap:8px;padding:12px 14px;border-radius:var(--r-sm,8px);background:var(--bg-1);border:1px solid var(--border-subtle)}
-.cmdk-ask-answer-body{color:var(--text-1);font-size:13px;line-height:1.55;white-space:pre-wrap;word-break:break-word}
-.cmdk-ask-answer-foot{color:var(--text-3);font-size:11px;letter-spacing:.2px}
-.cmdk-ask-rejected{margin-top:8px;border:1px solid var(--border-subtle);border-radius:var(--r-sm,8px);background:var(--bg-1);padding:6px 10px}
-.cmdk-ask-rejected summary{cursor:pointer;color:var(--warning);font-size:12px;font-weight:500}
-.cmdk-ask-rejected-list{margin:6px 0 0;padding-left:18px;color:var(--text-2);font-size:12px;line-height:1.55}
-.cmdk-ask-rejected-list li{word-break:break-word}
-.cmdk-ask-rejected-more{font-style:italic;color:var(--text-3)}
-
-/* Chat-style Ask conversation. Reply container scrolls; bubbles are right
-   (user) and left (assistant) aligned. The existing per-state classes
-   (.cmdk-ask-answer-body, .cmdk-ask-error, .cmdk-ask-done, .cmdk-ask-empty,
-   .cmdk-ask-rejected) are reused inside the assistant bubble so we don't
-   duplicate styling. */
-#cmdkAskReply{max-height:46vh;max-height:min(46vh, calc(var(--vv-height, 46dvh) - 180px));overflow-y:auto;padding-right:2px;scroll-behavior:smooth}
-/* When the soft keyboard is open, shrink the chat scroll area further so the
-   input field stays visible. 180→260 budget covers the input row, the foot
-   hint, and the "+ New chat" toolbar without clipping any of them. */
-.kb-open #cmdkAskReply{max-height:calc(var(--vv-height, 60dvh) - 260px)}
-.cmdk-ask-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 2px 8px;border-bottom:1px solid var(--border-subtle);margin-bottom:10px;position:sticky;top:0;background:var(--bg-0,inherit);z-index:1}
-.cmdk-ask-bar-btn{appearance:none;background:transparent;border:1px solid var(--border-subtle);color:var(--text-2);font-size:12px;padding:4px 10px;border-radius:999px;cursor:pointer;line-height:1.4}
-.cmdk-ask-bar-btn:hover{color:var(--text-1);border-color:var(--text-3)}
-.cmdk-ask-bar-count{color:var(--text-3);font-size:11px;letter-spacing:.3px}
-.cmdk-ask-turn{display:flex;margin-bottom:10px}
-.cmdk-ask-turn--q{justify-content:flex-end}
-.cmdk-ask-turn--a{justify-content:flex-start}
-.cmdk-ask-bubble{max-width:88%;padding:10px 12px;border-radius:14px;line-height:1.5;font-size:13px;word-break:break-word;white-space:pre-wrap}
-.cmdk-ask-bubble--q{background:var(--accent,#3d8bcc);color:#fff;border-bottom-right-radius:4px;font-weight:500}
-.cmdk-ask-bubble--a{background:var(--bg-1);color:var(--text-1);border:1px solid var(--border-subtle);border-bottom-left-radius:4px;padding:12px 14px;display:flex;flex-direction:column;gap:6px}
-.cmdk-ask-bubble--a .cmdk-ask-rejected{margin-top:4px}
 
 /* Source badge + bulk-destructive warning inside the pending-ops preview */
 .pending-source-badge{
@@ -3719,56 +3607,6 @@ body:has(.cmdk-overlay.open)  #actionToast{
   background:rgba(241,196,15,.08);border:1px solid rgba(241,196,15,.35);border-radius:8px;
 }
 
-/* ══════════════════════════════════════════════════════════════════════════ */
-/* GENERATIVE AI — Settings subsection                                        */
-/* ══════════════════════════════════════════════════════════════════════════ */
-.gen-settings{display:flex;flex-direction:column;gap:10px;width:100%}
-.gen-settings-lead{font-size:11px;color:var(--text-3);line-height:1.55;margin:2px 0 0}
-.gen-settings-lead strong{color:var(--text-2)}
-.gen-settings-lead em{font-style:italic;color:var(--text-2)}
-.gen-settings-lead code,.gen-settings-lead kbd{font-family:var(--font-mono);font-size:10.5px;background:var(--bg-2);border:1px solid var(--border);padding:1px 5px;border-radius:3px;color:var(--text-2)}
-.gen-settings-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-.gen-settings-lbl{font-size:12px;color:var(--text-2);min-width:80px}
-.gen-settings select,.gen-settings input[type=number]{
-  flex:1;min-width:140px;padding:6px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:5px;
-  color:var(--text-1);font-family:inherit;font-size:12px;
-}
-.gen-settings select:disabled,.gen-settings input:disabled{opacity:.5;cursor:not-allowed}
-.gen-settings-note{font-size:11px;color:var(--text-3);line-height:1.4}
-.gen-settings-warn{font-size:11px;color:var(--warning,#e67e22);line-height:1.4;padding:6px 10px;background:rgba(230,126,34,.08);border:1px solid rgba(230,126,34,.3);border-radius:5px}
-.gen-settings-status{font-size:11px;color:var(--text-3);font-variant-numeric:tabular-nums}
-.gen-settings-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:2px}
-.gen-settings-actions--secondary{margin-top:6px;padding-top:8px;border-top:1px dashed var(--border)}
-.gen-settings-hint{font-size:11px;color:var(--text-4);line-height:1.5;margin:6px 0 0}
-
-/* Ask promo chip (discoverability outside Cmd+K) */
-.ask-promo-chip{
-  margin:0;display:inline-flex;align-items:center;gap:6px;padding:5px 10px;
-  background:var(--bg-2);border:1px solid var(--border);color:var(--text-3);
-  border-radius:999px;font-size:11px;font-family:inherit;cursor:pointer;
-}
-.ask-promo-chip .ask-promo-ic{display:inline-flex;align-items:center;flex-shrink:0}
-.ask-promo-chip:hover{color:var(--accent);border-color:var(--accent)}
-.ask-promo-chip kbd{
-  font-family:var(--font-mono);font-size:10px;background:var(--bg-1);border:1px solid var(--border);
-  padding:1px 5px;border-radius:3px;color:var(--text-2);
-}
-.ask-promo-label--touch{display:none}
-@media (max-width:640px),(pointer:coarse){
-  .ask-promo-label--kbd{display:none}
-  .ask-promo-label--touch{display:inline}
-}
-
-@media (max-width:640px){
-  .cmdk-ask-reply{max-height:35vh}
-  .cmdk-ask-stream{max-height:22vh}
-  .cmdk-ask-toggle{margin-right:8px;padding:5px 10px;font-size:10.5px}
-  .gen-settings-row{flex-direction:column;align-items:flex-start}
-  .gen-settings-lbl{min-width:0}
-  .gen-settings select,.gen-settings input[type=number]{width:100%}
-  .ask-promo-chip{font-size:10.5px;padding:4px 9px}
-  .ask-promo-chip kbd{font-size:9.5px;padding:1px 4px}
-}
 
 /* ═══ Layout / IA: header bar, track banner, timer sub-nav, first-task CTA ═══ */
 .header-nav-bar{
@@ -3954,20 +3792,13 @@ button.hist-day{display:block;width:100%;font:inherit;cursor:pointer;background:
 .bulk-close{background:transparent;border-color:transparent;font-size:14px;color:var(--text-3)}
 .bulk-sel{background:var(--card-2,rgba(255,255,255,.05));color:var(--text-1);border:1px solid var(--border);padding:4px 8px;border-radius:14px;font:11px inherit}
 
-/* ───── G-10/G-11 brief / review card ───── */
-.ai-brief-card{position:fixed;right:16px;top:80px;z-index:1100;width:min(420px,calc(100vw - 32px));max-height:60vh;overflow:auto;background:var(--card-1,#1a2333);border:1px solid var(--border);border-radius:var(--r-md,8px);box-shadow:0 8px 32px rgba(0,0,0,.5)}
-.aibc-head{display:flex;align-items:center;padding:10px 14px;border-bottom:1px solid var(--border)}
-.aibc-title{flex:1;font-size:13px;font-weight:600;color:var(--text-1)}
-.aibc-close{background:transparent;border:none;color:var(--text-3);font-size:14px;cursor:pointer;padding:0 4px}
-.aibc-body{padding:14px;font-size:13px;line-height:1.55;color:var(--text-1);white-space:pre-wrap}
-
 /* ───── G-25 prefers-contrast: more (high-contrast accessibility theme) ───── */
 @media (prefers-contrast: more) {
   :root {
     --border: rgba(255,255,255,.55);
     --text-3: #c8d3e0;
   }
-  .task-item, .ai-brief-card, .session-note-prompt, .focus-streak, .stats-by-area, .today-cal-events, .bulk-bar { border-width:1.5px }
+  .task-item, .session-note-prompt, .focus-streak, .stats-by-area, .today-cal-events, .bulk-bar { border-width:1.5px }
   .task-checkbox, .qt-btn, .bulk-btn, .snp-save, .snp-skip, .export-btn { outline:1px solid currentColor; outline-offset:1px }
   :focus-visible { outline:2px solid currentColor; outline-offset:2px }
   .sba-bar { background:#222 }
@@ -4112,7 +3943,7 @@ button.hist-day{display:block;width:100%;font:inherit;cursor:pointer;background:
      itself and the daily-momentum tile survive so printed output is the
      same content the user was looking at. */
   .header, .tabs-bar, .nav-tab, .skip-link,
-  .mini-timer, .quick-add-fab, .save-indicator, .gen-load-ribbon,
+  .mini-timer, .quick-add-fab, .save-indicator,
   .modal-overlay, .cmdk-overlay, .what-next-overlay,
   .update-banner, .sw-precache-banner, .share-in-banner, .sync-incoming-bar,
   .action-toast, .export-toast, .quota-warning,

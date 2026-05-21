@@ -4,9 +4,8 @@
  * History: .update-banner (z:5000) and .quota-warning (z:5001) both anchor
  * bottom-center on desktop and top:110px on mobile. Without explicit stacking
  * rules they overlap pixel-for-pixel when both surface together (e.g. storage
- * full + new SW available). The gen-load-ribbon also lives at bottom-center
- * during a long model download; transient banners were covering its progress
- * bar. These tests pin the lift rules so the fix can't quietly regress.
+ * full + new SW available). These tests pin the lift rules so the fix can't
+ * quietly regress.
  */
 import test from 'node:test';
 import assert from 'node:assert';
@@ -22,20 +21,6 @@ test('update + quota: quota lifts above the update banner when both visible (des
     css,
     /body:has\(\.update-banner\)\s*\.quota-warning\s*\{[^}]*bottom:\s*calc\(/,
     'missing body:has(.update-banner) .quota-warning lift rule',
-  );
-});
-
-test('gen-load-ribbon: banners lift above it so the download progress bar stays readable', () => {
-  // The :not([hidden]) qualifier keeps the rule inert while the ribbon is dormant.
-  assert.match(
-    css,
-    /body:has\(\.gen-load-ribbon:not\(\[hidden\]\)\)\s*\.update-banner[\s\S]*?bottom:\s*calc\(/,
-    'gen-load-ribbon should lift .update-banner above it',
-  );
-  assert.match(
-    css,
-    /body:has\(\.gen-load-ribbon:not\(\[hidden\]\)\)[\s\S]*?\.quota-warning[\s\S]*?bottom:\s*calc\(/,
-    'gen-load-ribbon should lift .quota-warning above it',
   );
 });
 

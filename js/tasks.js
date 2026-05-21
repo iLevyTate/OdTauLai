@@ -2627,9 +2627,9 @@ function renderTaskList(){
           ul.className = 'task-empty-welcome-list';
           [
             ['Type a task above. Words like "tomorrow", "@urgent", "#tag", "!star" parse automatically.'],
-            [`Press ${mod}+K for the command palette and Ask — works fully offline once the on-device model is loaded.`],
+            [`Press ${mod}+K for the command palette — search, jump, run actions, all fully offline.`],
             ['Click chips inside a task (priority, effort, category…) — they save instantly, no Save button needed.'],
-            ['Open Settings → AI to download the on-device language model. Everything stays on your device.'],
+            ['Embeddings load automatically in the background — semantic search, smart-add, and duplicate detection just work.'],
           ].forEach(([t]) => { const li = document.createElement('li'); li.textContent = t; ul.appendChild(li); });
           w.appendChild(ul);
           const dismiss = document.createElement('button');

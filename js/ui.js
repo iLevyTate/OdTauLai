@@ -498,23 +498,13 @@ function showShortcutsHelp(){
       ['Ctrl/⌘ + K', 'Open command palette (find tasks, run actions)'],
       ['Ctrl/⌘ + N or N', 'Focus the new-task input (jumps to Tasks)'],
       ['1 – 5', 'Switch top-level tab (Tasks / Timer / Tools / Data / Settings)'],
-      ['Shift + D', 'Daily brief card'],
       ['Esc', 'Close any open modal / palette / sheet'],
-    ]},
-    { title: 'Ask (AI)', items: [
-      ['?', 'Open this shortcuts help (when no field is focused)'],
-      ['? <query>', 'Type at the task input to send to Ask mode'],
-      ['Ctrl/⌘ + K, then toggle Ask', 'Open the chat sheet'],
-      ['Enter', 'Send the current message'],
-      ['↑ / ↓', 'Cycle previous Ask queries in the input'],
-      ['+ New chat', 'Clear conversation context without closing the sheet'],
     ]},
     { title: 'Tasks', items: [
       ['Click a row', 'Open task detail'],
       ['Click + on a task', 'Add subtask'],
       ['Long-press a task (touch)', 'Enter bulk-edit mode'],
       ['Click the status pill', 'Cycle Open → In Progress → Review → Blocked → Done'],
-      ['Type "?" at the start of the input', 'Send the rest to Ask'],
       ['Paste multiple lines', 'Bulk-import preview'],
     ]},
     { title: 'Undo & feedback', items: [
@@ -615,7 +605,6 @@ function showQuickAddSyntaxHint(){
     ['#tag1 #tag2', 'Tags (multiple allowed)'],
     ['!star', 'Mark starred'],
     ['~daily / ~weekdays / ~weekly / ~monthly', 'Recurrence'],
-    ['? <question>', 'Send the rest to Ask'],
   ];
   const head = document.createElement('div'); head.className = 'task-syntax-popover-head';
   const h = document.createElement('strong'); h.textContent = 'Quick-add syntax';
@@ -1383,8 +1372,6 @@ function openTaskDetail(id){
   // C-6 estimate vs actual variance
   if(typeof renderEstimateVariance === 'function') renderEstimateVariance(t);
   refreshMdSimilarTasks(id);
-  // Show the Break-down accordion only when a generative model is loaded.
-  // Content is lazy-rendered on toggle to avoid spending tokens unless asked.
   renderMdHabitLog(t);
   renderMdSessions(t);
   gid('taskModal').classList.add('open');

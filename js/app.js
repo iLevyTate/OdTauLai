@@ -833,7 +833,7 @@ if(typeof requestIdleCallback === 'function'){
   setTimeout(_bootIntelLoad, 1000);
 }
 
-/** Desktop palette shortcut label only — mobile shows icon + "Ask" via CSS. */
+/** Desktop palette shortcut label only — mobile shows just the icon via CSS. */
 (function syncCmdKKbdText(){
   const kbd = document.querySelector('#cmdKBtn .cmdk-btn-kbd');
   if (!kbd) return;
