@@ -16,8 +16,6 @@
 
 **On-Device Task App Using Local Ambient Intelligence**
 
-*A Pomodoro timer and ClickUp-style task manager that understands what your tasks **mean** — on your device, offline, with no account, no telemetry, no cloud LLM.*
-
 <br />
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
@@ -31,8 +29,6 @@
 [![On-Device AI](https://img.shields.io/badge/AI-on--device-7048e8?style=flat-square&logo=huggingface&logoColor=white)](#the-ambient-intelligence-the-headline-feature)
 [![WebGPU](https://img.shields.io/badge/WebGPU-WASM%20fallback-005cc5?style=flat-square)](#browser-support)
 [![~33MB Model](https://img.shields.io/badge/model-~33%20MB-orange?style=flat-square)](#the-ambient-intelligence-the-headline-feature)
-
-<sub>Vanilla JS · No build step · PWA · Offline · ~33 MB on-device model · MIT</sub>
 
 <br />
 
@@ -49,8 +45,6 @@
 Prefer letters? `O-D-T-A-U-L-A-I` works too. It's an acronym, so both are fine:
 
 > **O**n-**d**evice **t**ask **a**pp **u**sing **l**ocal **a**mbient **i**ntelligence.
-
-Not a chatbot. Not a wrapper around somebody else's API. Not a subscription. Just a very fast, very private task app that happens to understand the meaning of your tasks — geometrically, in a vector space, right on your machine.
 
 ---
 
@@ -119,8 +113,6 @@ What you actually get from it:
 - **Similar tasks** — top neighbors surface in the task detail drawer.
 - **Suggest due date** — kNN over your task history infers a sensible due date for a new task.
 - **Align values only** — narrow button for Schwartz-only alignment if you don't want other fields touched.
-
-The "understanding" is geometric: cosine similarity in a 384‑dimensional vector space. No language model, no chat — just fast, deterministic embeddings that run entirely on your device.
 
 ### Impact scoring (Pareto 80/20)
 
@@ -202,12 +194,12 @@ A derived impact score ranks every active task from signals you already have —
 ### Bells, whistles, and quality-of-life
 
 - **Undo stack** for AI batches (last 10).
-- **Save indicator** shows only on user-initiated saves, throttled to 4 s, auto-hides after 900 ms — no nagging.
-- **Today banner** — only shown when there's something urgent (overdue or due-today). Zero noise when your day is clean.
-- **Storage telemetry** — Settings shows IndexedDB quota, whether persistent storage is granted, online/offline state.
+- **Save indicator** — only on user-initiated saves, never nags.
+- **Today banner** — only shown when something is overdue or due today.
+- **Storage telemetry** in Settings: IndexedDB quota, persistent-storage state, online/offline.
 - **Optional persistent storage** prompt so "Clear browsing data" doesn't nuke your tasks.
 - **Haptic feedback** on destructive mobile gestures.
-- **Accessibility**: `aria-live` regions for the AI status chip, semantic search gated with a visible disabled state when the model isn't ready, focusable and keyboard-navigable everywhere.
+- **Accessibility**: `aria-live` AI status, disabled-state semantic search until the model loads, full keyboard navigation.
 
 ---
 
@@ -232,7 +224,6 @@ Or just **double-click `index.html`** — it works from `file://` too. You lose 
 | **GitHub Pages** | push, enable Pages on `main /` | free, permanent URL |
 | **Vercel** | `npx vercel` | free, instant |
 | **Cloudflare Pages** | connect GitHub, no build command, output `/` | free, great custom domains |
-| **Caddy** | `caddy file-server --domain example.com --root .` | auto-HTTPS one-liner |
 
 Full walkthroughs with Nginx configs, troubleshooting, custom icons, and manifest `id` guidance live in **[DEPLOY.md](DEPLOY.md)**.
 
@@ -273,10 +264,6 @@ To audit outbound traffic yourself, search the source for `fetch(`, dynamic `imp
 ## Architecture
 
 No framework, no bundler, no transpiler. Just **HTML, CSS, and vanilla JS modules** loaded in order from `index.html`.
-
-<img width="1672" height="941" alt="OTLArchitecture" src="https://github.com/user-attachments/assets/a3809d41-8047-4fe0-87d6-73b20e0216ac" />
-
-<sub>Dashed boxes = strictly opt-in. Nothing connects out unless you turn it on.</sub>
 
 <details>
 <summary><b>Source tree</b></summary>
@@ -385,7 +372,7 @@ No. The embedding model runs locally via Transformers.js. The only outbound call
 <details>
 <summary><b>Why a small embedding model instead of a chat LLM?</b></summary>
 
-Chat LLMs (a) don't fit on a phone, (b) need to talk to a cloud, (c) invent plausible nonsense ("hallucinate"), and (d) are overkill for "what does this task mean?". A 33 MB embedding model answers that question deterministically, on-device, in milliseconds, without generating anything.
+Chat LLMs are too big for a phone, need a cloud, and hallucinate. A 33 MB embedding model answers "what does this task mean?" deterministically, on-device, in milliseconds.
 
 </details>
 
@@ -420,7 +407,7 @@ Host `@huggingface/transformers`, the model files, `chrono-node`, and `peerjs` y
 <details>
 <summary><b>Can I remove the AI entirely?</b></summary>
 
-Yes. The embedding model is the only "AI" in the app — no LLM, no chat. The model auto-downloads in the background on first idle; if you want to skip it entirely, delete `js/ai.js`, `js/intel.js`, `js/intel-features.js`, `js/embed-store.js`, `js/tool-schema.js` and remove their `<script>` tags. The rest of the app (tasks, timer, sync, calendar) keeps working.
+Yes. Delete `js/ai.js`, `js/intel.js`, `js/intel-features.js`, `js/embed-store.js`, `js/tool-schema.js` and remove their `<script>` tags. Tasks, timer, sync, and calendar keep working.
 
 </details>
 
@@ -447,7 +434,7 @@ If you need any of the above, this isn't the right app. That's the point.
 ## Contributing
 
 > [!NOTE]
-> **Git hygiene confession:** For large stretches of this repo's life I treated `main` like the only lane on the highway — straight commits, no scenic detours through feature branches. That is *not* how the textbooks say to do it; it is how you ship when your branching strategy is "hope and `git push`." If you contribute here, feel free to be the responsible one and use PRs — I'll wave from the shoulder lane.
+> **Git hygiene confession:** much of this repo's history is straight-to-`main` commits. PRs are very welcome — be the responsible one.
 
 Pull requests welcome. Keep it:
 
@@ -480,13 +467,3 @@ Built with:
 Inspired by ClickUp, Things, Todoist, OmniFocus, and the long-standing tradition of Pomodoro apps that don't need an account.
 
 Everything else — vanilla HTML, CSS, JS, and a lot of care.
-
-<div align="center">
-
-<br />
-
-<sub>Built with intent. Runs on your device. Owes you nothing.</sub>
-
-<sub>**OdTauLai** — *ode-TOW-lie*</sub>
-
-</div>
